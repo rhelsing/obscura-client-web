@@ -17,7 +17,7 @@ class Gateway {
     if (this.proto) return;
 
     // Load proto from the file
-    this.proto = await protobuf.load('/src/proto/obscura.proto');
+    this.proto = await protobuf.load('/proto/obscura.proto');
     this.WebSocketFrame = this.proto.lookupType('obscura.v1.WebSocketFrame');
     this.AckMessage = this.proto.lookupType('obscura.v1.AckMessage');
     this.Envelope = this.proto.lookupType('obscura.v1.Envelope');

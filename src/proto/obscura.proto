@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package obscura.v1;
+
+// ==============================================================================
+// Gateway Protocol (WebSocket)
+// Endpoint: /v1/gateway
+// ==============================================================================
+
+// The top-level frame exchanged over the WebSocket connection.
+message WebSocketFrame {
+  oneof payload {
+    // Server -> Client: A new message has arrived.
+    Envelope envelope = 10;
+
+    // Client -> Server: Acknowledge receipt of a message (Triggers DB deletion).
+    AckMessage ack = 11;
+  }
+}
+
+// Represents a message waiting in the queue for the connected device.
+// The client MUST reply with an `AckMessage` containing this message's ID.
+message Envelope {
+  string id = 1;            // Unique UUID of the message in the server queue.
+  string source_user_id = 2;// UUID of the sender (Unencrypted metadata).
+  uint64 timestamp = 3;     // Server-generated timestamp (ms) when the message was received.
+  EncryptedMessage message = 4;
+}
+
+message EncryptedMessage {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    TYPE_PREKEY_MESSAGE = 1; // Initial handshake
+    TYPE_ENCRYPTED_MESSAGE = 2; // Standard encrypted message
+  }
+  Type type = 1;
+  bytes content = 2; // The actual ciphertext
+}
+
+// Sent by Client to confirm processing. Server hard-deletes the message upon receipt.
+message AckMessage {
+  string message_id = 1;    // The UUID from the Envelope.
+}
+
+// ==============================================================================
+// REST Messaging (POST /v1/messages/{recipientId})
+// Content-Type: application/x-protobuf
+// ==============================================================================
+
+// The body sent when pushing a message via REST.
+message OutgoingMessage {
+  EncryptedMessage message = 1;
+}

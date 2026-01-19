@@ -1,0 +1,15 @@
+{
+  "name": "obscura-client-web",
+  "version": "0.0.1",
+  "type": "module",
+  "dependencies": {
+    "navigo": "^8.11.1",
+    "protobufjs": "^8.0.0",
+    "vite": "^7.3.1"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  }
+}

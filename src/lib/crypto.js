@@ -1,6 +1,10 @@
-// Simple crypto utilities for key generation (POC only - not production-ready)
-// In production, use libsignal-protocol-javascript
+// Signal Protocol key generation using @privacyresearch/libsignal-protocol-typescript
+// Uses Curve25519 for proper Signal Protocol compatibility
 
+import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
+import { signalStore } from './signalStore.js';
+
+// Helper to convert ArrayBuffer to base64
 function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = '';
@@ -10,85 +14,100 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
-async function generateKeyPair() {
-  const keyPair = await crypto.subtle.generateKey(
-    { name: 'ECDSA', namedCurve: 'P-256' },
-    true,
-    ['sign', 'verify']
-  );
-
-  const publicKeyRaw = await crypto.subtle.exportKey('raw', keyPair.publicKey);
-  const privateKeyPkcs8 = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey);
-
-  return {
-    publicKey: arrayBufferToBase64(publicKeyRaw),
-    privateKey: arrayBufferToBase64(privateKeyPkcs8),
-    keyPair,
-  };
-}
-
-async function sign(privateKey, data) {
-  const signature = await crypto.subtle.sign(
-    { name: 'ECDSA', hash: 'SHA-256' },
-    privateKey,
-    new TextEncoder().encode(data)
-  );
-  return arrayBufferToBase64(signature);
-}
-
+// Generate all keys needed for registration
+// Returns data formatted for server registration AND stores keys locally
 export async function generateRegistrationKeys() {
-  // Generate identity key pair
-  const identity = await generateKeyPair();
+  // Ensure the store is open
+  await signalStore.open();
 
-  // Generate signed pre-key
-  const signedPreKey = await generateKeyPair();
-  const signedPreKeySignature = await sign(
-    identity.keyPair.privateKey,
-    signedPreKey.publicKey
-  );
+  // Generate identity key pair (Curve25519)
+  const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
 
-  // Generate one-time pre-keys (generate 10 for POC)
-  const oneTimePreKeys = [];
-  for (let i = 0; i < 10; i++) {
-    const otp = await generateKeyPair();
-    oneTimePreKeys.push({
-      keyId: i + 1,
-      publicKey: otp.publicKey,
-    });
+  // Generate registration ID (random value 1-16380)
+  const registrationId = KeyHelper.generateRegistrationId();
+
+  // Generate signed pre-key (key ID 1)
+  const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
+
+  // Generate one-time pre-keys (100 keys, IDs 1-100)
+  const preKeys = [];
+  for (let i = 1; i <= 100; i++) {
+    const preKey = await KeyHelper.generatePreKey(i);
+    preKeys.push(preKey);
   }
 
-  const registrationId = Math.floor(Math.random() * 16380) + 1;
+  // Store everything in IndexedDB via signalStore
+  await signalStore.storeIdentityKeyPair(identityKeyPair);
+  await signalStore.storeLocalRegistrationId(registrationId);
+  await signalStore.storeSignedPreKey(signedPreKey.keyId, signedPreKey.keyPair);
 
+  for (const preKey of preKeys) {
+    await signalStore.storePreKey(preKey.keyId, preKey.keyPair);
+  }
+
+  // Return data formatted for server registration (base64 encoded public keys)
   return {
-    identityKey: identity.publicKey,
+    identityKey: arrayBufferToBase64(identityKeyPair.pubKey),
     registrationId,
     signedPreKey: {
-      keyId: 1,
-      publicKey: signedPreKey.publicKey,
-      signature: signedPreKeySignature,
+      keyId: signedPreKey.keyId,
+      publicKey: arrayBufferToBase64(signedPreKey.keyPair.pubKey),
+      signature: arrayBufferToBase64(signedPreKey.signature),
     },
-    oneTimePreKeys,
-    // Store private keys locally (in production, use IndexedDB with encryption)
-    _private: {
-      identityKey: identity.privateKey,
-      signedPreKey: signedPreKey.privateKey,
-    },
+    oneTimePreKeys: preKeys.map(pk => ({
+      keyId: pk.keyId,
+      publicKey: arrayBufferToBase64(pk.keyPair.pubKey),
+    })),
   };
 }
 
+// Store reference to keys in localStorage for backwards compat
+// The actual keys are in IndexedDB, this just tracks that we have them
 export function storeKeys(keys) {
   localStorage.setItem('obscura_keys', JSON.stringify({
     identityKey: keys.identityKey,
     registrationId: keys.registrationId,
-    _private: keys._private,
+    hasSignalKeys: true,
   }));
 }
 
+// Load keys info from localStorage
+// Returns metadata only - actual keys are in IndexedDB
 export function loadKeys() {
   const stored = localStorage.getItem('obscura_keys');
   return stored ? JSON.parse(stored) : null;
 }
 
-export function clearKeys() {
+// Clear all keys (logout)
+export async function clearKeys() {
   localStorage.removeItem('obscura_keys');
+  await signalStore.clearAll();
+}
+
+// Check if we have Signal Protocol keys stored
+export async function hasSignalKeys() {
+  return signalStore.hasIdentity();
+}
+
+// Migration helper - check if user has old ECDSA keys
+export function hasLegacyKeys() {
+  const stored = localStorage.getItem('obscura_keys');
+  if (!stored) return false;
+
+  const keys = JSON.parse(stored);
+  // Old keys have _private property with ECDSA keys
+  // New keys have hasSignalKeys flag
+  return keys._private !== undefined && !keys.hasSignalKeys;
+}
+
+// Clear legacy keys to force re-registration
+export function clearLegacyKeys() {
+  const stored = localStorage.getItem('obscura_keys');
+  if (stored) {
+    const keys = JSON.parse(stored);
+    if (keys._private !== undefined) {
+      localStorage.removeItem('obscura_keys');
+      console.log('Legacy ECDSA keys cleared - re-registration required');
+    }
+  }
 }

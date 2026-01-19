@@ -1,6 +1,8 @@
 import protobuf from 'protobufjs';
 import client from './client.js';
 
+const HEARTBEAT_INTERVAL = 30000; // 30 seconds
+
 class Gateway {
   constructor() {
     this.ws = null;
@@ -11,28 +13,65 @@ class Gateway {
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
     this.reconnectDelay = 1000;
+    this.heartbeatTimer = null;
   }
 
   async loadProto() {
     if (this.proto) return;
 
-    // Load proto from the file
-    this.proto = await protobuf.load('/proto/obscura.proto');
+    // Load server protocol proto
+    this.proto = await protobuf.load('/proto/obscura/v1/obscura.proto');
     this.WebSocketFrame = this.proto.lookupType('obscura.v1.WebSocketFrame');
     this.AckMessage = this.proto.lookupType('obscura.v1.AckMessage');
     this.Envelope = this.proto.lookupType('obscura.v1.Envelope');
-    this.OutgoingMessage = this.proto.lookupType('obscura.v1.OutgoingMessage');
     this.EncryptedMessage = this.proto.lookupType('obscura.v1.EncryptedMessage');
+
+    // Load client-to-client message proto (our own, not from server submodule)
+    this.clientProto = await protobuf.load('/src/proto/client/client_message.proto');
+    this.ClientMessage = this.clientProto.lookupType('obscura.client.ClientMessage');
   }
 
-  // Encode an outgoing message as protobuf (just EncryptedMessage, no wrapper)
-  encodeOutgoingMessage(content, type = 2) {
-    // type 1 = PREKEY_MESSAGE, type 2 = ENCRYPTED_MESSAGE
+  // Encode a client message (text or image)
+  encodeClientMessage({ type = 'TEXT', text = '', imageData = null, mimeType = '' }) {
+    const clientMsg = this.ClientMessage.create({
+      type: type === 'IMAGE' ? 1 : 0,
+      text: text,
+      imageData: imageData || new Uint8Array(0),
+      mimeType: mimeType,
+      timestamp: Date.now(),
+    });
+    return this.ClientMessage.encode(clientMsg).finish();
+  }
+
+  // Decode a client message from bytes
+  decodeClientMessage(bytes) {
+    try {
+      const msg = this.ClientMessage.decode(bytes);
+      return {
+        type: msg.type === 1 ? 'IMAGE' : 'TEXT',
+        text: msg.text,
+        imageData: msg.imageData,
+        mimeType: msg.mimeType,
+        timestamp: msg.timestamp,
+      };
+    } catch (e) {
+      console.warn('Could not decode as ClientMessage, treating as raw text');
+      return {
+        type: 'TEXT',
+        text: new TextDecoder().decode(bytes),
+        imageData: null,
+        mimeType: '',
+        timestamp: Date.now(),
+      };
+    }
+  }
+
+  // Encode for sending to server (wraps ClientMessage in EncryptedMessage)
+  encodeOutgoingMessage(clientMessageBytes, encType = 2) {
+    // encType 1 = PREKEY_MESSAGE, encType 2 = ENCRYPTED_MESSAGE
     const message = this.EncryptedMessage.create({
-      type: type,
-      content: typeof content === 'string'
-        ? new TextEncoder().encode(content)
-        : content
+      type: encType,
+      content: clientMessageBytes,
     });
     return this.EncryptedMessage.encode(message).finish();
   }
@@ -70,12 +109,14 @@ class Gateway {
 
       this.ws.onopen = () => {
         this.reconnectAttempts = 0;
+        this.startHeartbeat();
         this.emit('status', { state: 'connected', message: 'Connected to gateway' });
         this.emit('connected');
         resolve();
       };
 
       this.ws.onclose = (event) => {
+        this.stopHeartbeat();
         this.emit('status', { state: 'disconnected', message: `Disconnected (${event.code})` });
         this.emit('disconnected', event);
         this.attemptReconnect();
@@ -145,9 +186,29 @@ class Gateway {
   }
 
   disconnect() {
+    this.stopHeartbeat();
     if (this.ws) {
       this.ws.close();
       this.ws = null;
+    }
+  }
+
+  startHeartbeat() {
+    this.stopHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        // Send an empty WebSocketFrame as keepalive
+        const frame = this.WebSocketFrame.create({});
+        const buffer = this.WebSocketFrame.encode(frame).finish();
+        this.ws.send(buffer);
+      }
+    }, HEARTBEAT_INTERVAL);
+  }
+
+  stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
     }
   }
 

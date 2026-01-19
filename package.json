@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "type": "module",
   "dependencies": {
+    "@privacyresearch/libsignal-protocol-typescript": "0.0.16",
     "navigo": "^8.11.1",
     "protobufjs": "^8.0.0",
     "vite": "^7.3.1"

@@ -369,3 +369,99 @@ textarea:focus {
   word-break: break-word;
   white-space: pre-wrap;
 }
+
+.message-image {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 4px;
+  margin-top: 0.5rem;
+}
+
+.message-caption {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  margin-top: 0.5rem;
+  font-style: italic;
+}
+
+/* Compose area */
+.compose-area {
+  border: 2px dashed transparent;
+  border-radius: 4px;
+  transition: border-color 0.2s;
+}
+
+.compose-area.drag-over {
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.compose-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.compose-actions button {
+  flex: 1;
+}
+
+.compose-actions .icon-btn {
+  flex: 0;
+  width: 44px;
+  padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Image preview */
+.image-preview {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1rem;
+}
+
+.image-preview img {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 4px;
+  display: block;
+  margin: 0 auto;
+}
+
+.preview-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.preview-actions button {
+  flex: 1;
+}
+
+/* Webcam */
+.webcam-container {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1rem;
+}
+
+.webcam-container video {
+  width: 100%;
+  max-height: 300px;
+  border-radius: 4px;
+  background: #000;
+}
+
+.webcam-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.webcam-actions button {
+  flex: 1;
+}

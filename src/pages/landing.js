@@ -1,6 +1,7 @@
 import client from '../api/client.js';
 import gateway from '../api/gateway.js';
 import { generateRegistrationKeys, storeKeys, clearKeys } from '../lib/crypto.js';
+import { sessionManager } from '../lib/sessionManager.js';
 
 export function renderLanding(container, router) {
   const logs = [];
@@ -8,6 +9,10 @@ export function renderLanding(container, router) {
   let authMode = 'login';
   let isLoading = false;
   let isSending = false;
+  let pendingImage = null; // { data: Uint8Array, mimeType: string, preview: string }
+  let webcamActive = false;
+  let webcamStream = null;
+  let lastRecipient = ''; // Persist recipient UUID between sends
 
   function log(message, type = '') {
     const time = new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -114,31 +119,85 @@ export function renderLanding(container, router) {
         <div class="messages-list" id="messages-list">
           ${messages.length === 0
             ? '<div class="no-messages">No messages yet</div>'
-            : messages.map(m => `
-                <div class="message ${m.direction}">
-                  <div class="message-meta">
-                    <span class="message-user">${m.direction === 'in' ? m.from.slice(0, 8) + '...' : 'You → ' + m.to.slice(0, 8) + '...'}</span>
-                    <span class="message-time">${m.time}</span>
-                  </div>
-                  <div class="message-content">${escapeHtml(m.content)}</div>
-                </div>
-              `).join('')
+            : messages.map(m => renderMessage(m)).join('')
           }
         </div>
 
         <form id="send-form" class="mt-2">
           <div class="form-group">
             <label for="recipient">Recipient User ID</label>
-            <input type="text" id="recipient" name="recipient" placeholder="UUID of recipient" required>
+            <input type="text" id="recipient" name="recipient" placeholder="UUID of recipient" value="${lastRecipient}" required>
           </div>
-          <div class="form-group">
-            <label for="message">Message</label>
-            <textarea id="message" name="message" rows="3" placeholder="Type your message..." required></textarea>
+
+          <div class="compose-area" id="compose-area">
+            ${webcamActive ? renderWebcam() : ''}
+            ${pendingImage ? renderImagePreview() : ''}
+            ${!webcamActive && !pendingImage ? `
+              <div class="form-group">
+                <label for="message">Message</label>
+                <textarea id="message" name="message" rows="3" placeholder="Type your message or drop an image..."></textarea>
+              </div>
+              <div class="compose-actions">
+                <button type="button" id="webcam-btn" class="secondary icon-btn" title="Take photo">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                    <circle cx="12" cy="13" r="4"/>
+                  </svg>
+                </button>
+                <button type="submit" ${isSending ? 'disabled' : ''}>
+                  ${isSending ? 'Sending...' : 'Send'}
+                </button>
+              </div>
+            ` : ''}
           </div>
-          <button type="submit" ${isSending ? 'disabled' : ''}>
-            ${isSending ? 'Sending...' : 'Send Message'}
-          </button>
         </form>
+      </div>
+    `;
+  }
+
+  function renderMessage(m) {
+    const isImage = m.type === 'IMAGE' && m.imageData;
+    return `
+      <div class="message ${m.direction}">
+        <div class="message-meta">
+          <span class="message-user">${m.direction === 'in' ? m.from.slice(0, 8) + '...' : 'You → ' + m.to.slice(0, 8) + '...'}</span>
+          <span class="message-time">${m.time}</span>
+        </div>
+        ${isImage
+          ? `<img class="message-image" src="${m.imageData}" alt="Image">`
+          : `<div class="message-content">${escapeHtml(m.content)}</div>`
+        }
+        ${isImage && m.content ? `<div class="message-caption">${escapeHtml(m.content)}</div>` : ''}
+      </div>
+    `;
+  }
+
+  function renderImagePreview() {
+    return `
+      <div class="image-preview">
+        <img src="${pendingImage.preview}" alt="Preview">
+        <div class="form-group mt-1">
+          <input type="text" id="caption" placeholder="Add a caption (optional)">
+        </div>
+        <div class="preview-actions">
+          <button type="button" id="cancel-image" class="secondary">Cancel</button>
+          <button type="submit" ${isSending ? 'disabled' : ''}>
+            ${isSending ? 'Sending...' : 'Send Image'}
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderWebcam() {
+    return `
+      <div class="webcam-container">
+        <video id="webcam-video" autoplay playsinline></video>
+        <canvas id="webcam-canvas" style="display:none;"></canvas>
+        <div class="webcam-actions">
+          <button type="button" id="capture-btn" class="secondary">Capture</button>
+          <button type="button" id="cancel-webcam" class="secondary">Cancel</button>
+        </div>
       </div>
     `;
   }
@@ -194,6 +253,54 @@ export function renderLanding(container, router) {
         }
       });
     }
+
+    // Drag and drop for images
+    const composeArea = container.querySelector('#compose-area');
+    if (composeArea) {
+      composeArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        composeArea.classList.add('drag-over');
+      });
+      composeArea.addEventListener('dragleave', () => {
+        composeArea.classList.remove('drag-over');
+      });
+      composeArea.addEventListener('drop', handleImageDrop);
+    }
+
+    // Webcam button
+    const webcamBtn = container.querySelector('#webcam-btn');
+    if (webcamBtn) {
+      webcamBtn.addEventListener('click', startWebcam);
+    }
+
+    // Webcam capture
+    const captureBtn = container.querySelector('#capture-btn');
+    if (captureBtn) {
+      captureBtn.addEventListener('click', captureWebcam);
+    }
+
+    // Cancel webcam
+    const cancelWebcamBtn = container.querySelector('#cancel-webcam');
+    if (cancelWebcamBtn) {
+      cancelWebcamBtn.addEventListener('click', stopWebcam);
+    }
+
+    // Cancel image preview
+    const cancelImageBtn = container.querySelector('#cancel-image');
+    if (cancelImageBtn) {
+      cancelImageBtn.addEventListener('click', () => {
+        pendingImage = null;
+        render();
+      });
+    }
+
+    // Start webcam video if active
+    if (webcamActive) {
+      const video = container.querySelector('#webcam-video');
+      if (video && webcamStream) {
+        video.srcObject = webcamStream;
+      }
+    }
   }
 
   function scrollLogToBottom() {
@@ -238,8 +345,8 @@ export function renderLanding(container, router) {
         log('Login successful!', 'success');
       }
     } catch (error) {
-      log(`Error: ${error.message}`, 'error');
-      console.error(error);
+      const detail = error.body ? ` ${JSON.stringify(error.body)}` : '';
+      log(`Error: ${error.message}${detail}`, 'error');
     } finally {
       isLoading = false;
       render();
@@ -257,45 +364,156 @@ export function renderLanding(container, router) {
   async function handleLogout() {
     log('Logging out...', 'info');
     gateway.disconnect();
+    stopWebcam();
     await client.logout();
     clearKeys();
     log('Logged out', 'success');
     render();
   }
 
+  async function handleImageDrop(e) {
+    e.preventDefault();
+    e.currentTarget.classList.remove('drag-over');
+
+    const file = e.dataTransfer?.files?.[0];
+    if (!file || !file.type.startsWith('image/')) {
+      log('Please drop an image file', 'error');
+      return;
+    }
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const data = new Uint8Array(arrayBuffer);
+      const preview = URL.createObjectURL(file);
+
+      pendingImage = {
+        data,
+        mimeType: file.type,
+        preview,
+      };
+      render();
+    } catch (error) {
+      log(`Failed to load image: ${error.message}`, 'error');
+    }
+  }
+
+  async function startWebcam() {
+    try {
+      webcamStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
+      });
+      webcamActive = true;
+      render();
+    } catch (error) {
+      log(`Webcam error: ${error.message}`, 'error');
+    }
+  }
+
+  function stopWebcam() {
+    if (webcamStream) {
+      webcamStream.getTracks().forEach(track => track.stop());
+      webcamStream = null;
+    }
+    webcamActive = false;
+    render();
+  }
+
+  function captureWebcam() {
+    const video = container.querySelector('#webcam-video');
+    const canvas = container.querySelector('#webcam-canvas');
+    if (!video || !canvas) return;
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0);
+
+    canvas.toBlob((blob) => {
+      if (blob) {
+        blob.arrayBuffer().then(arrayBuffer => {
+          pendingImage = {
+            data: new Uint8Array(arrayBuffer),
+            mimeType: 'image/png',
+            preview: canvas.toDataURL('image/png'),
+          };
+          stopWebcam();
+        });
+      }
+    }, 'image/png');
+  }
+
   async function handleSendMessage(e) {
     e.preventDefault();
     const formData = new FormData(e.target);
-    const recipient = formData.get('recipient').trim();
-    const messageText = formData.get('message').trim();
+    const recipient = formData.get('recipient')?.trim();
+    const messageText = formData.get('message')?.trim() || '';
+    const caption = container.querySelector('#caption')?.value?.trim() || '';
 
-    if (!recipient || !messageText) return;
+    if (!recipient) return;
+    if (!pendingImage && !messageText) return;
 
     isSending = true;
     render();
 
     try {
-      // Make sure proto is loaded
       await gateway.loadProto();
 
-      // Encode the message as protobuf
-      const protobufData = gateway.encodeOutgoingMessage(messageText);
+      let clientMessageBytes;
+      let localMessage;
+
+      if (pendingImage) {
+        // Send image
+        clientMessageBytes = gateway.encodeClientMessage({
+          type: 'IMAGE',
+          text: caption,
+          imageData: pendingImage.data,
+          mimeType: pendingImage.mimeType,
+        });
+        localMessage = {
+          direction: 'out',
+          to: recipient,
+          type: 'IMAGE',
+          content: caption,
+          imageData: pendingImage.preview,
+          time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+        };
+      } else {
+        // Send text
+        clientMessageBytes = gateway.encodeClientMessage({
+          type: 'TEXT',
+          text: messageText,
+        });
+        localMessage = {
+          direction: 'out',
+          to: recipient,
+          type: 'TEXT',
+          content: messageText,
+          time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+        };
+      }
+
+      // Encrypt the message using Signal Protocol
+      log(`Encrypting for ${recipient.slice(0, 8)}...`, 'info');
+      const encrypted = await sessionManager.encrypt(recipient, clientMessageBytes);
+
+      // Wrap encrypted content in EncryptedMessage proto
+      // encrypted.protoType: 1 = PREKEY_MESSAGE, 2 = ENCRYPTED_MESSAGE
+      // encrypted.body is already a Uint8Array
+      const protobufData = gateway.encodeOutgoingMessage(encrypted.body, encrypted.protoType);
 
       log(`Sending to ${recipient.slice(0, 8)}...`, 'info');
       await client.sendMessage(recipient, protobufData);
 
-      // Add to local messages
-      messages.push({
-        direction: 'out',
-        to: recipient,
-        content: messageText,
-        time: new Date().toLocaleTimeString('en-US', { hour12: false }),
-      });
-
+      messages.push(localMessage);
       log('Message sent!', 'success');
 
-      // Clear form
-      e.target.reset();
+      // Clear message/caption but keep recipient
+      lastRecipient = recipient;
+      pendingImage = null;
+      const messageField = e.target.querySelector('#message');
+      const captionField = e.target.querySelector('#caption');
+      if (messageField) messageField.value = '';
+      if (captionField) captionField.value = '';
     } catch (error) {
       log(`Send failed: ${error.message}`, 'error');
       console.error(error);
@@ -318,25 +536,44 @@ export function renderLanding(container, router) {
     log(message, typeMap[state] || '');
   });
 
-  gateway.on('envelope', (envelope) => {
+  gateway.on('envelope', async (envelope) => {
     log(`Message received from ${envelope.sourceUserId.slice(0, 8)}...`, 'info');
 
-    // Decode message content (POC: treat as plaintext)
-    let content = '[encrypted]';
+    // Decrypt and decode ClientMessage from content
+    let clientMsg = { type: 'TEXT', text: '[could not decode]', imageData: null, mimeType: '' };
     try {
       if (envelope.message && envelope.message.content) {
-        content = new TextDecoder().decode(envelope.message.content);
+        // Decrypt using Signal Protocol
+        log('Decrypting...', 'info');
+        const decryptedBytes = await sessionManager.decrypt(
+          envelope.sourceUserId,
+          envelope.message.content,
+          envelope.message.type  // 1 = PREKEY_MESSAGE, 2 = ENCRYPTED_MESSAGE
+        );
+
+        // Decode the decrypted ClientMessage
+        clientMsg = gateway.decodeClientMessage(new Uint8Array(decryptedBytes));
+        log('Decryption successful', 'success');
       }
     } catch (e) {
-      console.warn('Could not decode message content:', e);
+      console.warn('Could not decrypt/decode message:', e);
+      log(`Decryption failed: ${e.message}`, 'error');
+    }
+
+    // Convert image bytes to data URL for display
+    let imageDataUrl = null;
+    if (clientMsg.type === 'IMAGE' && clientMsg.imageData && clientMsg.imageData.length > 0) {
+      const base64 = btoa(String.fromCharCode(...clientMsg.imageData));
+      imageDataUrl = `data:${clientMsg.mimeType || 'image/png'};base64,${base64}`;
     }
 
     messages.push({
       direction: 'in',
       from: envelope.sourceUserId,
-      content: content,
+      type: clientMsg.type,
+      content: clientMsg.text,
+      imageData: imageDataUrl,
       time: new Date(Number(envelope.timestamp)).toLocaleTimeString('en-US', { hour12: false }),
-      type: envelope.message?.type,
     });
     render();
   });

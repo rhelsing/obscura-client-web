@@ -178,6 +178,21 @@ export function renderAuth(container, onSuccess) {
         // Login
         await client.login(username, password);
         localStorage.setItem('obscura_username', username);
+
+        // Check if we have Signal keys locally - if not, regenerate
+        const { hasSignalKeys } = await import('../lib/crypto.js');
+        if (!(await hasSignalKeys())) {
+          console.log('No local keys found, regenerating...');
+          const keys = await generateRegistrationKeys();
+          storeKeys(keys);
+          // Upload new keys to server
+          await client.uploadKeys({
+            identityKey: keys.identityKey,
+            registrationId: keys.registrationId,
+            signedPreKey: keys.signedPreKey,
+            oneTimePreKeys: keys.oneTimePreKeys,
+          });
+        }
       }
 
       // Success - cleanup and callback to parent

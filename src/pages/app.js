@@ -9,13 +9,18 @@ import { renderCamera } from './camera.js';
 import { renderInbox } from './inbox.js';
 import QRCode from 'qrcode';
 
-export function renderApp(container) {
+export function renderApp(container, options = {}) {
   let currentTab = 'camera'; // 'camera', 'inbox', 'profile'
   let friends = [];
   let pendingMessages = [];
   let isConnecting = false;
   let cameraInstance = null;
   let inboxInstance = null;
+
+  // Store pending friend ID if provided (for processing after auth)
+  if (options.pendingFriendId) {
+    sessionStorage.setItem('obscura_pending_friend', options.pendingFriendId);
+  }
 
   // Check if authenticated
   if (!client.loadTokens() || !client.isAuthenticated()) {
@@ -31,6 +36,83 @@ export function renderApp(container) {
     await loadPendingMessages();
     await connectGateway();
     render();
+    // Process any pending friend link after everything is initialized
+    await processPendingFriendLink();
+  }
+
+  async function processPendingFriendLink() {
+    const pendingFriendId = sessionStorage.getItem('obscura_pending_friend');
+    if (!pendingFriendId) return;
+
+    // Clear it immediately to prevent reprocessing
+    sessionStorage.removeItem('obscura_pending_friend');
+
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(pendingFriendId)) {
+      alert('Invalid friend link');
+      redirectToHome();
+      return;
+    }
+
+    // Check if it's our own ID
+    if (pendingFriendId === client.getUserId()) {
+      alert("That's your own friend link!");
+      redirectToHome();
+      return;
+    }
+
+    // Check if already a friend
+    const existing = await friendStore.getFriend(pendingFriendId);
+    if (existing) {
+      if (existing.status === FriendStatus.ACCEPTED) {
+        alert(`Already friends with ${existing.username}!`);
+      } else {
+        alert(`Friend request already ${existing.status === FriendStatus.PENDING_SENT ? 'sent' : 'received'}!`);
+      }
+      redirectToHome();
+      return;
+    }
+
+    // Send friend request
+    try {
+      await sendFriendRequest(pendingFriendId);
+      alert('Friend request sent!');
+      await loadFriends();
+      if (inboxInstance) inboxInstance.render();
+    } catch (err) {
+      console.error('Failed to send friend request:', err);
+      alert('Failed to send friend request: ' + err.message);
+    }
+
+    redirectToHome();
+  }
+
+  function redirectToHome() {
+    const base = import.meta.env.BASE_URL || '/';
+    window.history.replaceState(null, '', base);
+  }
+
+  async function sendFriendRequest(targetUserId) {
+    await gateway.loadProto();
+
+    const username = localStorage.getItem('obscura_username') || 'Unknown';
+
+    // Encode friend request message
+    const clientMessageBytes = gateway.encodeClientMessage({
+      type: 'FRIEND_REQUEST',
+      text: '',
+      username: username,
+    });
+
+    // Encrypt and send
+    const encrypted = await sessionManager.encrypt(targetUserId, clientMessageBytes);
+    const protobufData = gateway.encodeOutgoingMessage(encrypted.body, encrypted.protoType);
+
+    await client.sendMessage(targetUserId, protobufData);
+
+    // Add to local friend store as pending_sent
+    await friendStore.addFriend(targetUserId, 'Unknown', FriendStatus.PENDING_SENT);
   }
 
   async function loadFriends() {
@@ -277,6 +359,9 @@ export function renderApp(container) {
     const userId = client.getUserId();
     const username = localStorage.getItem('obscura_username') || 'Unknown';
 
+    const base = import.meta.env.BASE_URL || '/';
+    const friendLink = `${window.location.origin}${base}add/${userId}`;
+
     content.innerHTML = `
       <div class="profile-view">
         <div class="profile-card">
@@ -284,6 +369,16 @@ export function renderApp(container) {
           <div class="qr-container" id="qr-container"></div>
           <div class="profile-hint">Friends scan this to add you</div>
         </div>
+
+        <button class="profile-btn" id="copy-link">
+          <span class="profile-btn-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+            </svg>
+          </span>
+          Copy Friend Link
+        </button>
 
         <button class="profile-btn danger" id="logout">
           <span class="profile-btn-icon">
@@ -314,6 +409,26 @@ export function renderApp(container) {
         return;
       }
       qrContainer.appendChild(canvas);
+    });
+
+    // Copy link button
+    content.querySelector('#copy-link')?.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(friendLink);
+        const btn = content.querySelector('#copy-link');
+        const originalText = btn.innerHTML;
+        btn.innerHTML = `<span class="profile-btn-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </span>Copied!`;
+        setTimeout(() => {
+          btn.innerHTML = originalText;
+        }, 2000);
+      } catch (err) {
+        console.error('Failed to copy:', err);
+        alert('Failed to copy link');
+      }
     });
 
     // Logout button

@@ -15,11 +15,15 @@ function loadStylesheet(href) {
 
 router
   .on('/', () => {
-    loadStylesheet('/src/styles/mobile.css');
+    loadStylesheet(`${base}src/styles/mobile.css`);
     renderApp(app);
   })
+  .on('/add/:userId', ({ data }) => {
+    loadStylesheet(`${base}src/styles/mobile.css`);
+    renderApp(app, { pendingFriendId: data.userId });
+  })
   .on('/testing', () => {
-    loadStylesheet('/src/styles/main.css');
+    loadStylesheet(`${base}src/styles/main.css`);
     renderLanding(app, router);
   })
   .resolve();

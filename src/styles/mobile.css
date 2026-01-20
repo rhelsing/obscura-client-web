@@ -863,6 +863,26 @@ body::before {
 .qr-scanner-preview {
   flex: 1;
   position: relative;
+  overflow: hidden;
+}
+
+#qr-reader {
+  width: 100%;
+  height: 100%;
+}
+
+#qr-reader video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
+#qr-reader__scan_region {
+  min-height: 100% !important;
+}
+
+#qr-reader__dashboard {
+  display: none !important;
 }
 
 .qr-scanner-preview video {
@@ -880,6 +900,7 @@ body::before {
   display: flex;
   align-items: center;
   justify-content: center;
+  pointer-events: none;
 }
 
 .qr-scanner-frame {

@@ -3,7 +3,6 @@ import client from '../api/client.js';
 import { generateRegistrationKeys, storeKeys } from '../lib/crypto.js';
 
 const LOADING_MESSAGES = [
-  'Reticulating splines...',
   'Conbobulating...',
   'Encrypting the things...',
   'Generating entropy...',
@@ -105,15 +104,15 @@ export function renderAuth(container, onSuccess) {
             <div></div>
           </div>
         </div>
-        <div class="loading-text" id="loading-text">${LOADING_MESSAGES[0]}</div>
+        <div class="loading-text" id="loading-text">${LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)]}</div>
       </div>
     `;
 
     // Cycle through messages
-    loadingMessageIndex = 0;
+    loadingMessageIndex = Math.floor(Math.random() * LOADING_MESSAGES.length);
     if (loadingInterval) clearInterval(loadingInterval);
     loadingInterval = setInterval(() => {
-      loadingMessageIndex = (loadingMessageIndex + 1) % LOADING_MESSAGES.length;
+      loadingMessageIndex = Math.floor(Math.random() * LOADING_MESSAGES.length);
       const textEl = container.querySelector('#loading-text');
       if (textEl) {
         textEl.textContent = LOADING_MESSAGES[loadingMessageIndex];

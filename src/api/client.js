@@ -174,7 +174,45 @@ class ObscuraClient {
     return this.request(`/v1/keys/${userId}`);
   }
 
-  // Messaging
+  // Messaging - Fetch pending messages from server
+  async fetchPendingMessages() {
+    const url = `${API_BASE}/v1/messages`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${this.token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = new Error(`HTTP ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+
+    // Returns protobuf binary data
+    const buffer = await response.arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+
+  // Acknowledge message receipt (server deletes after this)
+  async acknowledgeMessage(messageId) {
+    const url = `${API_BASE}/v1/messages/${messageId}/ack`;
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${this.token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = new Error(`HTTP ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+  }
+
+  // Messaging - Send
   async sendMessage(recipientId, protobufData) {
     const url = `${API_BASE}/v1/messages/${recipientId}`;
     console.log('=== SENDING MESSAGE ===');

@@ -173,9 +173,9 @@ class Gateway {
       const frame = this.WebSocketFrame.decode(new Uint8Array(data));
 
       if (frame.envelope) {
+        // Emit envelope - caller must ack after successful processing
         this.emit('envelope', frame.envelope);
-        // Auto-acknowledge
-        this.acknowledge(frame.envelope.id);
+        // DO NOT auto-ack here - ack only after message is persisted
       }
     } catch (error) {
       console.error('Failed to decode message:', error);
@@ -248,6 +248,42 @@ class Gateway {
 
   isConnected() {
     return this.ws && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  // Decode envelope list from REST API response (GET /v1/messages)
+  // Server returns length-delimited repeated Envelope messages
+  decodeEnvelopeList(buffer) {
+    const envelopes = [];
+    const data = new Uint8Array(buffer);
+    let offset = 0;
+
+    while (offset < data.length) {
+      // Read varint length prefix
+      let length = 0;
+      let shift = 0;
+      let byte;
+      do {
+        if (offset >= data.length) break;
+        byte = data[offset++];
+        length |= (byte & 0x7f) << shift;
+        shift += 7;
+      } while (byte & 0x80);
+
+      if (length === 0 || offset + length > data.length) break;
+
+      // Decode the envelope
+      const envelopeBytes = data.slice(offset, offset + length);
+      offset += length;
+
+      try {
+        const envelope = this.Envelope.decode(envelopeBytes);
+        envelopes.push(envelope);
+      } catch (e) {
+        console.warn('Failed to decode envelope:', e);
+      }
+    }
+
+    return envelopes;
   }
 }
 

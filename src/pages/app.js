@@ -34,10 +34,89 @@ export function renderApp(container, options = {}) {
   async function init() {
     await loadFriends();
     await loadPendingMessages();
-    await connectGateway();
+    await syncQueuedMessages(); // Fetch queued messages from server FIRST
+    await connectGateway();     // Then connect for real-time
     render();
     // Process any pending friend link after everything is initialized
     await processPendingFriendLink();
+  }
+
+  // ============================================================
+  // UNIFIED MESSAGE PROCESSING
+  // Same flow for REST (queued) and WebSocket (real-time)
+  // ============================================================
+
+  async function processEnvelope(envelope) {
+    // Decrypt
+    const decryptedBytes = await sessionManager.decrypt(
+      envelope.sourceUserId,
+      envelope.message.content,
+      envelope.message.type
+    );
+
+    // Decode
+    const clientMsg = gateway.decodeClientMessage(new Uint8Array(decryptedBytes));
+    console.log('Processing message:', clientMsg.type, 'from:', envelope.sourceUserId);
+
+    // Route and persist
+    if (clientMsg.type === 'FRIEND_REQUEST') {
+      await handleFriendRequest(envelope.sourceUserId, clientMsg);
+    } else if (clientMsg.type === 'FRIEND_RESPONSE') {
+      await handleFriendResponse(envelope.sourceUserId, clientMsg);
+    } else if (clientMsg.type === 'IMAGE' || clientMsg.type === 'TEXT') {
+      await handleContentMessage(envelope.sourceUserId, clientMsg);
+    }
+
+    // Refresh UI
+    await loadFriends();
+    await loadPendingMessages();
+    if (inboxInstance) inboxInstance.render();
+
+    return envelope.id; // Return for acking
+  }
+
+  // Fetch and process any messages queued on server while we were offline
+  async function syncQueuedMessages() {
+    try {
+      console.log('Syncing queued messages from server...');
+      const data = await client.fetchPendingMessages();
+
+      if (!data || data.length === 0) {
+        console.log('No queued messages');
+        return;
+      }
+
+      await gateway.loadProto(); // Ensure proto is loaded for decoding
+      const envelopes = gateway.decodeEnvelopeList(data);
+      console.log(`Found ${envelopes.length} queued messages`);
+
+      // STEP 1: Process and persist ALL messages FIRST
+      const processedIds = [];
+      for (const envelope of envelopes) {
+        try {
+          await processEnvelope(envelope);
+          processedIds.push(envelope.id);
+          console.log('Processed and persisted message:', envelope.id);
+        } catch (err) {
+          console.error('Failed to process queued message:', err);
+          // Don't add to processedIds - won't ack, will retry next time
+        }
+      }
+
+      // STEP 2: Only AFTER all are persisted locally, ack them to server
+      console.log(`Acking ${processedIds.length} messages to server...`);
+      for (const messageId of processedIds) {
+        try {
+          await client.acknowledgeMessage(messageId);
+          console.log('Acked message:', messageId);
+        } catch (err) {
+          console.error('Failed to ack message:', messageId, err);
+          // Message is safe locally, ack will succeed on next sync
+        }
+      }
+    } catch (err) {
+      console.error('Failed to sync queued messages:', err);
+    }
   }
 
   async function processPendingFriendLink() {
@@ -149,39 +228,20 @@ export function renderApp(container, options = {}) {
 
   function setupGatewayListeners() {
     gateway.on('envelope', async (envelope) => {
-      console.log('Received envelope from:', envelope.sourceUserId);
-      await handleIncomingMessage(envelope);
+      console.log('Received real-time envelope from:', envelope.sourceUserId);
+      try {
+        await processEnvelope(envelope);
+        gateway.acknowledge(envelope.id); // WebSocket ack AFTER success
+        console.log('Processed and acked real-time message:', envelope.id);
+      } catch (err) {
+        console.error('Failed to process real-time message:', err);
+        // Don't ack - server will redeliver
+      }
     });
 
     gateway.on('disconnected', () => {
       console.log('Gateway disconnected');
     });
-  }
-
-  async function handleIncomingMessage(envelope) {
-    try {
-      // Decrypt message
-      const decryptedBytes = await sessionManager.decrypt(
-        envelope.sourceUserId,
-        envelope.message.content,
-        envelope.message.type
-      );
-
-      // Decode client message
-      const clientMsg = gateway.decodeClientMessage(new Uint8Array(decryptedBytes));
-      console.log('Decoded message:', clientMsg.type, clientMsg);
-
-      // Handle based on message type
-      if (clientMsg.type === 'FRIEND_REQUEST') {
-        await handleFriendRequest(envelope.sourceUserId, clientMsg);
-      } else if (clientMsg.type === 'FRIEND_RESPONSE') {
-        await handleFriendResponse(envelope.sourceUserId, clientMsg);
-      } else if (clientMsg.type === 'IMAGE' || clientMsg.type === 'TEXT') {
-        await handleContentMessage(envelope.sourceUserId, clientMsg);
-      }
-    } catch (err) {
-      console.error('Failed to handle incoming message:', err);
-    }
   }
 
   async function handleFriendRequest(fromUserId, msg) {
@@ -198,17 +258,15 @@ export function renderApp(container, options = {}) {
       }
       // If already accepted or pending_received, ignore
     } else {
-      // New friend request
+      // New friend request - PERSIST TO INDEXEDDB
       await friendStore.addFriend(fromUserId, msg.username || 'Unknown', FriendStatus.PENDING_RECEIVED);
     }
-
-    await loadFriends();
-    if (inboxInstance) inboxInstance.render();
+    // UI refresh handled by caller (processEnvelope)
   }
 
   async function handleFriendResponse(fromUserId, msg) {
     if (msg.accepted) {
-      // Update to accepted
+      // Update to accepted - PERSIST TO INDEXEDDB
       const existing = await friendStore.getFriend(fromUserId);
       if (existing) {
         await friendStore.updateFriendStatus(fromUserId, FriendStatus.ACCEPTED);
@@ -218,12 +276,10 @@ export function renderApp(container, options = {}) {
         }
       }
     } else {
-      // Request declined - remove
+      // Request declined - remove from IndexedDB
       await friendStore.removeFriend(fromUserId);
     }
-
-    await loadFriends();
-    if (inboxInstance) inboxInstance.render();
+    // UI refresh handled by caller (processEnvelope)
   }
 
   async function handleContentMessage(fromUserId, msg) {
@@ -241,7 +297,7 @@ export function renderApp(container, options = {}) {
       imageData = `data:${msg.mimeType || 'image/jpeg'};base64,${base64}`;
     }
 
-    // Store as pending message
+    // PERSIST TO INDEXEDDB
     await friendStore.addPendingMessage({
       fromUserId,
       type: msg.type,
@@ -251,9 +307,7 @@ export function renderApp(container, options = {}) {
       displayDuration: msg.displayDuration || 8,
       timestamp: msg.timestamp,
     });
-
-    await loadPendingMessages();
-    if (inboxInstance) inboxInstance.render();
+    // UI refresh handled by caller (processEnvelope)
   }
 
   function onAuthSuccess() {
@@ -516,7 +570,8 @@ export function renderApp(container, options = {}) {
         gateway.disconnect();
         await client.logout();
         clearKeys();
-        await friendStore.clearAll();
+        // DON'T clear friendStore - preserve friends and pending requests
+        // They'll be here when the user logs back in
         renderAuth(container, onAuthSuccess);
       }
     });

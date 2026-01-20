@@ -74,6 +74,44 @@ git submodule update --remote proto
 | `npm run build` | Build for production |
 | `npm run preview` | Preview production build |
 
+## Message Architecture
+
+The client uses a unified message processing flow that handles both queued messages (offline delivery) and real-time messages (WebSocket) through the same pipeline.
+
+### Flow
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    ON CONNECT                        │
+├─────────────────────────────────────────────────────┤
+│  1. GET /v1/messages  (fetch anything queued)       │
+│  2. For each message:                               │
+│     → decrypt (Signal protocol)                     │
+│     → route to handler (friend request, content)    │
+│     → persist to IndexedDB                          │
+│     → ACK via DELETE /v1/messages/{id}/ack          │
+│  3. Connect WebSocket for real-time                 │
+└─────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────┐
+│               WEBSOCKET MESSAGE ARRIVES             │
+├─────────────────────────────────────────────────────┤
+│  1. Receive Envelope via WebSocketFrame             │
+│  2. Same handler: decrypt → route → persist         │
+│  3. ACK via AckMessage frame                        │
+└─────────────────────────────────────────────────────┘
+```
+
+### Key Principles
+
+- **Ack only after persistence**: Messages are acknowledged only after successfully persisting to local IndexedDB. If processing fails, the message stays queued on the server for retry.
+- **Unified processing**: `processEnvelope()` handles all messages identically regardless of source (REST or WebSocket).
+- **Friend data persists**: Logging out does not clear the friend store - pending friend requests survive across sessions.
+
+### Server API
+
+See the [Obscura Server OpenAPI spec](https://obscura.barrelmaker.dev/openapi.yaml) for endpoint details.
+
 ## Tech Stack
 
 - [Vite](https://vitejs.dev/) - Build tool

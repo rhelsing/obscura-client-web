@@ -76,10 +76,10 @@ class SignalProtocolStore {
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction(storeName, 'readwrite');
       const store = tx.objectStore(storeName);
-      const request = store.put(value, key);
+      store.put(value, key);
 
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
     });
   }
 
@@ -89,10 +89,10 @@ class SignalProtocolStore {
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction(storeName, 'readwrite');
       const store = tx.objectStore(storeName);
-      const request = store.delete(key);
+      store.delete(key);
 
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
     });
   }
 

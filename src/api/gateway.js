@@ -19,15 +19,17 @@ class Gateway {
   async loadProto() {
     if (this.proto) return;
 
+    const base = import.meta.env.BASE_URL || '/';
+
     // Load server protocol proto (from public folder)
-    this.proto = await protobuf.load('/proto/obscura/v1/obscura.proto');
+    this.proto = await protobuf.load(`${base}proto/obscura/v1/obscura.proto`);
     this.WebSocketFrame = this.proto.lookupType('obscura.v1.WebSocketFrame');
     this.AckMessage = this.proto.lookupType('obscura.v1.AckMessage');
     this.Envelope = this.proto.lookupType('obscura.v1.Envelope');
     this.EncryptedMessage = this.proto.lookupType('obscura.v1.EncryptedMessage');
 
     // Load client-to-client message proto (from public folder)
-    this.clientProto = await protobuf.load('/proto/client/client_message.proto');
+    this.clientProto = await protobuf.load(`${base}proto/client/client_message.proto`);
     this.ClientMessage = this.clientProto.lookupType('obscura.client.ClientMessage');
   }
 

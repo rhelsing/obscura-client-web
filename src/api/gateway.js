@@ -19,15 +19,15 @@ class Gateway {
   async loadProto() {
     if (this.proto) return;
 
-    // Load server protocol proto
+    // Load server protocol proto (from public folder)
     this.proto = await protobuf.load('/proto/obscura/v1/obscura.proto');
     this.WebSocketFrame = this.proto.lookupType('obscura.v1.WebSocketFrame');
     this.AckMessage = this.proto.lookupType('obscura.v1.AckMessage');
     this.Envelope = this.proto.lookupType('obscura.v1.Envelope');
     this.EncryptedMessage = this.proto.lookupType('obscura.v1.EncryptedMessage');
 
-    // Load client-to-client message proto (our own, not from server submodule)
-    this.clientProto = await protobuf.load('/src/proto/client/client_message.proto');
+    // Load client-to-client message proto (from public folder)
+    this.clientProto = await protobuf.load('/proto/client/client_message.proto');
     this.ClientMessage = this.clientProto.lookupType('obscura.client.ClientMessage');
   }
 

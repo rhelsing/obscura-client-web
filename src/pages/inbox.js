@@ -5,7 +5,8 @@ import client from '../api/client.js';
 import gateway from '../api/gateway.js';
 import { sessionManager } from '../lib/sessionManager.js';
 
-export function renderInbox(container, { friends, pendingMessages, refreshFriends, refreshMessages }) {
+export function renderInbox(container, { friends, pendingMessages: initialMessages, refreshFriends, refreshMessages }) {
+  let pendingMessages = initialMessages;
 
   async function render() {
     const pendingRequests = friends.filter(f => f.status === FriendStatus.PENDING_RECEIVED);
@@ -151,8 +152,11 @@ export function renderInbox(container, { friends, pendingMessages, refreshFriend
       });
     }
 
-    // Refresh to update indicators
-    refreshMessages();
+    // Refresh to update indicators - need to await and re-fetch
+    await refreshMessages();
+    // Fetch fresh message list directly from store
+    const freshMessages = await friendStore.getPendingMessages();
+    pendingMessages = freshMessages;
     render();
   }
 

@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Obscura</title>
+  <script>
+    // Single Page App redirect for GitHub Pages
+    // Converts path to query string and redirects to index.html
+    // e.g., /obscura-client-web/add/uuid -> /obscura-client-web/?p=/add/uuid
+    const path = window.location.pathname;
+    const base = '/obscura-client-web';
+    const relativePath = path.startsWith(base) ? path.slice(base.length) : path;
+    window.location.replace(base + '/?p=' + encodeURIComponent(relativePath));
+  </script>
+</head>
+<body>
+  Redirecting...
+</body>
+</html>

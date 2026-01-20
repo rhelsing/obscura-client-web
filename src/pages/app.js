@@ -1,7 +1,7 @@
 // Main mobile app with tabs
 import client from '../api/client.js';
 import gateway from '../api/gateway.js';
-import { clearKeys, hasSignalKeys } from '../lib/crypto.js';
+import { clearKeys } from '../lib/crypto.js';
 import { friendStore, FriendStatus } from '../lib/friendStore.js';
 import { sessionManager } from '../lib/sessionManager.js';
 import { renderAuth } from './auth.js';
@@ -32,17 +32,6 @@ export function renderApp(container, options = {}) {
   init();
 
   async function init() {
-    // Check if we have Signal keys - if not, force re-registration
-    const hasKeys = await hasSignalKeys();
-    if (!hasKeys) {
-      alert('Your encryption keys are missing. Please register again.');
-      await client.logout();
-      clearKeys();
-      await friendStore.clearAll();
-      renderAuth(container, onAuthSuccess);
-      return;
-    }
-
     await loadFriends();
     await loadPendingMessages();
     await connectGateway();

@@ -8,8 +8,8 @@
   --text-primary: #ffffff;
   --text-secondary: #a0a0a0;
   --text-muted: #666666;
-  --accent: #fffc00;
-  --accent-dim: #ccca00;
+  --accent: #FECE15;
+  --accent-dim: #d4ab10;
   --danger: #ff3b30;
   --success: #34c759;
   --border: #2a2a2a;
@@ -203,8 +203,8 @@ body::before {
   display: flex;
   align-items: center;
   justify-content: space-around;
-  background: var(--bg-secondary);
-  border-top: 1px solid var(--border);
+  background: var(--accent);
+  border-top: none;
   flex-shrink: 0;
   padding-bottom: env(safe-area-inset-bottom, 0);
 }
@@ -216,15 +216,17 @@ body::before {
   gap: 0.25rem;
   background: none;
   border: none;
-  color: var(--text-muted);
+  color: #000000;
   font-size: 0.7rem;
   padding: 0.5rem 1rem;
   cursor: pointer;
-  transition: color 0.2s;
+  transition: opacity 0.2s;
+  opacity: 0.5;
 }
 
 .nav-btn.active {
-  color: var(--accent);
+  color: #6366f1;
+  opacity: 1;
 }
 
 .nav-btn svg {
@@ -987,7 +989,7 @@ body::before {
 }
 
 .boxes .box > div {
-  --background: #fffc00;
+  --background: #FECE15;
   --top: auto;
   --right: auto;
   --bottom: auto;
@@ -1012,13 +1014,13 @@ body::before {
 }
 
 .boxes .box > div:nth-child(2) {
-  --background: #c2bb0a;
+  --background: #d4ab10;
   --right: 0;
   --rotateY: 90deg;
 }
 
 .boxes .box > div:nth-child(3) {
-  --background: #c2bb0a;
+  --background: #d4ab10;
   --rotateX: -90deg;
 }
 

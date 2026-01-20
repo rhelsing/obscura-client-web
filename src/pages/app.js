@@ -1,7 +1,6 @@
 // Main mobile app with tabs
 import client from '../api/client.js';
 import gateway from '../api/gateway.js';
-import { clearKeys } from '../lib/crypto.js';
 import { friendStore, FriendStatus } from '../lib/friendStore.js';
 import { sessionManager } from '../lib/sessionManager.js';
 import { renderAuth } from './auth.js';
@@ -536,9 +535,8 @@ export function renderApp(container, options = {}) {
       if (confirm('Are you sure you want to logout?')) {
         gateway.disconnect();
         await client.logout();
-        clearKeys();
-        // DON'T clear friendStore - preserve friends and pending requests
-        // They'll be here when the user logs back in
+        // Keys persist in IndexedDB - user can receive messages sent while logged out
+        // Friends also persist - they'll be here when the user logs back in
         renderAuth(container, onAuthSuccess);
       }
     });

@@ -1,6 +1,6 @@
 import client from '../api/client.js';
 import gateway from '../api/gateway.js';
-import { generateRegistrationKeys, storeKeys, clearKeys } from '../lib/crypto.js';
+import { generateRegistrationKeys, storeKeys } from '../lib/crypto.js';
 import { sessionManager } from '../lib/sessionManager.js';
 
 export function renderLanding(container, router) {
@@ -363,7 +363,7 @@ export function renderLanding(container, router) {
     gateway.disconnect();
     stopWebcam();
     await client.logout();
-    clearKeys();
+    // Keys persist in IndexedDB - user can receive messages sent while logged out
     log('Logged out', 'success');
     render();
   }

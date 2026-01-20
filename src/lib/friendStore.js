@@ -69,9 +69,9 @@ class FriendStore {
         updatedAt: Date.now(),
       };
 
-      const request = store.put(friend);
-      request.onsuccess = () => resolve(friend);
-      request.onerror = () => reject(request.error);
+      store.put(friend);
+      tx.oncomplete = () => resolve(friend);
+      tx.onerror = () => reject(tx.error);
     });
   }
 
@@ -122,10 +122,10 @@ class FriendStore {
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction(STORES.FRIENDS, 'readwrite');
       const store = tx.objectStore(STORES.FRIENDS);
-      const request = store.put(friend);
+      store.put(friend);
 
-      request.onsuccess = () => resolve(friend);
-      request.onerror = () => reject(request.error);
+      tx.oncomplete = () => resolve(friend);
+      tx.onerror = () => reject(tx.error);
     });
   }
 
@@ -134,10 +134,10 @@ class FriendStore {
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction(STORES.FRIENDS, 'readwrite');
       const store = tx.objectStore(STORES.FRIENDS);
-      const request = store.delete(userId);
+      store.delete(userId);
 
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
     });
   }
 
@@ -160,11 +160,13 @@ class FriendStore {
       };
 
       const request = store.add(msg);
-      request.onsuccess = () => {
-        msg.id = request.result;
+      let msgId;
+      request.onsuccess = () => { msgId = request.result; };
+      tx.oncomplete = () => {
+        msg.id = msgId;
         resolve(msg);
       };
-      request.onerror = () => reject(request.error);
+      tx.onerror = () => reject(tx.error);
     });
   }
 
@@ -198,10 +200,10 @@ class FriendStore {
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction(STORES.PENDING_MESSAGES, 'readwrite');
       const store = tx.objectStore(STORES.PENDING_MESSAGES);
-      const request = store.delete(id);
+      store.delete(id);
 
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
     });
   }
 
@@ -210,10 +212,10 @@ class FriendStore {
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction(STORES.PENDING_MESSAGES, 'readwrite');
       const store = tx.objectStore(STORES.PENDING_MESSAGES);
-      const request = store.clear();
+      store.clear();
 
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
     });
   }
 

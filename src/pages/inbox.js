@@ -5,10 +5,15 @@ import client from '../api/client.js';
 import gateway from '../api/gateway.js';
 import { sessionManager } from '../lib/sessionManager.js';
 
-export function renderInbox(container, { friends, pendingMessages: initialMessages, refreshFriends, refreshMessages }) {
+export function renderInbox(container, { friends: initialFriends, pendingMessages: initialMessages, refreshFriends, refreshMessages }) {
+  let friends = initialFriends;
   let pendingMessages = initialMessages;
 
   async function render() {
+    // Re-fetch fresh data from IndexedDB for real-time updates
+    friends = await friendStore.getAllFriends();
+    pendingMessages = await friendStore.getPendingMessages();
+
     const pendingRequests = friends.filter(f => f.status === FriendStatus.PENDING_RECEIVED);
     const acceptedFriends = friends.filter(f => f.status === FriendStatus.ACCEPTED);
 

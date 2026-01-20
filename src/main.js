@@ -3,7 +3,8 @@ import { renderLanding } from './pages/landing.js';
 import { renderApp } from './pages/app.js';
 
 const app = document.getElementById('app');
-const router = new Navigo('/');
+const base = import.meta.env.BASE_URL || '/';
+const router = new Navigo(base);
 
 // Track which stylesheet is loaded
 let currentStyle = null;

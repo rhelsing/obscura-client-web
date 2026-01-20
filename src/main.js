@@ -31,7 +31,7 @@ router
     renderApp(app, { pendingFriendId: data.userId });
   })
   .on('/testing', () => {
-    loadStylesheet(`${base}src/styles/main.css`);
+    loadStylesheet(`${base}src/styles/mobile.css`);
     renderLanding(app, router);
   })
   .resolve();

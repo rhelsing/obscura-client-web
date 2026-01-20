@@ -13,6 +13,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "NODE_OPTIONS='--experimental-vm-modules' jest test/e2e/"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5",
+    "jest": "^30.2.0",
+    "ws": "^8.19.0"
   }
 }

@@ -76,36 +76,28 @@ git submodule update --remote proto
 
 ## Message Architecture
 
-The client uses a unified message processing flow that handles both queued messages (offline delivery) and real-time messages (WebSocket) through the same pipeline.
+All message delivery happens via WebSocket. When you connect, the server pushes any queued messages.
 
 ### Flow
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                    ON CONNECT                        │
+│              WEBSOCKET CONNECT                       │
 ├─────────────────────────────────────────────────────┤
-│  1. GET /v1/messages  (fetch anything queued)       │
-│  2. For each message:                               │
+│  1. Connect to /v1/gateway                          │
+│  2. Server pushes queued Envelopes                  │
+│  3. For each envelope:                              │
 │     → decrypt (Signal protocol)                     │
 │     → route to handler (friend request, content)    │
 │     → persist to IndexedDB                          │
-│     → ACK via DELETE /v1/messages/{id}/ack          │
-│  3. Connect WebSocket for real-time                 │
-└─────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────┐
-│               WEBSOCKET MESSAGE ARRIVES             │
-├─────────────────────────────────────────────────────┤
-│  1. Receive Envelope via WebSocketFrame             │
-│  2. Same handler: decrypt → route → persist         │
-│  3. ACK via AckMessage frame                        │
+│     → ACK via AckMessage frame                      │
 └─────────────────────────────────────────────────────┘
 ```
 
 ### Key Principles
 
 - **Ack only after persistence**: Messages are acknowledged only after successfully persisting to local IndexedDB. If processing fails, the message stays queued on the server for retry.
-- **Unified processing**: `processEnvelope()` handles all messages identically regardless of source (REST or WebSocket).
+- **Unified processing**: `processEnvelope()` handles all messages through one path.
 - **Friend data persists**: Logging out does not clear the friend store - pending friend requests survive across sessions.
 
 ### Server API

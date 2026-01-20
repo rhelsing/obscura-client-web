@@ -174,44 +174,6 @@ class ObscuraClient {
     return this.request(`/v1/keys/${userId}`);
   }
 
-  // Messaging - Fetch pending messages from server
-  async fetchPendingMessages() {
-    const url = `${API_BASE}/v1/messages`;
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${this.token}`,
-      },
-    });
-
-    if (!response.ok) {
-      const error = new Error(`HTTP ${response.status}`);
-      error.status = response.status;
-      throw error;
-    }
-
-    // Returns protobuf binary data
-    const buffer = await response.arrayBuffer();
-    return new Uint8Array(buffer);
-  }
-
-  // Acknowledge message receipt (server deletes after this)
-  async acknowledgeMessage(messageId) {
-    const url = `${API_BASE}/v1/messages/${messageId}/ack`;
-    const response = await fetch(url, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${this.token}`,
-      },
-    });
-
-    if (!response.ok) {
-      const error = new Error(`HTTP ${response.status}`);
-      error.status = response.status;
-      throw error;
-    }
-  }
-
   // Messaging - Send
   async sendMessage(recipientId, protobufData) {
     const url = `${API_BASE}/v1/messages/${recipientId}`;
@@ -246,6 +208,48 @@ class ObscuraClient {
 
   getGatewayUrl() {
     return `${WS_BASE}/v1/gateway?token=${encodeURIComponent(this.token)}`;
+  }
+
+  // Attachments - Upload binary blob to server storage
+  async uploadAttachment(blob) {
+    const url = `${API_BASE}/v1/attachments`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Authorization': `Bearer ${this.token}`,
+      },
+      body: blob,
+    });
+
+    if (!response.ok) {
+      const error = new Error(`HTTP ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+
+    // Returns {id: uuid, expiresAt: timestamp}
+    return response.json();
+  }
+
+  // Attachments - Fetch binary blob from server
+  async fetchAttachment(id) {
+    const url = `${API_BASE}/v1/attachments/${id}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${this.token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = new Error(`HTTP ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+
+    const buffer = await response.arrayBuffer();
+    return new Uint8Array(buffer);
   }
 }
 

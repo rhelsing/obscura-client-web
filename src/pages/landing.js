@@ -25,55 +25,67 @@ export function renderLanding(container, router) {
     const isAuth = client.isAuthenticated();
     const wsConnected = gateway.isConnected();
 
-    container.innerHTML = `
-      <h1>obscura</h1>
-      <h2>privacy-first messaging relay</h2>
-
-      <div class="card">
-        <div class="card-header">
-          <div class="status-indicator ${wsConnected ? 'connected' : isAuth ? 'connecting' : ''}"></div>
-          <span class="card-title">Connection Status</span>
+    if (!isAuth) {
+      container.innerHTML = `
+        <div class="auth-screen">
+          <div class="auth-logo">obscura</div>
+          <div class="auth-subtitle" style="color: var(--text-muted); margin-bottom: 2rem; font-size: 0.875rem;">testing console</div>
+          ${renderAuthForm()}
         </div>
-        <div class="log" id="log">
-          ${logs.length === 0 ? '<div class="log-entry"><span class="log-message">Ready to connect...</span></div>' : ''}
-          ${logs.map(l => `
-            <div class="log-entry">
-              <span class="log-time">${l.time}</span>
-              <span class="log-message ${l.type}">${l.message}</span>
+      `;
+    } else {
+      container.innerHTML = `
+        <div class="app-container">
+          <header class="app-header">
+            <span class="app-title">obscura testing</span>
+            <div class="status-dot ${wsConnected ? 'connected' : 'disconnected'}"></div>
+          </header>
+          <div class="app-content">
+            <div class="testing-view">
+              ${renderLogPanel()}
+              ${renderAuthenticatedUI(wsConnected)}
             </div>
-          `).join('')}
+          </div>
         </div>
-      </div>
-
-      ${isAuth ? renderAuthenticatedUI(wsConnected) : renderAuthForm()}
-    `;
+      `;
+    }
 
     attachEventListeners();
     scrollLogToBottom();
   }
 
+  function renderLogPanel() {
+    return `
+      <div class="log-panel">
+        <div class="log-header">
+          <span class="log-title">Connection Log</span>
+        </div>
+        <div class="log-content" id="log">
+          ${logs.length === 0 ? '<div class="log-entry">Ready to connect...</div>' : ''}
+          ${logs.map(l => `
+            <div class="log-entry ${l.type}">
+              <span class="log-time">${l.time}</span>
+              <span class="log-msg">${l.message}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
   function renderAuthForm() {
     return `
-      <div class="card">
-        <div class="tabs">
-          <button class="tab ${authMode === 'login' ? 'active' : ''}" data-mode="login">Login</button>
-          <button class="tab ${authMode === 'register' ? 'active' : ''}" data-mode="register">Register</button>
+      <form id="auth-form" class="auth-form">
+        <div class="auth-tabs">
+          <button type="button" class="auth-tab ${authMode === 'login' ? 'active' : ''}" data-mode="login">Login</button>
+          <button type="button" class="auth-tab ${authMode === 'register' ? 'active' : ''}" data-mode="register">Register</button>
         </div>
-
-        <form id="auth-form">
-          <div class="form-group">
-            <label for="username">Username</label>
-            <input type="text" id="username" name="username" required autocomplete="username">
-          </div>
-          <div class="form-group">
-            <label for="password">Password</label>
-            <input type="password" id="password" name="password" required autocomplete="current-password">
-          </div>
-          <button type="submit" ${isLoading ? 'disabled' : ''}>
-            ${isLoading ? 'Please wait...' : authMode === 'login' ? 'Connect' : 'Create Account'}
-          </button>
-        </form>
-      </div>
+        <input type="text" id="username" name="username" class="auth-input" placeholder="Username" required autocomplete="username">
+        <input type="password" id="password" name="password" class="auth-input" placeholder="Password" required autocomplete="current-password">
+        <button type="submit" class="auth-btn" ${isLoading ? 'disabled' : ''}>
+          ${isLoading ? 'Please wait...' : authMode === 'login' ? 'Connect' : 'Create Account'}
+        </button>
+      </form>
     `;
   }
 
@@ -82,27 +94,22 @@ export function renderLanding(container, router) {
     const payload = client.getTokenPayload();
 
     return `
-      <div class="card">
-        <div class="card-header">
-          <span class="card-title">Session</span>
+      <div class="session-card">
+        <div class="session-header">Session</div>
+        <div class="user-id-block">
+          <div class="user-id-label">Your User ID</div>
+          <div class="user-id-value" id="user-id">${userId || 'Unknown'}</div>
+          <button class="copy-btn" id="copy-id">Copy</button>
         </div>
-        <div class="user-info-block">
-          <div class="user-id-row">
-            <label>Your User ID</label>
-            <code class="user-id-value" id="user-id">${userId || 'Unknown'}</code>
-            <button class="copy-btn" id="copy-id" title="Copy to clipboard">Copy</button>
-          </div>
-          <div class="user-meta">
-            Token expires: ${new Date(client.expiresAt * 1000).toLocaleTimeString()}
-            ${payload ? ` | JWT: ${JSON.stringify(payload)}` : ''}
-          </div>
+        <div class="session-meta">
+          Token expires: ${new Date(client.expiresAt * 1000).toLocaleTimeString()}
         </div>
-        <button id="connect-ws" class="secondary" ${wsConnected ? 'disabled' : ''}>
-          ${wsConnected ? 'Gateway Connected' : 'Connect to Gateway'}
-        </button>
-        <button id="logout" class="secondary mt-1">
-          Logout
-        </button>
+        <div class="session-actions">
+          <button id="connect-ws" class="action-btn ${wsConnected ? 'connected' : ''}" ${wsConnected ? 'disabled' : ''}>
+            ${wsConnected ? 'Gateway Connected' : 'Connect to Gateway'}
+          </button>
+          <button id="logout" class="action-btn danger">Logout</button>
+        </div>
       </div>
 
       ${wsConnected ? renderMessaging() : ''}
@@ -111,40 +118,32 @@ export function renderLanding(container, router) {
 
   function renderMessaging() {
     return `
-      <div class="card">
-        <div class="card-header">
-          <span class="card-title">Messages</span>
-        </div>
+      <div class="messaging-card">
+        <div class="messaging-header">Messages</div>
 
         <div class="messages-list" id="messages-list">
           ${messages.length === 0
-            ? '<div class="no-messages">No messages yet</div>'
+            ? '<div class="empty-messages">No messages yet</div>'
             : messages.map(m => renderMessage(m)).join('')
           }
         </div>
 
-        <form id="send-form" class="mt-2">
-          <div class="form-group">
-            <label for="recipient">Recipient User ID</label>
-            <input type="text" id="recipient" name="recipient" placeholder="UUID of recipient" value="${lastRecipient}" required>
-          </div>
+        <form id="send-form" class="send-form">
+          <input type="text" id="recipient" name="recipient" class="auth-input" placeholder="Recipient UUID" value="${lastRecipient}" required>
 
           <div class="compose-area" id="compose-area">
             ${webcamActive ? renderWebcam() : ''}
             ${pendingImage ? renderImagePreview() : ''}
             ${!webcamActive && !pendingImage ? `
-              <div class="form-group">
-                <label for="message">Message</label>
-                <textarea id="message" name="message" rows="3" placeholder="Type your message or drop an image..."></textarea>
-              </div>
+              <textarea id="message" name="message" class="message-input" rows="3" placeholder="Type your message or drop an image..."></textarea>
               <div class="compose-actions">
-                <button type="button" id="webcam-btn" class="secondary icon-btn" title="Take photo">
+                <button type="button" id="webcam-btn" class="camera-btn" title="Take photo">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
                     <circle cx="12" cy="13" r="4"/>
                   </svg>
                 </button>
-                <button type="submit" ${isSending ? 'disabled' : ''}>
+                <button type="submit" class="send-btn" ${isSending ? 'disabled' : ''}>
                   ${isSending ? 'Sending...' : 'Send'}
                 </button>
               </div>
@@ -158,16 +157,16 @@ export function renderLanding(container, router) {
   function renderMessage(m) {
     const isImage = m.type === 'IMAGE' && m.imageData;
     return `
-      <div class="message ${m.direction}">
-        <div class="message-meta">
-          <span class="message-user">${m.direction === 'in' ? m.from.slice(0, 8) + '...' : 'You → ' + m.to.slice(0, 8) + '...'}</span>
-          <span class="message-time">${m.time}</span>
+      <div class="msg ${m.direction}">
+        <div class="msg-meta">
+          <span class="msg-user">${m.direction === 'in' ? m.from.slice(0, 8) + '...' : 'You → ' + m.to.slice(0, 8) + '...'}</span>
+          <span class="msg-time">${m.time}</span>
         </div>
         ${isImage
-          ? `<img class="message-image" src="${m.imageData}" alt="Image">`
-          : `<div class="message-content">${escapeHtml(m.content)}</div>`
+          ? `<img class="msg-image" src="${m.imageData}" alt="Image">`
+          : `<div class="msg-content">${escapeHtml(m.content)}</div>`
         }
-        ${isImage && m.content ? `<div class="message-caption">${escapeHtml(m.content)}</div>` : ''}
+        ${isImage && m.content ? `<div class="msg-caption">${escapeHtml(m.content)}</div>` : ''}
       </div>
     `;
   }
@@ -176,12 +175,10 @@ export function renderLanding(container, router) {
     return `
       <div class="image-preview">
         <img src="${pendingImage.preview}" alt="Preview">
-        <div class="form-group mt-1">
-          <input type="text" id="caption" placeholder="Add a caption (optional)">
-        </div>
+        <input type="text" id="caption" class="auth-input" placeholder="Add a caption (optional)" style="margin-top: 0.75rem;">
         <div class="preview-actions">
-          <button type="button" id="cancel-image" class="secondary">Cancel</button>
-          <button type="submit" ${isSending ? 'disabled' : ''}>
+          <button type="button" id="cancel-image" class="action-btn">Cancel</button>
+          <button type="submit" class="send-btn" ${isSending ? 'disabled' : ''}>
             ${isSending ? 'Sending...' : 'Send Image'}
           </button>
         </div>
@@ -195,8 +192,8 @@ export function renderLanding(container, router) {
         <video id="webcam-video" autoplay playsinline></video>
         <canvas id="webcam-canvas" style="display:none;"></canvas>
         <div class="webcam-actions">
-          <button type="button" id="capture-btn" class="secondary">Capture</button>
-          <button type="button" id="cancel-webcam" class="secondary">Cancel</button>
+          <button type="button" id="capture-btn" class="action-btn">Capture</button>
+          <button type="button" id="cancel-webcam" class="action-btn">Cancel</button>
         </div>
       </div>
     `;
@@ -210,7 +207,7 @@ export function renderLanding(container, router) {
 
   function attachEventListeners() {
     // Tab switching
-    container.querySelectorAll('.tab').forEach(tab => {
+    container.querySelectorAll('.auth-tab').forEach(tab => {
       tab.addEventListener('click', () => {
         authMode = tab.dataset.mode;
         render();
@@ -304,7 +301,7 @@ export function renderLanding(container, router) {
   }
 
   function scrollLogToBottom() {
-    const logEl = container.querySelector('#log');
+    const logEl = container.querySelector('.log-content');
     if (logEl) {
       logEl.scrollTop = logEl.scrollHeight;
     }

@@ -34,8 +34,7 @@ export function renderApp(container, options = {}) {
   async function init() {
     await loadFriends();
     await loadPendingMessages();
-    await syncQueuedMessages(); // Fetch queued messages from server FIRST
-    await connectGateway();     // Then connect for real-time
+    await connectGateway(); // Server pushes queued messages on connect
     render();
     // Process any pending friend link after everything is initialized
     await processPendingFriendLink();
@@ -75,49 +74,6 @@ export function renderApp(container, options = {}) {
     return envelope.id; // Return for acking
   }
 
-  // Fetch and process any messages queued on server while we were offline
-  async function syncQueuedMessages() {
-    try {
-      console.log('Syncing queued messages from server...');
-      const data = await client.fetchPendingMessages();
-
-      if (!data || data.length === 0) {
-        console.log('No queued messages');
-        return;
-      }
-
-      await gateway.loadProto(); // Ensure proto is loaded for decoding
-      const envelopes = gateway.decodeEnvelopeList(data);
-      console.log(`Found ${envelopes.length} queued messages`);
-
-      // STEP 1: Process and persist ALL messages FIRST
-      const processedIds = [];
-      for (const envelope of envelopes) {
-        try {
-          await processEnvelope(envelope);
-          processedIds.push(envelope.id);
-          console.log('Processed and persisted message:', envelope.id);
-        } catch (err) {
-          console.error('Failed to process queued message:', err);
-          // Don't add to processedIds - won't ack, will retry next time
-        }
-      }
-
-      // STEP 2: Only AFTER all are persisted locally, ack them to server
-      console.log(`Acking ${processedIds.length} messages to server...`);
-      for (const messageId of processedIds) {
-        try {
-          await client.acknowledgeMessage(messageId);
-          console.log('Acked message:', messageId);
-        } catch (err) {
-          console.error('Failed to ack message:', messageId, err);
-          // Message is safe locally, ack will succeed on next sync
-        }
-      }
-    } catch (err) {
-      console.error('Failed to sync queued messages:', err);
-    }
-  }
 
   async function processPendingFriendLink() {
     const pendingFriendId = sessionStorage.getItem('obscura_pending_friend');
@@ -290,9 +246,20 @@ export function renderApp(container, options = {}) {
       return;
     }
 
-    // Convert image data to data URL if present
+    // Get image data - either from attachment or inline bytes
     let imageData = null;
-    if (msg.imageData && msg.imageData.length > 0) {
+    if (msg.attachmentId) {
+      // Fetch attachment from server
+      try {
+        const imageBytes = await client.fetchAttachment(msg.attachmentId);
+        const base64 = btoa(String.fromCharCode(...imageBytes));
+        imageData = `data:${msg.mimeType || 'image/jpeg'};base64,${base64}`;
+      } catch (err) {
+        console.error('Failed to fetch attachment:', err);
+        // Continue without image if attachment fetch fails
+      }
+    } else if (msg.imageData && msg.imageData.length > 0) {
+      // Legacy: inline image bytes
       const base64 = btoa(String.fromCharCode(...msg.imageData));
       imageData = `data:${msg.mimeType || 'image/jpeg'};base64,${base64}`;
     }

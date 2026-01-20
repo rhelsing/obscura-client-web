@@ -50,6 +50,8 @@ class Gateway {
     displayDuration = 8,
     username = '',
     accepted = false,
+    attachmentId = '',
+    attachmentExpires = 0,
   }) {
     const typeValue = Gateway.MessageTypes[type] ?? 0;
 
@@ -62,6 +64,8 @@ class Gateway {
       displayDuration: displayDuration,
       username: username,
       accepted: accepted,
+      attachmentId: attachmentId,
+      attachmentExpires: attachmentExpires,
     });
     return this.ClientMessage.encode(clientMsg).finish();
   }
@@ -84,6 +88,8 @@ class Gateway {
         displayDuration: msg.displayDuration || 8,
         username: msg.username || '',
         accepted: msg.accepted || false,
+        attachmentId: msg.attachmentId || '',
+        attachmentExpires: msg.attachmentExpires || 0,
       };
     } catch (e) {
       console.warn('Could not decode as ClientMessage, treating as raw text');
@@ -96,6 +102,8 @@ class Gateway {
         displayDuration: 8,
         username: '',
         accepted: false,
+        attachmentId: '',
+        attachmentExpires: 0,
       };
     }
   }
@@ -248,42 +256,6 @@ class Gateway {
 
   isConnected() {
     return this.ws && this.ws.readyState === WebSocket.OPEN;
-  }
-
-  // Decode envelope list from REST API response (GET /v1/messages)
-  // Server returns length-delimited repeated Envelope messages
-  decodeEnvelopeList(buffer) {
-    const envelopes = [];
-    const data = new Uint8Array(buffer);
-    let offset = 0;
-
-    while (offset < data.length) {
-      // Read varint length prefix
-      let length = 0;
-      let shift = 0;
-      let byte;
-      do {
-        if (offset >= data.length) break;
-        byte = data[offset++];
-        length |= (byte & 0x7f) << shift;
-        shift += 7;
-      } while (byte & 0x80);
-
-      if (length === 0 || offset + length > data.length) break;
-
-      // Decode the envelope
-      const envelopeBytes = data.slice(offset, offset + length);
-      offset += length;
-
-      try {
-        const envelope = this.Envelope.decode(envelopeBytes);
-        envelopes.push(envelope);
-      } catch (e) {
-        console.warn('Failed to decode envelope:', e);
-      }
-    }
-
-    return envelopes;
   }
 }
 

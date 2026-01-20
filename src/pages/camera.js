@@ -4,6 +4,7 @@ import client from '../api/client.js';
 import gateway from '../api/gateway.js';
 import { sessionManager } from '../lib/sessionManager.js';
 import { friendStore, FriendStatus } from '../lib/friendStore.js';
+import { FEATURES } from '../lib/config.js';
 
 export function renderCamera(container, { onSwitchTab, friends, refreshFriends }) {
   let mode = 'photo'; // 'photo' or 'qr'
@@ -417,18 +418,33 @@ export function renderCamera(container, { onSwitchTab, friends, refreshFriends }
     try {
       await gateway.loadProto();
 
-      // Convert blob to Uint8Array
-      const arrayBuffer = await capturedPhoto.blob.arrayBuffer();
-      const imageData = new Uint8Array(arrayBuffer);
+      let clientMessageBytes;
 
-      // Encode client message with image
-      const clientMessageBytes = gateway.encodeClientMessage({
-        type: 'IMAGE',
-        text: textOverlay,
-        imageData: imageData,
-        mimeType: 'image/jpeg',
-        displayDuration: timerValue,
-      });
+      if (FEATURES.USE_ATTACHMENTS) {
+        // Upload image as attachment, send reference
+        const { id, expiresAt } = await client.uploadAttachment(capturedPhoto.blob);
+
+        clientMessageBytes = gateway.encodeClientMessage({
+          type: 'IMAGE',
+          text: textOverlay,
+          mimeType: 'image/jpeg',
+          displayDuration: timerValue,
+          attachmentId: id,
+          attachmentExpires: expiresAt,
+        });
+      } else {
+        // Legacy: send image bytes inline
+        const arrayBuffer = await capturedPhoto.blob.arrayBuffer();
+        const imageData = new Uint8Array(arrayBuffer);
+
+        clientMessageBytes = gateway.encodeClientMessage({
+          type: 'IMAGE',
+          text: textOverlay,
+          imageData: imageData,
+          mimeType: 'image/jpeg',
+          displayDuration: timerValue,
+        });
+      }
 
       // Encrypt and send
       const encrypted = await sessionManager.encrypt(selectedFriend.userId, clientMessageBytes);

@@ -12,6 +12,8 @@ message ClientMessage {
   enum Type {
     TEXT = 0;
     IMAGE = 1;
+    FRIEND_REQUEST = 2;
+    FRIEND_RESPONSE = 3;
   }
 
   Type type = 1;
@@ -19,4 +21,7 @@ message ClientMessage {
   bytes image_data = 3;         // Raw image bytes (PNG/JPEG)
   string mime_type = 4;         // e.g., "image/png", "image/jpeg"
   uint64 timestamp = 5;         // Client-side timestamp (ms since epoch)
+  uint32 display_duration = 6;  // How long to display message (seconds, default 8)
+  string username = 7;          // Sender's username (for friend requests)
+  bool accepted = 8;            // Response to friend request (true = accepted)
 }

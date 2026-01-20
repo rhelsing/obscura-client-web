@@ -31,14 +31,35 @@ class Gateway {
     this.ClientMessage = this.clientProto.lookupType('obscura.client.ClientMessage');
   }
 
-  // Encode a client message (text or image)
-  encodeClientMessage({ type = 'TEXT', text = '', imageData = null, mimeType = '' }) {
+  // Message type enum mapping
+  static MessageTypes = {
+    TEXT: 0,
+    IMAGE: 1,
+    FRIEND_REQUEST: 2,
+    FRIEND_RESPONSE: 3,
+  };
+
+  // Encode a client message (text, image, or friend request/response)
+  encodeClientMessage({
+    type = 'TEXT',
+    text = '',
+    imageData = null,
+    mimeType = '',
+    displayDuration = 8,
+    username = '',
+    accepted = false,
+  }) {
+    const typeValue = Gateway.MessageTypes[type] ?? 0;
+
     const clientMsg = this.ClientMessage.create({
-      type: type === 'IMAGE' ? 1 : 0,
+      type: typeValue,
       text: text,
       imageData: imageData || new Uint8Array(0),
       mimeType: mimeType,
       timestamp: Date.now(),
+      displayDuration: displayDuration,
+      username: username,
+      accepted: accepted,
     });
     return this.ClientMessage.encode(clientMsg).finish();
   }
@@ -47,12 +68,20 @@ class Gateway {
   decodeClientMessage(bytes) {
     try {
       const msg = this.ClientMessage.decode(bytes);
+
+      // Map type number back to string
+      const typeMap = ['TEXT', 'IMAGE', 'FRIEND_REQUEST', 'FRIEND_RESPONSE'];
+      const typeStr = typeMap[msg.type] || 'TEXT';
+
       return {
-        type: msg.type === 1 ? 'IMAGE' : 'TEXT',
+        type: typeStr,
         text: msg.text,
         imageData: msg.imageData,
         mimeType: msg.mimeType,
         timestamp: msg.timestamp,
+        displayDuration: msg.displayDuration || 8,
+        username: msg.username || '',
+        accepted: msg.accepted || false,
       };
     } catch (e) {
       console.warn('Could not decode as ClientMessage, treating as raw text');
@@ -62,6 +91,9 @@ class Gateway {
         imageData: null,
         mimeType: '',
         timestamp: Date.now(),
+        displayDuration: 8,
+        username: '',
+        accepted: false,
       };
     }
   }

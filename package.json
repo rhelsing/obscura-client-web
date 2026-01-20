@@ -4,8 +4,10 @@
   "type": "module",
   "dependencies": {
     "@privacyresearch/libsignal-protocol-typescript": "0.0.16",
+    "html5-qrcode": "^2.3.8",
     "navigo": "^8.11.1",
     "protobufjs": "^8.0.0",
+    "qrcode": "^1.5.4",
     "vite": "^7.3.1"
   },
   "scripts": {

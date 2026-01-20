@@ -84,10 +84,11 @@ class ObscuraClient {
     if (!response.ok) {
       const error = new Error(`HTTP ${response.status}`);
       error.status = response.status;
+      const text = await response.text();
       try {
-        error.body = await response.json();
+        error.body = JSON.parse(text);
       } catch {
-        error.body = await response.text();
+        error.body = text;
       }
       throw error;
     }

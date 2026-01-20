@@ -2,6 +2,8 @@
 const isDev = import.meta.env.DEV;
 const API_URL = import.meta.env.VITE_API_URL;
 const API_BASE = isDev ? '/api' : API_URL;
+
+console.log('ENV DEBUG:', { isDev, API_URL, API_BASE });
 const WS_BASE = isDev ? `ws://${location.host}/ws` : API_URL.replace('https://', 'wss://');
 
 class ObscuraClient {

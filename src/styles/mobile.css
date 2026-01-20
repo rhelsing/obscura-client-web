@@ -938,9 +938,10 @@ body::before {
 }
 
 .loading-text {
-  margin-top: 4rem;
+  margin-top: 7rem;
   font-size: 1rem;
-  color: var(--text-secondary);
+  color: #ffffff;
+  font-weight: 700;
   min-height: 1.5rem;
 }
 
@@ -986,7 +987,7 @@ body::before {
 }
 
 .boxes .box > div {
-  --background: #5C8DF6;
+  --background: #fffc00;
   --top: auto;
   --right: auto;
   --bottom: auto;
@@ -1011,13 +1012,13 @@ body::before {
 }
 
 .boxes .box > div:nth-child(2) {
-  --background: #145af2;
+  --background: #c2bb0a;
   --right: 0;
   --rotateY: 90deg;
 }
 
 .boxes .box > div:nth-child(3) {
-  --background: #447cf5;
+  --background: #c2bb0a;
   --rotateX: -90deg;
 }
 

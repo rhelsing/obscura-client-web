@@ -368,6 +368,10 @@ export function renderApp(container, options = {}) {
           <div class="profile-username">@${username}</div>
           <div class="qr-container" id="qr-container"></div>
           <div class="profile-hint">Friends scan this to add you</div>
+          <div id="user-id-display" style="margin-top: 1rem; padding: 0.5rem; background: var(--bg-tertiary); border-radius: 8px; font-size: 0.7rem; color: var(--text-muted); word-break: break-all; cursor: pointer;">
+            ${userId}
+          </div>
+          <div class="profile-hint" style="font-size: 0.65rem; margin-top: 0.25rem;">Tap to copy your ID</div>
         </div>
 
         <button class="profile-btn" id="copy-link">
@@ -379,6 +383,22 @@ export function renderApp(container, options = {}) {
           </span>
           Copy Friend Link
         </button>
+
+        <div class="profile-card" style="margin-top: 1rem;">
+          <div class="profile-hint" style="margin-bottom: 0.75rem;">Add friend by ID</div>
+          <div style="display: flex; gap: 0.5rem;">
+            <input
+              type="text"
+              id="friend-id-input"
+              placeholder="Paste friend's ID"
+              class="auth-input"
+              style="flex: 1; margin: 0;"
+            >
+            <button class="profile-btn" id="add-friend-btn" style="width: auto; padding: 0 1rem;">
+              Add
+            </button>
+          </div>
+        </div>
 
         <button class="profile-btn danger" id="logout">
           <span class="profile-btn-icon">
@@ -411,6 +431,21 @@ export function renderApp(container, options = {}) {
       qrContainer.appendChild(canvas);
     });
 
+    // Copy user ID when tapped
+    content.querySelector('#user-id-display')?.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(userId);
+        const el = content.querySelector('#user-id-display');
+        const original = el.textContent;
+        el.textContent = 'Copied!';
+        setTimeout(() => {
+          el.textContent = original;
+        }, 1500);
+      } catch (err) {
+        console.error('Failed to copy:', err);
+      }
+    });
+
     // Copy link button
     content.querySelector('#copy-link')?.addEventListener('click', async () => {
       try {
@@ -428,6 +463,50 @@ export function renderApp(container, options = {}) {
       } catch (err) {
         console.error('Failed to copy:', err);
         alert('Failed to copy link');
+      }
+    });
+
+    // Add friend by ID
+    content.querySelector('#add-friend-btn')?.addEventListener('click', async () => {
+      const input = content.querySelector('#friend-id-input');
+      const friendId = input.value.trim();
+
+      if (!friendId) {
+        alert('Please enter a friend ID');
+        return;
+      }
+
+      // Validate UUID format
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(friendId)) {
+        alert('Invalid ID format');
+        return;
+      }
+
+      if (friendId === userId) {
+        alert("That's your own ID!");
+        return;
+      }
+
+      // Check if already a friend
+      const existing = await friendStore.getFriend(friendId);
+      if (existing) {
+        if (existing.status === FriendStatus.ACCEPTED) {
+          alert(`Already friends with ${existing.username}!`);
+        } else {
+          alert('Friend request already pending!');
+        }
+        return;
+      }
+
+      try {
+        await sendFriendRequest(friendId);
+        input.value = '';
+        alert('Friend request sent!');
+        await loadFriends();
+      } catch (err) {
+        console.error('Failed to send friend request:', err);
+        alert('Failed to send friend request: ' + err.message);
       }
     });
 

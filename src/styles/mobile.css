@@ -254,6 +254,10 @@ body::before {
   object-fit: cover;
 }
 
+.camera-preview video.mirrored {
+  transform: scaleX(-1);
+}
+
 .camera-controls {
   position: absolute;
   top: 1rem;

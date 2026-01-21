@@ -265,6 +265,8 @@ export function renderCamera(container, { onSwitchTab, friends, refreshFriends }
       const video = container.querySelector('#camera-video');
       if (video) {
         video.srcObject = stream;
+        // Mirror front-facing camera for natural selfie view
+        video.classList.toggle('mirrored', facingMode === 'user');
       }
     } catch (err) {
       console.error('Camera error:', err);

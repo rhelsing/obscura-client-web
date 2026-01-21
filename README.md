@@ -102,10 +102,31 @@ All message delivery happens via WebSocket. When you connect, the server pushes 
 
 ### Server API
 
-See the [Obscura Server OpenAPI spec](https://obscura.barrelmaker.dev/openapi.yaml) for endpoint details.
+See the Obscura Server OpenAPI spec at `{YOUR_SERVER}/openapi.yaml` for endpoint details.
+
+## Debugging
+
+### Server Issues
+
+When debugging authentication, key validation, or signature errors, check the server source:
+
+- **Server Repo:** https://github.com/barrelmaker97/obscura-server
+- **Key validation:** `src/core/auth.rs` - `verify_signature()` function
+- **Key upload:** `src/core/key_service.rs`
+
+### Key Format Testing
+
+Use the standalone test script to debug key format issues:
+
+```bash
+node test-keys.js
+```
+
+This tests various combinations of key sizes (32 vs 33 bytes) against the server.
 
 ## Tech Stack
 
 - [Vite](https://vitejs.dev/) - Build tool
 - [Navigo](https://github.com/krasimir/navigo) - Router
 - [Protobuf.js](https://protobufjs.github.io/protobuf.js/) - Protocol Buffers
+- [@privacyresearch/libsignal-protocol-typescript](https://github.com/nicholassm/libsignal-protocol-typescript) - Signal Protocol

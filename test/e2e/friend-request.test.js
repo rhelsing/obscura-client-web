@@ -1,10 +1,13 @@
 // E2E Test: Friend Request Flow
-// Tests against real server: https://obscura.barrelmaker.dev
+// Run with: OBSCURA_API_URL=https://your-server.com npm run test:e2e
 
 import { TestClient, randomUsername } from '../helpers/testClient.js';
 import WebSocket from 'ws';
 
-const API_URL = 'https://obscura.barrelmaker.dev';
+const API_URL = process.env.OBSCURA_API_URL;
+if (!API_URL) {
+  throw new Error('OBSCURA_API_URL environment variable is required');
+}
 
 describe('Friend Request E2E', () => {
   let userA, userB;

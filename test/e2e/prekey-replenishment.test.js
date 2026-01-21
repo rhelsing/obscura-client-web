@@ -1,9 +1,12 @@
 // E2E Test: PreKey Replenishment
-// Tests prekey generation and upload against real server
+// Run with: OBSCURA_API_URL=https://your-server.com npm run test:e2e
 
 import { TestClient, randomUsername } from '../helpers/testClient.js';
 
-const API_URL = 'https://obscura.barrelmaker.dev';
+const API_URL = process.env.OBSCURA_API_URL;
+if (!API_URL) {
+  throw new Error('OBSCURA_API_URL environment variable is required');
+}
 
 describe('PreKey Replenishment E2E', () => {
   let user;

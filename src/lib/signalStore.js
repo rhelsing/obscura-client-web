@@ -245,6 +245,47 @@ class SignalProtocolStore {
     await this._delete(STORES.SESSIONS, encodedAddress);
   }
 
+  // === Pre-Key Management ===
+
+  async getPreKeyCount() {
+    await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(STORES.PRE_KEYS, 'readonly');
+      const store = tx.objectStore(STORES.PRE_KEYS);
+      const request = store.count();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getHighestPreKeyId() {
+    await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(STORES.PRE_KEYS, 'readonly');
+      const store = tx.objectStore(STORES.PRE_KEYS);
+      const request = store.getAllKeys();
+      request.onsuccess = () => {
+        const keys = request.result.map(k => parseInt(k, 10));
+        resolve(keys.length > 0 ? Math.max(...keys) : 0);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getHighestSignedPreKeyId() {
+    await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(STORES.SIGNED_PRE_KEYS, 'readonly');
+      const store = tx.objectStore(STORES.SIGNED_PRE_KEYS);
+      const request = store.getAllKeys();
+      request.onsuccess = () => {
+        const keys = request.result.map(k => parseInt(k, 10));
+        resolve(keys.length > 0 ? Math.max(...keys) : 0);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
   // === Utility Methods ===
 
   async clearAll() {

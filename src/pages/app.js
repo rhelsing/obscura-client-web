@@ -3,6 +3,7 @@ import client from '../api/client.js';
 import gateway from '../api/gateway.js';
 import { friendStore, FriendStatus } from '../lib/friendStore.js';
 import { sessionManager } from '../lib/sessionManager.js';
+import { replenishPreKeys } from '../lib/crypto.js';
 import { renderAuth } from './auth.js';
 import { renderCamera } from './camera.js';
 import { renderInbox } from './inbox.js';
@@ -37,6 +38,8 @@ export function renderApp(container, options = {}) {
     render();
     // Process any pending friend link after everything is initialized
     await processPendingFriendLink();
+    // Replenish prekeys if running low (non-blocking)
+    replenishPreKeys(client).catch(err => console.error('[PreKey] Replenishment failed:', err));
   }
 
   // ============================================================
@@ -263,7 +266,8 @@ export function renderApp(container, options = {}) {
       imageData = `data:${msg.mimeType || 'image/jpeg'};base64,${base64}`;
     }
 
-    // PERSIST TO INDEXEDDB
+    // PERSIST TO INDEXEDDB - user will see unread indicator and click to view
+    console.log('Storing message from:', friend.username, '- user can click to view');
     await friendStore.addPendingMessage({
       fromUserId,
       type: msg.type,

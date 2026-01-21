@@ -35,3 +35,10 @@ router
     renderLanding(app, router);
   })
   .resolve();
+
+// Expose test helpers in dev mode
+if (import.meta.env.DEV) {
+  import('./api/gateway.js').then(m => window.__gateway = m.default);
+  import('./api/client.js').then(m => window.__client = m.default);
+  import('./lib/sessionManager.js').then(m => window.__sessionManager = m.sessionManager);
+}

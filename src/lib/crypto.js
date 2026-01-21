@@ -46,6 +46,8 @@ export async function generateRegistrationKeys() {
   }
 
   // Return data formatted for server registration (base64 encoded public keys)
+  // Public keys are 33 bytes (with 0x05 Curve25519 type prefix)
+  // Private keys are 32 bytes
   return {
     identityKey: arrayBufferToBase64(identityKeyPair.pubKey),
     registrationId,
@@ -110,4 +112,92 @@ export function clearLegacyKeys() {
       console.log('Legacy ECDSA keys cleared - re-registration required');
     }
   }
+}
+
+// === Pre-Key Replenishment ===
+
+const PREKEY_THRESHOLD = 20;
+const PREKEY_BATCH_SIZE = 50;
+
+// Generate additional one-time prekeys starting from a given ID
+export async function generateMorePreKeys(startId, count) {
+  await signalStore.open();
+
+  const preKeys = [];
+  for (let i = 0; i < count; i++) {
+    const keyId = startId + i;
+    const preKey = await KeyHelper.generatePreKey(keyId);
+    preKeys.push(preKey);
+    await signalStore.storePreKey(preKey.keyId, preKey.keyPair);
+  }
+
+  return preKeys.map(pk => ({
+    keyId: pk.keyId,
+    publicKey: arrayBufferToBase64(pk.keyPair.pubKey),
+  }));
+}
+
+// Generate a new signed prekey (required by API for uploads)
+export async function generateNewSignedPreKey() {
+  await signalStore.open();
+
+  const identityKeyPair = await signalStore.getIdentityKeyPair();
+  if (!identityKeyPair) {
+    throw new Error('No identity key found');
+  }
+
+  const currentHighest = await signalStore.getHighestSignedPreKeyId();
+  const newKeyId = currentHighest + 1;
+
+  const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, newKeyId);
+  await signalStore.storeSignedPreKey(signedPreKey.keyId, signedPreKey.keyPair);
+
+  return {
+    keyId: signedPreKey.keyId,
+    publicKey: arrayBufferToBase64(signedPreKey.keyPair.pubKey),
+    signature: arrayBufferToBase64(signedPreKey.signature),
+  };
+}
+
+// Check prekey count and replenish if below threshold
+export async function replenishPreKeys(client) {
+  await signalStore.open();
+
+  const count = await signalStore.getPreKeyCount();
+  console.log(`[PreKey] Current count: ${count}, threshold: ${PREKEY_THRESHOLD}`);
+
+  if (count >= PREKEY_THRESHOLD) {
+    return { replenished: false, count, uploaded: 0 };
+  }
+
+  console.log(`[PreKey] Below threshold, generating ${PREKEY_BATCH_SIZE} new prekeys...`);
+
+  const highestId = await signalStore.getHighestPreKeyId();
+  const startId = highestId + 1;
+
+  const newPreKeys = await generateMorePreKeys(startId, PREKEY_BATCH_SIZE);
+  const signedPreKey = await generateNewSignedPreKey();
+
+  await client.uploadKeys({
+    signedPreKey,
+    oneTimePreKeys: newPreKeys,
+  });
+
+  const newCount = await signalStore.getPreKeyCount();
+  console.log(`[PreKey] Replenished. New count: ${newCount}`);
+
+  return { replenished: true, count: newCount, uploaded: newPreKeys.length };
+}
+
+// Get current prekey status
+export async function getPreKeyStatus() {
+  await signalStore.open();
+  const count = await signalStore.getPreKeyCount();
+  const highestId = await signalStore.getHighestPreKeyId();
+  return {
+    count,
+    highestId,
+    threshold: PREKEY_THRESHOLD,
+    needsReplenishment: count < PREKEY_THRESHOLD,
+  };
 }

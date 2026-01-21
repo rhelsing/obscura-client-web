@@ -137,7 +137,9 @@ export function renderInbox(container, { friends: initialFriends, pendingMessage
   }
 
   async function viewMessagesFrom(userId) {
+    console.log('viewMessagesFrom called with userId:', userId);
     const messages = await friendStore.getPendingMessagesFrom(userId);
+    console.log('Messages found:', messages.length, messages);
     if (messages.length === 0) return;
 
     // Get friend info for display

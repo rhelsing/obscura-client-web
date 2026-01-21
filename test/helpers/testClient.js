@@ -110,6 +110,35 @@ class InMemorySignalStore {
     this.sessions.clear();
     this.trustedIdentities.clear();
   }
+
+  // === Pre-Key Management (for replenishment testing) ===
+
+  getPreKeyCount() {
+    return this.preKeys.size;
+  }
+
+  getHighestPreKeyId() {
+    const ids = Array.from(this.preKeys.keys()).map(k => parseInt(k, 10));
+    return ids.length > 0 ? Math.max(...ids) : 0;
+  }
+
+  getHighestSignedPreKeyId() {
+    const ids = Array.from(this.signedPreKeys.keys()).map(k => parseInt(k, 10));
+    return ids.length > 0 ? Math.max(...ids) : 0;
+  }
+
+  deletePreKeysExcept(keepCount) {
+    const ids = Array.from(this.preKeys.keys())
+      .map(k => parseInt(k, 10))
+      .sort((a, b) => b - a); // highest first
+    const toKeep = ids.slice(0, keepCount);
+    for (const id of ids) {
+      if (!toKeep.includes(id)) {
+        this.preKeys.delete(id.toString());
+      }
+    }
+    return this.preKeys.size;
+  }
 }
 
 // Helper functions
@@ -623,6 +652,51 @@ export class TestClient {
       type: 'FRIEND_REQUEST',
       username: this.username,
     });
+  }
+
+  // === PreKey Replenishment ===
+
+  async uploadKeys({ signedPreKey, oneTimePreKeys }) {
+    return this.request('/v1/keys', {
+      method: 'POST',
+      body: JSON.stringify({
+        signedPreKey,
+        oneTimePreKeys,
+      }),
+    });
+  }
+
+  async generateMorePreKeys(startId, count) {
+    const preKeys = [];
+    for (let i = 0; i < count; i++) {
+      const keyId = startId + i;
+      const preKey = await KeyHelper.generatePreKey(keyId);
+      preKeys.push(preKey);
+      await this.store.storePreKey(keyId, preKey.keyPair);
+    }
+    return preKeys.map(pk => ({
+      keyId: pk.keyId,
+      publicKey: arrayBufferToBase64(pk.keyPair.pubKey),
+    }));
+  }
+
+  async generateNewSignedPreKey() {
+    const identityKeyPair = await this.store.getIdentityKeyPair();
+    if (!identityKeyPair) {
+      throw new Error('No identity key found');
+    }
+
+    const currentHighest = this.store.getHighestSignedPreKeyId();
+    const newKeyId = currentHighest + 1;
+
+    const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, newKeyId);
+    await this.store.storeSignedPreKey(newKeyId, signedPreKey.keyPair);
+
+    return {
+      keyId: signedPreKey.keyId,
+      publicKey: arrayBufferToBase64(signedPreKey.keyPair.pubKey),
+      signature: arrayBufferToBase64(signedPreKey.signature),
+    };
   }
 }
 

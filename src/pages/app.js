@@ -3,6 +3,7 @@ import client from '../api/client.js';
 import gateway from '../api/gateway.js';
 import { friendStore, FriendStatus } from '../lib/friendStore.js';
 import { sessionManager } from '../lib/sessionManager.js';
+import { sessionResetManager } from '../lib/sessionResetManager.js';
 import { replenishPreKeys } from '../lib/crypto.js';
 import { renderAuth } from './auth.js';
 import { renderCamera } from './camera.js';
@@ -48,19 +49,53 @@ export function renderApp(container, options = {}) {
   // ============================================================
 
   async function processEnvelope(envelope) {
-    // Decrypt
-    const decryptedBytes = await sessionManager.decrypt(
-      envelope.sourceUserId,
-      envelope.message.content,
-      envelope.message.type
-    );
+    let decryptedBytes;
+
+    // Try to decrypt - may fail if sender has stale session
+    try {
+      decryptedBytes = await sessionManager.decrypt(
+        envelope.sourceUserId,
+        envelope.message.content,
+        envelope.message.type
+      );
+    } catch (err) {
+      // Decryption failed - likely key mismatch or missing session
+      console.log(`[App] Decryption failed for ${envelope.sourceUserId}:`, err.message);
+
+      // Check if we already tried to reset for this envelope (prevent loops)
+      if (sessionResetManager.hasTriedEnvelope(envelope.id)) {
+        console.log(`[App] Already tried reset for envelope ${envelope.id}, skipping`);
+        return null; // Don't ack - let server redeliver later
+      }
+
+      sessionResetManager.markEnvelopeTried(envelope.id);
+
+      // Initiate session reset protocol
+      const resetStarted = await sessionResetManager.initiateReset(
+        envelope.sourceUserId,
+        'decryption_failed'
+      );
+
+      if (resetStarted) {
+        console.log(`[App] Session reset initiated for ${envelope.sourceUserId}`);
+      }
+
+      // Return null to NOT ack - server will redeliver after reset completes
+      return null;
+    }
 
     // Decode
     const clientMsg = gateway.decodeClientMessage(new Uint8Array(decryptedBytes));
     console.log('Processing message:', clientMsg.type, 'from:', envelope.sourceUserId);
 
     // Route and persist
-    if (clientMsg.type === 'FRIEND_REQUEST') {
+    if (clientMsg.type === 'SESSION_RESET') {
+      // Handle session reset request
+      await sessionResetManager.handleSessionReset(envelope.sourceUserId, clientMsg);
+      // Refresh UI since friend list may have changed
+      await loadFriends();
+      if (inboxInstance) inboxInstance.render();
+    } else if (clientMsg.type === 'FRIEND_REQUEST') {
       await handleFriendRequest(envelope.sourceUserId, clientMsg);
     } else if (clientMsg.type === 'FRIEND_RESPONSE') {
       await handleFriendResponse(envelope.sourceUserId, clientMsg);
@@ -188,9 +223,13 @@ export function renderApp(container, options = {}) {
     gateway.on('envelope', async (envelope) => {
       console.log('Received real-time envelope from:', envelope.sourceUserId);
       try {
-        await processEnvelope(envelope);
-        gateway.acknowledge(envelope.id); // WebSocket ack AFTER success
-        console.log('Processed and acked real-time message:', envelope.id);
+        const envelopeId = await processEnvelope(envelope);
+        if (envelopeId) {
+          gateway.acknowledge(envelopeId); // WebSocket ack AFTER success
+          console.log('Processed and acked real-time message:', envelopeId);
+        } else {
+          console.log('Message processing deferred (reset in progress), not acking');
+        }
       } catch (err) {
         console.error('Failed to process real-time message:', err);
         // Don't ack - server will redeliver

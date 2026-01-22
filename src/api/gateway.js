@@ -39,9 +39,10 @@ class Gateway {
     IMAGE: 1,
     FRIEND_REQUEST: 2,
     FRIEND_RESPONSE: 3,
+    SESSION_RESET: 4,
   };
 
-  // Encode a client message (text, image, or friend request/response)
+  // Encode a client message (text, image, friend request/response, or session reset)
   encodeClientMessage({
     type = 'TEXT',
     text = '',
@@ -52,6 +53,8 @@ class Gateway {
     accepted = false,
     attachmentId = '',
     attachmentExpires = 0,
+    resetReason = '',
+    resetTimestamp = 0,
   }) {
     const typeValue = Gateway.MessageTypes[type] ?? 0;
 
@@ -66,6 +69,8 @@ class Gateway {
       accepted: accepted,
       attachmentId: attachmentId,
       attachmentExpires: attachmentExpires,
+      resetReason: resetReason,
+      resetTimestamp: resetTimestamp,
     });
     return this.ClientMessage.encode(clientMsg).finish();
   }
@@ -76,7 +81,7 @@ class Gateway {
       const msg = this.ClientMessage.decode(bytes);
 
       // Map type number back to string
-      const typeMap = ['TEXT', 'IMAGE', 'FRIEND_REQUEST', 'FRIEND_RESPONSE'];
+      const typeMap = ['TEXT', 'IMAGE', 'FRIEND_REQUEST', 'FRIEND_RESPONSE', 'SESSION_RESET'];
       const typeStr = typeMap[msg.type] || 'TEXT';
 
       return {
@@ -90,6 +95,8 @@ class Gateway {
         accepted: msg.accepted || false,
         attachmentId: msg.attachmentId || '',
         attachmentExpires: msg.attachmentExpires || 0,
+        resetReason: msg.resetReason || '',
+        resetTimestamp: msg.resetTimestamp || 0,
       };
     } catch (e) {
       console.warn('Could not decode as ClientMessage, treating as raw text');
@@ -104,6 +111,8 @@ class Gateway {
         accepted: false,
         attachmentId: '',
         attachmentExpires: 0,
+        resetReason: '',
+        resetTimestamp: 0,
       };
     }
   }

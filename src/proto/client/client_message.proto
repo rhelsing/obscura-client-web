@@ -14,6 +14,7 @@ message ClientMessage {
     IMAGE = 1;
     FRIEND_REQUEST = 2;
     FRIEND_RESPONSE = 3;
+    SESSION_RESET = 4;        // Request session re-establishment after key change
   }
 
   Type type = 1;
@@ -26,4 +27,8 @@ message ClientMessage {
   bool accepted = 8;            // Response to friend request (true = accepted)
   string attachment_id = 9;     // UUID reference to uploaded attachment (replaces image_data)
   uint64 attachment_expires = 10; // When attachment expires (unix timestamp ms)
+
+  // Session reset fields
+  string reset_reason = 11;     // e.g., "decryption_failed", "key_mismatch"
+  uint64 reset_timestamp = 12;  // When the reset was initiated
 }

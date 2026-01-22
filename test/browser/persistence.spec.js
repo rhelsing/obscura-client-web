@@ -375,16 +375,10 @@ test.describe('Persistence', () => {
 
   test('Full mesh - three users exchange friend requests and messages', async ({ browser }) => {
     test.setTimeout(120000); // 2 minutes for this comprehensive test
-    // Create contexts with camera permissions granted
-    const contextA = await browser.newContext({
-      permissions: ['camera'],
-    });
-    const contextB = await browser.newContext({
-      permissions: ['camera'],
-    });
-    const contextC = await browser.newContext({
-      permissions: ['camera'],
-    });
+    // Create contexts (camera permissions inherited from config)
+    const contextA = await browser.newContext();
+    const contextB = await browser.newContext();
+    const contextC = await browser.newContext();
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
     const pageC = await contextC.newPage();

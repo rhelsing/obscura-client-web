@@ -1,5 +1,7 @@
 # Claude Code Context
 
+@README.md
+
 ## Project Overview
 Obscura Web Client - a Signal Protocol encrypted messaging client.
 
@@ -50,7 +52,7 @@ The 0x05 prefix is a type identifier. Server may expect 32-byte raw keys.
 
 ### Testing
 - `test/helpers/testClient.js` - E2E test client with real crypto
-- `test-keys.js` - Standalone key format debugging script
+- `test/smoke/` - Standalone debugging scripts (test-keys.js, test-xeddsa.js, etc.)
 
 ## Testing
 
@@ -62,5 +64,5 @@ npm run test:e2e
 npm run test:browser
 
 # Debug key formats against server
-node test-keys.js
+node test/smoke/test-keys.js
 ```

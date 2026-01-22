@@ -127,7 +127,7 @@ When debugging authentication, key validation, or signature errors, check the se
 export $(cat .env | xargs) && npm run test:e2e
 
 # Or
-source .env && node test-keys.js
+source .env && node test/smoke/test-keys.js
 ```
 
 ## Tech Stack

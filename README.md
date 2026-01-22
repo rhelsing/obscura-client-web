@@ -58,10 +58,13 @@ Uses the [obscura-proto](https://github.com/barrelmaker97/obscura-proto) definit
 
    The app will be available at `http://localhost:5173`
 
-## Updating Proto Definitions
+## Proto Definitions
 
-To pull the latest proto definitions:
+**Server proto** (submodule at `proto/`): Transport layer - `WebSocketFrame`, `Envelope`, `EncryptedMessage`
 
+**Client proto** (`src/proto/client/`): Encrypted payload - `ClientMessage` (TEXT, IMAGE, FRIEND_REQUEST, FRIEND_RESPONSE)
+
+To pull latest server proto:
 ```bash
 git submodule update --remote proto
 ```
@@ -73,10 +76,13 @@ git submodule update --remote proto
 | `npm run dev` | Start development server |
 | `npm run build` | Build for production |
 | `npm run preview` | Preview production build |
+| `npm run test:e2e` | Run E2E tests (uses `VITE_API_URL` from `.env`) |
+| `npm run test:browser` | Run Playwright browser tests |
 
 ## Message Architecture
 
-All message delivery happens via WebSocket. When you connect, the server pushes any queued messages.
+- **Send:** HTTP POST to `/v1/messages/{recipientId}`
+- **Receive:** WebSocket at `/v1/gateway` (server pushes queued messages on connect)
 
 ### Flow
 
@@ -114,15 +120,15 @@ When debugging authentication, key validation, or signature errors, check the se
 - **Key validation:** `src/core/auth.rs` - `verify_signature()` function
 - **Key upload:** `src/core/key_service.rs`
 
-### Key Format Testing
-
-Use the standalone test script to debug key format issues:
+### Running Tests
 
 ```bash
-node test-keys.js
-```
+# Load env vars then run
+export $(cat .env | xargs) && npm run test:e2e
 
-This tests various combinations of key sizes (32 vs 33 bytes) against the server.
+# Or
+source .env && node test-keys.js
+```
 
 ## Tech Stack
 

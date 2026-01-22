@@ -129,7 +129,7 @@ const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
 const preKey = await KeyHelper.generatePreKey(1);
 ```
 
-Keys are Curve25519, not ECDSA. The `pubKey` and `privKey` are `ArrayBuffer`.
+Keys are Curve25519 with XEdDSA signatures (64 bytes). The `pubKey` and `privKey` are `ArrayBuffer`.
 
 ### 6. Session Establishment (X3DH)
 

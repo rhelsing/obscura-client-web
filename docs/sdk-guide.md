@@ -544,7 +544,7 @@ obscura_db/
          │
          ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  DUMB PIPE                                                    │
+│  DUMB PIPE     message and attachments                        │
 │  POST /v1/messages/{device} → queue → WebSocket drain         │
 └──────────────────────────────────────────────────────────────┘
 ```

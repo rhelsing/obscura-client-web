@@ -400,20 +400,19 @@ const myCollection = await client.collected.where({ /* all */ });
 
 ## Large Content (Attachments)
 
-For media (images, videos), use the attachment pattern:
+For media (images, videos), use the attachment pattern. **Encryption is handled automatically** - content is encrypted before upload, keys distributed via E2E messages. Server never sees plaintext.
 
 ```javascript
-// Upload content ONCE to server
+// Upload (encrypts automatically, server stores only encrypted bytes)
 const attachment = await client.attachments.upload(imageBlob);
-// Returns: { id: 'xyz', expiresAt: '...' }
 
-// Send tiny notification to all recipients
+// Reference in your content
 await client.story.create({
   content: 'Check this out!',
-  mediaUrl: attachment.id,   // reference, not the actual bytes
+  mediaUrl: attachment.id,
 });
 
-// Recipients fetch attachment on-demand
+// Download (decrypts automatically)
 const media = await client.attachments.download(story.mediaUrl);
 ```
 

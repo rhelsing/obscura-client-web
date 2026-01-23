@@ -569,22 +569,65 @@ Created → Synced → Persists forever (until user explicitly deletes)
 
 ### Large Content (Attachments)
 
-For media (images, video), use the attachment pattern to avoid fan-out explosion:
+For media (images, video), use the attachment pattern. **Content is encrypted BEFORE upload. Key is distributed via E2E messages. Server stores only opaque bytes.**
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ LARGE CONTENT FLOW                                              │
+│ ATTACHMENT ENCRYPTION FLOW                                      │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│ 1. Upload content ONCE to server attachment endpoint            │
-│    POST /v1/attachments → returns attachment_id                 │
+│ 1. SENDER ENCRYPTS LOCALLY                                      │
+│    content_key = random_bytes(32)            // AES-256-GCM     │
+│    nonce = random_bytes(12)                                     │
+│    encrypted_blob = AES_GCM_encrypt(content, content_key, nonce)│
+│    content_hash = SHA256(content)            // integrity       │
 │                                                                 │
-│ 2. Fan out TINY notification messages (not the content!)        │
-│    { type: CONTENT_REF, attachment_id, decryption_key }        │
-│    ~100 bytes × 150 recipients = 15KB (not 150 × 5MB)          │
+│ 2. UPLOAD ENCRYPTED BLOB TO SERVER                              │
+│    POST /v1/attachments { body: encrypted_blob }                │
+│    → Returns: attachment_id, expires_at                         │
+│    → Server stores OPAQUE BYTES (cannot decrypt)                │
 │                                                                 │
-│ 3. Recipients fetch attachment on-demand                        │
-│    GET /v1/attachments/{id} → decrypt with key from message    │
+│ 3. FAN OUT KEY VIA E2E MESSAGES                                 │
+│    For each recipient device:                                   │
+│      Signal_encrypt(recipient, ContentReference {               │
+│        attachment_id: "xyz",                                    │
+│        content_key: <32 bytes>,                                 │
+│        nonce: <12 bytes>,                                       │
+│        content_hash: <32 bytes>,                                │
+│        content_type: "image/jpeg",                              │
+│        size_bytes: 1024000,                                     │
+│      })                                                         │
+│    → POST /v1/messages/{recipient_device}                       │
+│    → Key travels E2E encrypted, server NEVER sees it            │
+│                                                                 │
+│ 4. RECIPIENT FETCHES AND DECRYPTS                               │
+│    a. Receive E2E message with ContentReference                 │
+│    b. GET /v1/attachments/{attachment_id} → encrypted_blob      │
+│    c. content = AES_GCM_decrypt(blob, content_key, nonce)       │
+│    d. Verify: SHA256(content) == content_hash                   │
+│    e. Display content                                           │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ SERVER SEES vs RECIPIENT SEES                                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│ SERVER SEES:                      RECIPIENT SEES:               │
+│ ─────────────────────────         ─────────────────────────     │
+│ • Encrypted blob (opaque)         • content_key (from E2E)      │
+│ • attachment_id                   • Decrypted content           │
+│ • Size, TTL                       • Original file               │
+│ • Who uploaded (auth)                                           │
+│ • Who downloaded (auth)                                         │
+│                                                                 │
+│ SERVER CANNOT SEE:                                              │
+│ • Content                                                       │
+│ • content_key                                                   │
+│ • What the file is                                              │
+│ • Who it's meant for (just who downloads)                       │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -592,17 +635,22 @@ For media (images, video), use the attachment pattern to avoid fan-out explosion
 ```protobuf
 message ContentReference {
   string attachment_id = 1;      // server attachment ID
-  bytes decryption_key = 2;      // symmetric key for this content
-  string content_type = 3;       // "image/jpeg", "video/mp4"
-  uint64 size_bytes = 4;         // for UI preview
+  bytes content_key = 2;         // AES-256-GCM key (32 bytes)
+  bytes nonce = 3;               // AES-GCM nonce (12 bytes)
+  bytes content_hash = 4;        // SHA-256 for integrity
+  string content_type = 5;       // MIME type
+  uint64 size_bytes = 6;         // for progress/preview
 }
 ```
 
-**Server attachment properties:**
-- TTL-based expiration (not single-use)
+**Security properties:**
+- Content encrypted BEFORE upload (AES-256-GCM)
+- Server stores ONLY encrypted bytes
+- Key distributed via E2E (Signal Protocol)
+- Each attachment has unique key (no reuse)
+- Integrity verified via SHA-256 hash
+- TTL-based expiration on server
 - Multiple downloads allowed
-- Server cannot decrypt (key in E2E message)
-- Stored until TTL expires
 
 **Why Devices use LWW-Map, not G-Set?**
 

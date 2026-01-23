@@ -49,10 +49,55 @@ This document specifies the Obscura Sync Protocol - a client-side protocol for m
 
 1. **Server is dumb** - The relay server only routes encrypted blobs. It has no knowledge of message content, device relationships, or sync state. One queue. KISS.
 2. **Self-authenticating data** - All data is signed by the originating identity. Can be verified by any peer.
-3. **Grow-only data** - Messages are a grow-only set (CRDT). No deletion, just accumulation. Can compact/archive for efficiency.
+3. **Ephemeral by default** - Content auto-deletes after view or TTL unless explicitly collected.
 4. **Eventually consistent** - Devices sync via WebSocket drain + push. New devices receive history from peers.
 5. **Privacy by default** - All payloads are E2E encrypted via Signal Protocol. Server sees only opaque bytes.
 6. **Server knows NOTHING** - Device relationships, friend lists, sync state - all managed peer-to-peer via announcements.
+
+### Hard Constraints
+
+| Constraint | Value | Rationale |
+|------------|-------|-----------|
+| **Network size** | ~150 (Dunbar's number) | Full E2E practical, fan-out manageable |
+| **Data lifecycle** | Explicit ephemeral OR collectable | No ambiguous persistence |
+| **Encryption** | Always E2E | No public/signed-only tier at this scale |
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ DATA LIFECYCLE                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│ Every data model MUST be explicitly:                            │
+│                                                                 │
+│   EPHEMERAL                     COLLECTABLE                     │
+│   ─────────────────────────     ─────────────────────────────   │
+│   • Auto-delete after view      • Persists locally forever      │
+│   • TTL fallback expiration     • User's permanent collection   │
+│   • Stories, messages, snaps    • Saved items, profile, state   │
+│                                                                 │
+│ No default. Forces intentional design.                          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Scaling Limits
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ DUNBAR'S NUMBER (~150) IS THE DESIGN CONSTRAINT                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│ Network   Fan-out   Latency    Status                           │
+│ ────────  ────────  ─────────  ──────────────────────────────   │
+│ 1-10      trivial   instant    Perfect                          │
+│ 10-50     easy      <1s        Great                            │
+│ 50-150    OK        ~3s        Good (Dunbar limit)              │
+│ 150+      heavy     5-10s+     Beyond design scope              │
+│                                                                 │
+│ This protocol optimizes for intimate networks, not broadcasts.  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ### Inspirations
 
@@ -488,11 +533,76 @@ message MessageEntry {
 
 ### Data Stores
 
-| Store | Type | Merge Strategy |
-|-------|------|----------------|
-| **Messages** | G-Set | Union. Dedupe by message_id. Grow-only. |
-| **Devices** | LWW-Map | DeviceAnnounce is **authoritative** - replaces entire list. Latest timestamp wins. |
-| **Friends** | G-Set | Union. Friend relationships accumulate. |
+| Store | Type | Lifecycle | Merge Strategy |
+|-------|------|-----------|----------------|
+| **Messages** | G-Set | Ephemeral | Union. Dedupe by message_id. Auto-delete after view/TTL. |
+| **Collected** | G-Set | Collectable | Union. User's permanent local collection. |
+| **Devices** | LWW-Map | Collectable | DeviceAnnounce replaces entire list. Latest timestamp wins. |
+| **Friends** | G-Set | Collectable | Union. Friend relationships persist. |
+| **Profile** | LWW-Map | Collectable | Latest write wins. Persists. |
+
+### Lifecycle: Ephemeral vs Collectable
+
+```protobuf
+message DataEntry {
+  // ... other fields ...
+
+  Lifecycle lifecycle = 10;
+  uint64 ttl_seconds = 11;       // for ephemeral: time until expiration
+
+  enum Lifecycle {
+    EPHEMERAL = 0;               // auto-delete after view or TTL
+    COLLECTABLE = 1;             // persist locally forever
+  }
+}
+```
+
+**Ephemeral flow:**
+```
+Created → Synced → Viewed → Deleted (or TTL expires → Deleted)
+```
+
+**Collectable flow:**
+```
+Created → Synced → Persists forever (until user explicitly deletes)
+```
+
+### Large Content (Attachments)
+
+For media (images, video), use the attachment pattern to avoid fan-out explosion:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ LARGE CONTENT FLOW                                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│ 1. Upload content ONCE to server attachment endpoint            │
+│    POST /v1/attachments → returns attachment_id                 │
+│                                                                 │
+│ 2. Fan out TINY notification messages (not the content!)        │
+│    { type: CONTENT_REF, attachment_id, decryption_key }        │
+│    ~100 bytes × 150 recipients = 15KB (not 150 × 5MB)          │
+│                                                                 │
+│ 3. Recipients fetch attachment on-demand                        │
+│    GET /v1/attachments/{id} → decrypt with key from message    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+```protobuf
+message ContentReference {
+  string attachment_id = 1;      // server attachment ID
+  bytes decryption_key = 2;      // symmetric key for this content
+  string content_type = 3;       // "image/jpeg", "video/mp4"
+  uint64 size_bytes = 4;         // for UI preview
+}
+```
+
+**Server attachment properties:**
+- TTL-based expiration (not single-use)
+- Multiple downloads allowed
+- Server cannot decrypt (key in E2E message)
+- Stored until TTL expires
 
 **Why Devices use LWW-Map, not G-Set?**
 
@@ -807,20 +917,20 @@ message ClientMessage {
 obscura_db/
 ├── identity/
 │   ├── user_keypair           # Ed25519 identity
+│   ├── recovery_pubkey        # Recovery phrase public key
 │   └── device_id              # This device's UUID
 │
-├── live/                      # < 1 month, full fidelity
-│   ├── messages[]             # G-Set of MessageEntry
-│   ├── devices[]              # G-Set of known devices (yours + friends')
-│   └── friends[]              # G-Set of friend relationships
+├── ephemeral/                 # Auto-delete after view or TTL
+│   ├── messages[]             # Incoming messages (auto-purge)
+│   ├── stories[]              # Stories (24h TTL)
+│   └── reactions[]            # Reactions (follow parent TTL)
 │
-├── archive/                   # > 1 month, compressed
-│   └── {month}.gz             # Compressed message batches
-│
-├── settings/                  # Universal settings (always synced, small)
-│   ├── profile                # Name, avatar, etc.
-│   ├── my_devices[]           # Your linked devices
-│   └── preferences            # App preferences
+├── collected/                 # User's permanent collection
+│   ├── saved_items[]          # Explicitly collected content
+│   ├── friends[]              # Friend list (persists)
+│   ├── devices[]              # Linked devices (persists)
+│   ├── profile                # User profile (persists)
+│   └── streaks[]              # Streak state (persists)
 │
 └── signal/
     ├── sessions/              # Signal sessions (existing)
@@ -828,37 +938,33 @@ obscura_db/
     └── identity_keys/         # Signal identity keys (existing)
 ```
 
-### Storage Tiers
+### Storage Lifecycle
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ LIVE (< 1 month)                                                │
-│ • Full fidelity, uncompressed                                   │
-│ • Fast random access                                            │
-│ • Synced immediately on new device                              │
-└─────────────────────────────────────────────────────────────────┘
-                         │
-                         ▼ (monthly archive job)
-┌─────────────────────────────────────────────────────────────────┐
-│ ARCHIVE (> 1 month)                                             │
-│ • Compressed (gzip)                                             │
-│ • Lazy-loaded on demand (scroll back in history)                │
-│ • Synced in background after live data                          │
+│ EPHEMERAL (auto-delete)                                         │
+├─────────────────────────────────────────────────────────────────┤
+│ • Messages, stories, reactions                                  │
+│ • Deleted after viewed OR TTL expires                           │
+│ • NOT synced to new devices (already gone)                      │
+│ • Keeps storage bounded automatically                           │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
-│ SETTINGS (always synced first)                                  │
-│ • Small payload                                                 │
-│ • CRDT-based (LWW for values, OR-Set for lists)                │
-│ • New device gets this immediately → usable state               │
+│ COLLECTED (persist forever)                                     │
+├─────────────────────────────────────────────────────────────────┤
+│ • User explicitly saved items                                   │
+│ • Friends, devices, profile, streaks                            │
+│ • Synced to new devices                                         │
+│ • User's permanent data - survives everything                   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ### New Device Sync Order
 
-1. **Settings** → Device is immediately usable (knows friends, profile)
-2. **Live messages** → Last month of conversations
-3. **Archive** → Background sync, on-demand load
+1. **Collected data** → Device immediately usable (friends, profile, streaks)
+2. **Pending ephemeral** → Any unviewed content still in TTL window
+3. **Done** → No archive sync needed (ephemeral content is gone)
 
 ## Security Considerations
 

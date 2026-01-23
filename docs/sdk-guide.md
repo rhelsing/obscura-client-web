@@ -6,6 +6,31 @@
 
 ---
 
+## Design Constraints
+
+| Constraint | Value | Rationale |
+|------------|-------|-----------|
+| **Network size** | ~150 (Dunbar) | Full E2E practical, fan-out manageable |
+| **Default persistence** | Ephemeral | Delete after view unless collected |
+| **Encryption** | Always E2E | No public/signed-only tier needed at this scale |
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ EPHEMERAL BY DEFAULT                                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│ Content auto-deletes after viewed (or TTL expires)              │
+│ Not stored permanently unless explicitly "collected"            │
+│                                                                 │
+│ COLLECTABLE (opt-in)                                            │
+│ Recipient can save to their local collection                    │
+│ Their copy, their choice - survives server deletion             │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Developer Experience
 
 ```javascript
@@ -205,28 +230,63 @@ message Association {
 ```javascript
 const schema = client.schema({
 
+  // ─────────────────────────────────────────────────────────────
+  // EPHEMERAL MODELS (auto-delete after view or TTL)
+  // ─────────────────────────────────────────────────────────────
+
   story: {
     fields: {
       content: 'string',
       mediaUrl: 'string?',
-      expiresAt: 'timestamp?',
     },
     has_many: ['comment', 'reaction'],
     sync: 'g-set',
+    ephemeral: true,           // REQUIRED: auto-delete
     ttl: '24h',
+  },
+
+  message: {
+    fields: {
+      text: 'string',
+      mediaUrl: 'string?',
+    },
+    belongs_to: 'conversation',
+    sync: 'g-set',
+    ephemeral: true,           // REQUIRED
+    ttl: '7d',
   },
 
   comment: {
     fields: { text: 'string' },
-    belongs_to: 'story',
-    has_many: ['comment'],  // nested comments
+    belongs_to: ['story', 'comment'],
+    has_many: ['comment'],
     sync: 'g-set',
+    ephemeral: true,           // REQUIRED
+    ttl: '24h',
   },
 
   reaction: {
     fields: { emoji: 'string' },
-    belongs_to: ['story', 'comment'],  // polymorphic
+    belongs_to: ['story', 'comment', 'message'],
     sync: 'lww',
+    ephemeral: true,           // REQUIRED
+    ttl: '24h',
+  },
+
+  // ─────────────────────────────────────────────────────────────
+  // COLLECTABLE MODELS (persist locally forever)
+  // ─────────────────────────────────────────────────────────────
+
+  collected: {
+    fields: {
+      originalType: 'string',
+      originalId: 'string',
+      originalAuthor: 'string',
+      data: 'bytes',
+      collectedAt: 'timestamp',
+    },
+    sync: 'g-set',
+    collectable: true,         // REQUIRED: user's permanent collection
   },
 
   streak: {
@@ -236,20 +296,56 @@ const schema = client.schema({
     },
     belongs_to: 'friend',
     sync: 'lww',
+    collectable: true,         // REQUIRED: persists
   },
 
-  page: {
+  profile: {
     fields: {
-      title: 'string',
-      body: 'string',
-      published: 'boolean',
+      displayName: 'string',
+      avatarUrl: 'string?',
+      bio: 'string?',
     },
-    has_many: ['comment'],
+    sync: 'lww',
+    collectable: true,         // REQUIRED: persists
+  },
+
+  friend: {
+    fields: {
+      status: 'string',        // 'pending', 'accepted'
+      addedAt: 'timestamp',
+    },
     sync: 'g-set',
+    collectable: true,         // REQUIRED: friend list persists
   },
 
 });
 ```
+
+### Persistence Mode (REQUIRED)
+
+Every model MUST declare either `ephemeral: true` or `collectable: true`:
+
+```javascript
+// EPHEMERAL: auto-deletes after view (or TTL)
+story: {
+  ephemeral: true,    // REQUIRED
+  ttl: '24h',         // fallback expiration
+  ...
+}
+
+// COLLECTABLE: persists in user's local collection
+collected: {
+  collectable: true,  // REQUIRED
+  ...
+}
+```
+
+| Mode | Behavior | Use Case |
+|------|----------|----------|
+| `ephemeral: true` | Auto-delete after view or TTL | Stories, messages, snaps |
+| `collectable: true` | Persists locally forever | Saved items, profile, streaks |
+
+**No default.** You must choose. This forces intentional data lifecycle design.
 
 ---
 
@@ -287,6 +383,83 @@ await client.streak.upsert({
 // Query
 const myStories = await client.story.where({ authorId: client.userId });
 const bobsStreak = await client.streak.find({ friendId: 'bob' });
+
+// Collect (save before it expires)
+await client.collected.create({
+  originalType: 'story',
+  originalId: story.id,
+  originalAuthor: story.authorId,
+  data: story,
+});
+
+// View collection
+const myCollection = await client.collected.where({ /* all */ });
+```
+
+---
+
+## Large Content (Attachments)
+
+For media (images, videos), use the attachment pattern:
+
+```javascript
+// Upload content ONCE to server
+const attachment = await client.attachments.upload(imageBlob);
+// Returns: { id: 'xyz', expiresAt: '...' }
+
+// Send tiny notification to all recipients
+await client.story.create({
+  content: 'Check this out!',
+  mediaUrl: attachment.id,   // reference, not the actual bytes
+});
+
+// Recipients fetch attachment on-demand
+const media = await client.attachments.download(story.mediaUrl);
+```
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ LARGE CONTENT FLOW                                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│ WITHOUT attachments:                                            │
+│   150 friends × 5MB image = 750MB uploaded (bad!)               │
+│                                                                 │
+│ WITH attachments:                                               │
+│   1 × 5MB upload + 150 × 100 byte notifications = 5MB (good!)  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Scaling Characteristics
+
+| Network Size | Fan-out | Latency | Battery | Recommendation |
+|--------------|---------|---------|---------|----------------|
+| **1-10** | Trivial | Instant | None | Full E2E, direct |
+| **10-50** | Easy | <1s | Minimal | Full E2E, direct |
+| **50-150** | OK | ~3s | Noticeable | Full E2E, direct |
+| **150+** | Heavy | 5-10s+ | Significant | Consider limits |
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ DUNBAR'S NUMBER (~150) IS THE SWEET SPOT                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│ Below 150:                                                      │
+│   ✓ Full E2E encryption always                                  │
+│   ✓ Direct fan-out works                                        │
+│   ✓ No complex scaling needed                                   │
+│   ✓ Intimate network                                            │
+│                                                                 │
+│ Above 150:                                                      │
+│   • Sends take seconds                                          │
+│   • Battery drain noticeable                                    │
+│   • Message volume grows quadratically                          │
+│   • Consider: is this really a "close network"?                 │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---

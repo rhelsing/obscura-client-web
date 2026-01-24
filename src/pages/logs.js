@@ -130,6 +130,57 @@ export function renderLogs(container) {
     return lines.join('\n');
   }
 
+  // Plain text format for clipboard copy
+  function formatDataPlain(data, indent = 0) {
+    if (data === null || data === undefined) return 'null';
+    if (typeof data !== 'object') return String(data);
+
+    const prefix = '  '.repeat(indent);
+    const lines = [];
+
+    for (const [key, value] of Object.entries(data)) {
+      if (typeof value === 'object' && value !== null) {
+        if (value.type === 'Uint8Array' || value.type === 'ArrayBuffer') {
+          lines.push(`${prefix}${key}: [${value.type}] ${value.length} bytes${value.truncated ? ' (truncated)' : ''}`);
+          lines.push(`${prefix}  ${value.preview}`);
+        } else {
+          lines.push(`${prefix}${key}:`);
+          lines.push(formatDataPlain(value, indent + 1));
+        }
+      } else {
+        lines.push(`${prefix}${key}: ${value}`);
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  function formatEventPlain(event) {
+    const direction = EVENT_DIRECTION[event.eventType] || '';
+    const dirArrow = direction === 'out' ? '↑' : direction === 'in' ? '↓' : direction === 'session' ? '⇄' : '↔';
+    const time = formatTimestamp(event.timestamp);
+    const type = formatEventType(event.eventType);
+
+    let text = `[${time}] ${dirArrow} ${type} (${event.correlationId.slice(-6)})`;
+    if (event.data && Object.keys(event.data).length > 0) {
+      text += '\n' + formatDataPlain(event.data, 1);
+    }
+    return text;
+  }
+
+  function copyLogsToClipboard() {
+    const filteredEvents = getFilteredEvents();
+    const text = filteredEvents.map(formatEventPlain).join('\n\n');
+    navigator.clipboard.writeText(text).then(() => {
+      // Brief visual feedback
+      const btn = container.querySelector('#copy-btn');
+      if (btn) {
+        btn.classList.add('copied');
+        setTimeout(() => btn.classList.remove('copied'), 1500);
+      }
+    });
+  }
+
   function render() {
     const filteredEvents = getFilteredEvents();
 
@@ -145,6 +196,12 @@ export function renderLogs(container) {
               <option value="session" ${filter === 'session' ? 'selected' : ''}>Session</option>
               <option value="gateway" ${filter === 'gateway' ? 'selected' : ''}>Gateway</option>
             </select>
+            <button id="copy-btn" class="log-btn" title="Copy All">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+            </button>
             <button id="refresh-btn" class="log-btn" title="Refresh">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="23 4 23 10 17 10"/>
@@ -230,6 +287,9 @@ export function renderLogs(container) {
       filter = e.target.value;
       render();
     });
+
+    // Copy button
+    container.querySelector('#copy-btn')?.addEventListener('click', copyLogsToClipboard);
 
     // Refresh button
     container.querySelector('#refresh-btn')?.addEventListener('click', async () => {

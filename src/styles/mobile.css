@@ -1609,6 +1609,12 @@ body::before {
   border-color: var(--danger);
 }
 
+.log-btn.copied {
+  background: var(--success);
+  border-color: var(--success);
+  color: white;
+}
+
 .logs-stats {
   display: flex;
   align-items: center;

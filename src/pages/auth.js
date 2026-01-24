@@ -3,11 +3,13 @@ import client from '../api/client.js';
 import { generateRegistrationKeys, storeKeys, storeGeneratedKeys } from '../lib/crypto.js';
 import { signalStore } from '../lib/signalStore.js';
 import { friendStore } from '../lib/friendStore.js';
+import { logger } from '../lib/logger.js';
 
 // Initialize stores for a user - must be called after auth
 function initStoresForUser(userId) {
   signalStore.init(userId);
   friendStore.init(userId);
+  logger.init(userId);
 }
 
 const LOADING_MESSAGES = [

@@ -249,6 +249,10 @@ export function renderApp(container, options = {}) {
   }
 
   function setupGatewayListeners() {
+    // Clear existing listeners to prevent accumulation on reconnect
+    gateway.removeAllListeners('envelope');
+    gateway.removeAllListeners('disconnected');
+
     gateway.on('envelope', async (envelope) => {
       console.log('Received real-time envelope from:', envelope.sourceUserId);
       try {

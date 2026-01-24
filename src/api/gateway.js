@@ -140,6 +140,14 @@ class Gateway {
     };
   }
 
+  removeAllListeners(event) {
+    if (event) {
+      this.listeners.delete(event);
+    } else {
+      this.listeners.clear();
+    }
+  }
+
   emit(event, data) {
     const callbacks = this.listeners.get(event) || [];
     callbacks.forEach(cb => cb(data));

@@ -1,3 +1,5 @@
+import { logger } from '../lib/logger.js';
+
 // Use proxy in development, direct URL in production
 const isDev = import.meta.env.DEV;
 const API_URL = import.meta.env.VITE_API_URL;
@@ -175,12 +177,17 @@ class ObscuraClient {
   }
 
   // Messaging - Send
-  async sendMessage(recipientId, protobufData) {
+  async sendMessage(recipientId, protobufData, correlationId = null) {
     const url = `${API_BASE}/v1/messages/${recipientId}`;
+    const corrId = correlationId || logger.generateCorrelationId();
+
     console.log('=== SENDING MESSAGE ===');
     console.log('Recipient:', recipientId);
     console.log('Protobuf size:', protobufData.length, 'bytes');
     console.log('Protobuf data:', protobufData);
+
+    // Log send complete (encryption already logged by caller)
+    await logger.logSendComplete(recipientId, protobufData.length, corrId);
 
     const response = await fetch(url, {
       method: 'POST',
@@ -199,6 +206,7 @@ class ObscuraClient {
       const error = new Error(`HTTP ${response.status}: ${errorBody}`);
       error.status = response.status;
       error.body = errorBody;
+      await logger.logSendError(recipientId, error, corrId);
       throw error;
     }
 

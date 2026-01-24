@@ -8,6 +8,7 @@ import {
 } from '@privacyresearch/libsignal-protocol-typescript';
 import { signalStore } from './signalStore.js';
 import client from '../api/client.js';
+import { logger } from './logger.js';
 
 const SIGNAL_WHISPER_MESSAGE = 1;
 const SIGNAL_PREKEY_MESSAGE = 3;
@@ -82,6 +83,10 @@ class SessionManager {
 
     const sessionBuilder = new SessionBuilder(this.store, this.getAddress(userId, deviceId));
     await sessionBuilder.processPreKey(device);
+
+    // Log session establishment
+    await logger.logSessionEstablish(userId, !!otp);
+
     return this.getCipher(userId, deviceId);
   }
 
@@ -92,7 +97,8 @@ class SessionManager {
     return this.establishSession(userId, deviceId);
   }
 
-  async encrypt(userId, plaintext) {
+  async encrypt(userId, plaintext, correlationId = null) {
+    const corrId = correlationId || logger.generateCorrelationId();
     const cipher = await this.ensureSession(userId);
 
     let plaintextBuffer;
@@ -105,6 +111,9 @@ class SessionManager {
     } else {
       throw new Error('Plaintext must be ArrayBuffer, Uint8Array, or string');
     }
+
+    // Log encrypt start
+    await logger.logSendEncryptStart(userId, plaintextBuffer.byteLength, corrId);
 
     const ciphertext = await cipher.encrypt(plaintextBuffer);
     const protoType = ciphertext.type === SIGNAL_PREKEY_MESSAGE ? PROTO_PREKEY_MESSAGE : PROTO_ENCRYPTED_MESSAGE;
@@ -123,10 +132,15 @@ class SessionManager {
       throw new Error(`Unexpected ciphertext body type: ${typeof ciphertext.body}`);
     }
 
-    return { type: ciphertext.type, body: bodyBytes, protoType };
+    // Log encrypt complete
+    const signalTypeStr = ciphertext.type === SIGNAL_PREKEY_MESSAGE ? 'PREKEY_MESSAGE' : 'ENCRYPTED_MESSAGE';
+    await logger.logSendEncryptComplete(userId, bodyBytes.length, signalTypeStr, corrId);
+
+    return { type: ciphertext.type, body: bodyBytes, protoType, correlationId: corrId };
   }
 
-  async decrypt(userId, content, messageType) {
+  async decrypt(userId, content, messageType, correlationId = null) {
+    const corrId = correlationId || logger.generateCorrelationId();
     const cipher = this.getCipher(userId);
 
     let contentBuffer;
@@ -140,10 +154,22 @@ class SessionManager {
       throw new Error('Content must be ArrayBuffer, Uint8Array, or base64 string');
     }
 
+    // Log decrypt start
+    const ciphertextSize = contentBuffer.byteLength;
+    await logger.logReceiveDecryptStart(userId, ciphertextSize, messageType, corrId);
+
+    let plaintext;
     if (messageType === PROTO_PREKEY_MESSAGE) {
-      return cipher.decryptPreKeyWhisperMessage(contentBuffer, 'binary');
+      plaintext = await cipher.decryptPreKeyWhisperMessage(contentBuffer, 'binary');
+    } else {
+      plaintext = await cipher.decryptWhisperMessage(contentBuffer, 'binary');
     }
-    return cipher.decryptWhisperMessage(contentBuffer, 'binary');
+
+    // Log decrypt complete
+    const plaintextSize = plaintext instanceof ArrayBuffer ? plaintext.byteLength : plaintext.length;
+    await logger.logReceiveDecryptComplete(userId, plaintextSize, corrId);
+
+    return plaintext;
   }
 
   async clearAllSessions() {

@@ -1,5 +1,6 @@
 import protobuf from 'protobufjs';
 import client from './client.js';
+import { logger } from '../lib/logger.js';
 
 const HEARTBEAT_INTERVAL = 30000; // 30 seconds
 
@@ -163,6 +164,7 @@ class Gateway {
         this.startHeartbeat();
         this.emit('status', { state: 'connected', message: 'Connected to gateway' });
         this.emit('connected');
+        logger.logGatewayConnect();
         resolve();
       };
 
@@ -170,6 +172,7 @@ class Gateway {
         this.stopHeartbeat();
         this.emit('status', { state: 'disconnected', message: `Disconnected (${event.code})` });
         this.emit('disconnected', event);
+        logger.logGatewayDisconnect(event.code, event.reason);
         this.attemptReconnect();
       };
 
@@ -190,6 +193,18 @@ class Gateway {
       const frame = this.WebSocketFrame.decode(new Uint8Array(data));
 
       if (frame.envelope) {
+        // Generate correlation ID for this message flow
+        const correlationId = logger.generateCorrelationId();
+        frame.envelope._correlationId = correlationId;
+
+        // Log envelope receipt
+        logger.logReceiveEnvelope(
+          frame.envelope.id,
+          frame.envelope.sourceUserId,
+          frame.envelope.message?.type,
+          correlationId
+        );
+
         // Emit envelope - caller must ack after successful processing
         this.emit('envelope', frame.envelope);
         // DO NOT auto-ack here - ack only after message is persisted
@@ -200,7 +215,7 @@ class Gateway {
     }
   }
 
-  acknowledge(messageId) {
+  acknowledge(messageId, correlationId = null) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.warn('Cannot acknowledge: WebSocket not open');
       return;
@@ -213,6 +228,7 @@ class Gateway {
     const buffer = this.WebSocketFrame.encode(frame).finish();
     this.ws.send(buffer);
     this.emit('ack', { messageId });
+    logger.logGatewayAck(messageId);
   }
 
   attemptReconnect() {

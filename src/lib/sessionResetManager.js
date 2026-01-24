@@ -6,6 +6,7 @@ import { sessionManager } from './sessionManager.js';
 import { friendStore, FriendStatus } from './friendStore.js';
 import gateway from '../api/gateway.js';
 import client from '../api/client.js';
+import { logger } from './logger.js';
 
 const RESET_COOLDOWN_MS = 30000; // 30 seconds between reset attempts per user
 const RESET_WINDOW_MS = 5000;    // Ignore duplicate resets within 5 seconds
@@ -105,6 +106,9 @@ class SessionResetManager {
       await gateway.loadProto();
 
       // 7. Send SESSION_RESET message (encrypted with their current keys)
+      const correlationId = logger.generateCorrelationId();
+      await logger.logSendStart(toUserId, 'SESSION_RESET', correlationId);
+
       const username = localStorage.getItem('obscura_username') || 'Unknown';
       const clientMsgBytes = gateway.encodeClientMessage({
         type: 'SESSION_RESET',
@@ -113,9 +117,9 @@ class SessionResetManager {
         resetTimestamp: Date.now(),
       });
 
-      const encrypted = await sessionManager.encrypt(toUserId, clientMsgBytes);
+      const encrypted = await sessionManager.encrypt(toUserId, clientMsgBytes, correlationId);
       const protobufData = gateway.encodeOutgoingMessage(encrypted.body, encrypted.protoType);
-      await client.sendMessage(toUserId, protobufData);
+      await client.sendMessage(toUserId, protobufData, correlationId);
 
       console.log(`[SessionReset] Sent SESSION_RESET to ${toUserId}`);
       this.markResetCompleted(toUserId);

@@ -4,6 +4,7 @@ import { showMessageViewer } from '../components/messageViewer.js';
 import client from '../api/client.js';
 import gateway from '../api/gateway.js';
 import { sessionManager } from '../lib/sessionManager.js';
+import { logger } from '../lib/logger.js';
 
 export function renderInbox(container, { friends: initialFriends, pendingMessages: initialMessages, refreshFriends, refreshMessages }) {
   let friends = initialFriends;
@@ -99,12 +100,15 @@ export function renderInbox(container, { friends: initialFriends, pendingMessage
   }
 
   async function acceptFriendRequest(userId) {
+    const correlationId = logger.generateCorrelationId();
+
     try {
       // Update local status
       await friendStore.updateFriendStatus(userId, FriendStatus.ACCEPTED);
 
       // Send acceptance message
       await gateway.loadProto();
+      await logger.logSendStart(userId, 'FRIEND_RESPONSE', correlationId);
 
       const username = localStorage.getItem('obscura_username') || 'Unknown';
 
@@ -115,14 +119,15 @@ export function renderInbox(container, { friends: initialFriends, pendingMessage
         accepted: true,
       });
 
-      const encrypted = await sessionManager.encrypt(userId, clientMessageBytes);
+      const encrypted = await sessionManager.encrypt(userId, clientMessageBytes, correlationId);
       const protobufData = gateway.encodeOutgoingMessage(encrypted.body, encrypted.protoType);
 
-      await client.sendMessage(userId, protobufData);
+      await client.sendMessage(userId, protobufData, correlationId);
 
       refreshFriends();
     } catch (err) {
       console.error('Failed to accept friend request:', err);
+      await logger.logSendError(userId, err, correlationId);
       alert('Failed to accept: ' + err.message);
     }
   }

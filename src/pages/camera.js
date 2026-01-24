@@ -5,6 +5,7 @@ import gateway from '../api/gateway.js';
 import { sessionManager } from '../lib/sessionManager.js';
 import { friendStore, FriendStatus } from '../lib/friendStore.js';
 import { FEATURES } from '../lib/config.js';
+import { logger } from '../lib/logger.js';
 
 export function renderCamera(container, { onSwitchTab, friends, refreshFriends }) {
   let mode = 'photo'; // 'photo' or 'qr'
@@ -362,6 +363,8 @@ export function renderCamera(container, { onSwitchTab, friends, refreshFriends }
     await gateway.loadProto();
 
     const username = localStorage.getItem('obscura_username') || 'Unknown';
+    const correlationId = logger.generateCorrelationId();
+    await logger.logSendStart(targetUserId, 'FRIEND_REQUEST', correlationId);
 
     // Encode friend request message
     const clientMessageBytes = gateway.encodeClientMessage({
@@ -371,10 +374,10 @@ export function renderCamera(container, { onSwitchTab, friends, refreshFriends }
     });
 
     // Encrypt and send
-    const encrypted = await sessionManager.encrypt(targetUserId, clientMessageBytes);
+    const encrypted = await sessionManager.encrypt(targetUserId, clientMessageBytes, correlationId);
     const protobufData = gateway.encodeOutgoingMessage(encrypted.body, encrypted.protoType);
 
-    await client.sendMessage(targetUserId, protobufData);
+    await client.sendMessage(targetUserId, protobufData, correlationId);
 
     // Add to local friend store as pending_sent
     await friendStore.addFriend(targetUserId, 'Unknown', FriendStatus.PENDING_SENT);
@@ -417,8 +420,11 @@ export function renderCamera(container, { onSwitchTab, friends, refreshFriends }
     isSending = true;
     render();
 
+    const correlationId = logger.generateCorrelationId();
+
     try {
       await gateway.loadProto();
+      await logger.logSendStart(selectedFriend.userId, 'IMAGE', correlationId);
 
       let clientMessageBytes;
 
@@ -449,10 +455,10 @@ export function renderCamera(container, { onSwitchTab, friends, refreshFriends }
       }
 
       // Encrypt and send
-      const encrypted = await sessionManager.encrypt(selectedFriend.userId, clientMessageBytes);
+      const encrypted = await sessionManager.encrypt(selectedFriend.userId, clientMessageBytes, correlationId);
       const protobufData = gateway.encodeOutgoingMessage(encrypted.body, encrypted.protoType);
 
-      await client.sendMessage(selectedFriend.userId, protobufData);
+      await client.sendMessage(selectedFriend.userId, protobufData, correlationId);
 
       // Reset state
       capturedPhoto = null;
@@ -464,6 +470,7 @@ export function renderCamera(container, { onSwitchTab, friends, refreshFriends }
       if (onSwitchTab) onSwitchTab('inbox');
     } catch (err) {
       console.error('Failed to send photo:', err);
+      await logger.logSendError(selectedFriend.userId, err, correlationId);
       alert('Failed to send: ' + err.message);
     } finally {
       isSending = false;

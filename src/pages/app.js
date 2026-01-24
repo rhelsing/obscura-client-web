@@ -6,24 +6,28 @@ import { signalStore } from '../lib/signalStore.js';
 import { sessionManager } from '../lib/sessionManager.js';
 import { sessionResetManager } from '../lib/sessionResetManager.js';
 import { replenishPreKeys } from '../lib/crypto.js';
+import { logger } from '../lib/logger.js';
 import { renderAuth } from './auth.js';
 import { renderCamera } from './camera.js';
 import { renderInbox } from './inbox.js';
+import { renderLogs } from './logs.js';
 import QRCode from 'qrcode';
 
 // Initialize stores for a user - must be called after auth
 function initStoresForUser(userId) {
   signalStore.init(userId);
   friendStore.init(userId);
+  logger.init(userId);
 }
 
 export function renderApp(container, options = {}) {
-  let currentTab = 'camera'; // 'camera', 'inbox', 'profile'
+  let currentTab = 'camera'; // 'camera', 'inbox', 'profile', 'logs'
   let friends = [];
   let pendingMessages = [];
   let isConnecting = false;
   let cameraInstance = null;
   let inboxInstance = null;
+  let logsInstance = null;
 
   // Store pending friend ID if provided (for processing after auth)
   if (options.pendingFriendId) {
@@ -62,6 +66,7 @@ export function renderApp(container, options = {}) {
   // ============================================================
 
   async function processEnvelope(envelope) {
+    const correlationId = envelope._correlationId || logger.generateCorrelationId();
     let decryptedBytes;
 
     // Try to decrypt - may fail if sender has stale session
@@ -69,11 +74,13 @@ export function renderApp(container, options = {}) {
       decryptedBytes = await sessionManager.decrypt(
         envelope.sourceUserId,
         envelope.message.content,
-        envelope.message.type
+        envelope.message.type,
+        correlationId
       );
     } catch (err) {
       // Decryption failed - likely key mismatch or missing session
       console.log(`[App] Decryption failed for ${envelope.sourceUserId}:`, err.message);
+      await logger.logReceiveError(envelope.id, envelope.sourceUserId, err, correlationId);
 
       // Check if we already tried to reset for this envelope (prevent loops)
       if (sessionResetManager.hasTriedEnvelope(envelope.id)) {
@@ -91,6 +98,7 @@ export function renderApp(container, options = {}) {
 
       if (resetStarted) {
         console.log(`[App] Session reset initiated for ${envelope.sourceUserId}`);
+        await logger.logSessionReset(envelope.sourceUserId, 'decryption_failed');
       }
 
       // Return null to NOT ack - server will redeliver after reset completes
@@ -100,6 +108,7 @@ export function renderApp(container, options = {}) {
     // Decode
     const clientMsg = gateway.decodeClientMessage(new Uint8Array(decryptedBytes));
     console.log('Processing message:', clientMsg.type, 'from:', envelope.sourceUserId);
+    await logger.logReceiveDecode(envelope.sourceUserId, clientMsg.type, correlationId);
 
     // Route and persist
     if (clientMsg.type === 'SESSION_RESET') {
@@ -115,6 +124,9 @@ export function renderApp(container, options = {}) {
     } else if (clientMsg.type === 'IMAGE' || clientMsg.type === 'TEXT') {
       await handleContentMessage(envelope.sourceUserId, clientMsg);
     }
+
+    // Log receive complete
+    await logger.logReceiveComplete(envelope.id, envelope.sourceUserId, clientMsg.type, correlationId);
 
     // Refresh UI
     await loadFriends();
@@ -183,6 +195,10 @@ export function renderApp(container, options = {}) {
 
     const username = localStorage.getItem('obscura_username') || 'Unknown';
 
+    // Start logging the send flow
+    const correlationId = logger.generateCorrelationId();
+    await logger.logSendStart(targetUserId, 'FRIEND_REQUEST', correlationId);
+
     // Encode friend request message
     const clientMessageBytes = gateway.encodeClientMessage({
       type: 'FRIEND_REQUEST',
@@ -191,10 +207,10 @@ export function renderApp(container, options = {}) {
     });
 
     // Encrypt and send
-    const encrypted = await sessionManager.encrypt(targetUserId, clientMessageBytes);
+    const encrypted = await sessionManager.encrypt(targetUserId, clientMessageBytes, correlationId);
     const protobufData = gateway.encodeOutgoingMessage(encrypted.body, encrypted.protoType);
 
-    await client.sendMessage(targetUserId, protobufData);
+    await client.sendMessage(targetUserId, protobufData, correlationId);
 
     // Add to local friend store as pending_sent
     await friendStore.addFriend(targetUserId, 'Unknown', FriendStatus.PENDING_SENT);
@@ -362,6 +378,16 @@ export function renderApp(container, options = {}) {
             </svg>
             <span>Profile</span>
           </button>
+          <button class="nav-btn ${currentTab === 'logs' ? 'active' : ''}" data-tab="logs">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+              <polyline points="10 9 9 9 8 9"/>
+            </svg>
+            <span>Logs</span>
+          </button>
         </nav>
       </div>
     `;
@@ -427,6 +453,10 @@ export function renderApp(container, options = {}) {
 
       case 'profile':
         renderProfile(content);
+        break;
+
+      case 'logs':
+        logsInstance = renderLogs(content);
         break;
     }
   }

@@ -84,8 +84,11 @@ export function renderApp(container, options = {}) {
 
       // Check if we already tried to reset for this envelope (prevent loops)
       if (sessionResetManager.hasTriedEnvelope(envelope.id)) {
-        console.log(`[App] Already tried reset for envelope ${envelope.id}, skipping`);
-        return null; // Don't ack - let server redeliver later
+        console.log(`[App] Already tried reset for envelope ${envelope.id} - message unrecoverable, acking to clear queue`);
+        // The message was encrypted with OLD keys that are now gone after session reset.
+        // We MUST ack it or it will loop forever. Log as lost and move on.
+        await logger.logMessageLost(envelope.id, envelope.sourceUserId, 'UNKNOWN', err, correlationId);
+        return envelope.id; // ACK the unrecoverable message
       }
 
       sessionResetManager.markEnvelopeTried(envelope.id);

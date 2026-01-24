@@ -415,9 +415,18 @@ export function renderApp(container, options = {}) {
       cameraInstance.cleanup();
       cameraInstance = null;
     }
+    if (logsInstance && currentTab === 'logs') {
+      logsInstance.hide();
+    }
 
     currentTab = tab;
-    renderCurrentTab();
+
+    // Show logs if switching to it and instance exists
+    if (tab === 'logs' && logsInstance) {
+      logsInstance.show();
+    } else {
+      renderCurrentTab();
+    }
 
     // Update nav active state
     container.querySelectorAll('.nav-btn').forEach(btn => {

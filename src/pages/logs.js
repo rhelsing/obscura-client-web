@@ -57,6 +57,7 @@ export function renderLogs(container) {
   let filter = 'all'; // 'all', 'send', 'receive', 'session', 'gateway'
   let expandedEvent = null;
   let unsubscribe = null;
+  let isVisible = true;
 
   async function loadEvents() {
     try {
@@ -74,7 +75,8 @@ export function renderLogs(container) {
       events.unshift(event);
       // Keep max 200
       if (events.length > 200) events.pop();
-      render();
+      // Only render when tab is visible
+      if (isVisible) render();
     });
   }
 
@@ -322,11 +324,18 @@ export function renderLogs(container) {
     subscribe();
   });
 
-  // Return instance for cleanup
+  // Return instance for cleanup and visibility control
   return {
     render,
     cleanup: () => {
       if (unsubscribe) unsubscribe();
+    },
+    hide: () => {
+      isVisible = false;
+    },
+    show: () => {
+      isVisible = true;
+      render();
     },
   };
 }

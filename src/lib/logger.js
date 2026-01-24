@@ -140,6 +140,17 @@ class Logger {
     }, correlationId);
   }
 
+  // Decrypt succeeded but processing failed - message is unrecoverable
+  async logMessageLost(envelopeId, sourceUserId, messageType, error, correlationId) {
+    return this.log(LogEventType.MESSAGE_LOST, {
+      envelopeId,
+      sourceUserId,
+      messageType,
+      error: error.message || String(error),
+      reason: 'Decryption succeeded but processing failed. Signal keys are one-time use, so this message cannot be recovered.',
+    }, correlationId);
+  }
+
   // === SESSION EVENTS ===
 
   async logSessionEstablish(userId, hasPreKey) {

@@ -110,19 +110,28 @@ export function renderApp(container, options = {}) {
     console.log('Processing message:', clientMsg.type, 'from:', envelope.sourceUserId);
     await logger.logReceiveDecode(envelope.sourceUserId, clientMsg.type, correlationId);
 
-    // Route and persist
-    if (clientMsg.type === 'SESSION_RESET') {
-      // Handle session reset request
-      await sessionResetManager.handleSessionReset(envelope.sourceUserId, clientMsg);
-      // Refresh UI since friend list may have changed
-      await loadFriends();
-      if (inboxInstance) inboxInstance.render();
-    } else if (clientMsg.type === 'FRIEND_REQUEST') {
-      await handleFriendRequest(envelope.sourceUserId, clientMsg);
-    } else if (clientMsg.type === 'FRIEND_RESPONSE') {
-      await handleFriendResponse(envelope.sourceUserId, clientMsg);
-    } else if (clientMsg.type === 'IMAGE' || clientMsg.type === 'TEXT') {
-      await handleContentMessage(envelope.sourceUserId, clientMsg);
+    // Route and persist - MUST ack even if processing fails, since decryption keys are consumed
+    // If we don't ack, server will re-deliver but we can't decrypt again (keys are one-time)
+    try {
+      if (clientMsg.type === 'SESSION_RESET') {
+        // Handle session reset request
+        await sessionResetManager.handleSessionReset(envelope.sourceUserId, clientMsg);
+        // Refresh UI since friend list may have changed
+        await loadFriends();
+        if (inboxInstance) inboxInstance.render();
+      } else if (clientMsg.type === 'FRIEND_REQUEST') {
+        await handleFriendRequest(envelope.sourceUserId, clientMsg);
+      } else if (clientMsg.type === 'FRIEND_RESPONSE') {
+        await handleFriendResponse(envelope.sourceUserId, clientMsg);
+      } else if (clientMsg.type === 'IMAGE' || clientMsg.type === 'TEXT') {
+        await handleContentMessage(envelope.sourceUserId, clientMsg);
+      }
+    } catch (processingErr) {
+      // Log but don't throw - we must ack to prevent infinite re-delivery loops
+      // Use MESSAGE_LOST instead of RECEIVE_ERROR to clearly indicate the message is unrecoverable
+      console.error('[App] Message processing failed after decrypt - MESSAGE LOST:', processingErr);
+      await logger.logMessageLost(envelope.id, envelope.sourceUserId, clientMsg.type, processingErr, correlationId);
+      // Continue to ack - the message is lost but at least we won't loop forever
     }
 
     // Log receive complete
@@ -312,6 +321,22 @@ export function renderApp(container, options = {}) {
     // UI refresh handled by caller (processEnvelope)
   }
 
+  // Convert Uint8Array to base64 without call stack overflow
+  function uint8ArrayToBase64(bytes) {
+    // Use Blob + FileReader for large arrays to avoid call stack limits
+    // The spread operator in btoa(String.fromCharCode(...bytes)) crashes on large arrays
+    let binary = '';
+    const len = bytes.length;
+    const chunkSize = 8192; // Process in chunks to avoid stack issues
+    for (let i = 0; i < len; i += chunkSize) {
+      const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+      for (let j = 0; j < chunk.length; j++) {
+        binary += String.fromCharCode(chunk[j]);
+      }
+    }
+    return btoa(binary);
+  }
+
   async function handleContentMessage(fromUserId, msg) {
     // Check if from a friend
     const friend = await friendStore.getFriend(fromUserId);
@@ -326,15 +351,15 @@ export function renderApp(container, options = {}) {
       // Fetch attachment from server
       try {
         const imageBytes = await client.fetchAttachment(msg.attachmentId);
-        const base64 = btoa(String.fromCharCode(...imageBytes));
+        const base64 = uint8ArrayToBase64(imageBytes);
         imageData = `data:${msg.mimeType || 'image/jpeg'};base64,${base64}`;
       } catch (err) {
         console.error('Failed to fetch attachment:', err);
         // Continue without image if attachment fetch fails
       }
     } else if (msg.imageData && msg.imageData.length > 0) {
-      // Legacy: inline image bytes
-      const base64 = btoa(String.fromCharCode(...msg.imageData));
+      // Inline image bytes
+      const base64 = uint8ArrayToBase64(msg.imageData);
       imageData = `data:${msg.mimeType || 'image/jpeg'};base64,${base64}`;
     }
 
@@ -353,6 +378,11 @@ export function renderApp(container, options = {}) {
   }
 
   function onAuthSuccess() {
+    // Initialize stores after fresh login (not just for restored sessions)
+    const userId = client.getUserId();
+    if (userId) {
+      initStoresForUser(userId);
+    }
     init();
   }
 

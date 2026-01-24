@@ -25,6 +25,9 @@ export const LogEventType = {
   RECEIVE_COMPLETE: 'receive_complete',
   RECEIVE_ERROR: 'receive_error',
 
+  // Critical errors
+  MESSAGE_LOST: 'message_lost', // Decrypt succeeded but processing failed - message unrecoverable
+
   // Session events
   SESSION_ESTABLISH: 'session_establish',
   SESSION_RESET: 'session_reset',

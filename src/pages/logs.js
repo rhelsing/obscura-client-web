@@ -19,6 +19,9 @@ const EVENT_COLORS = {
   [LogEventType.RECEIVE_COMPLETE]: '#22c55e',
   [LogEventType.RECEIVE_ERROR]: '#ef4444',
 
+  // Critical errors - bright red
+  [LogEventType.MESSAGE_LOST]: '#dc2626',
+
   // Session events - orange
   [LogEventType.SESSION_ESTABLISH]: '#f97316',
   [LogEventType.SESSION_RESET]: '#fb923c',
@@ -43,6 +46,8 @@ const EVENT_DIRECTION = {
   [LogEventType.RECEIVE_DECODE]: 'in',
   [LogEventType.RECEIVE_COMPLETE]: 'in',
   [LogEventType.RECEIVE_ERROR]: 'in',
+
+  [LogEventType.MESSAGE_LOST]: 'error',
 
   [LogEventType.SESSION_ESTABLISH]: 'session',
   [LogEventType.SESSION_RESET]: 'session',

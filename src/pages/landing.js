@@ -13,6 +13,20 @@ function initStoresForUser(userId) {
   logger.init(userId);
 }
 
+// Convert Uint8Array to base64 without call stack overflow
+function uint8ArrayToBase64(bytes) {
+  let binary = '';
+  const len = bytes.length;
+  const chunkSize = 8192;
+  for (let i = 0; i < len; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+    for (let j = 0; j < chunk.length; j++) {
+      binary += String.fromCharCode(chunk[j]);
+    }
+  }
+  return btoa(binary);
+}
+
 export function renderLanding(container, router) {
   const logs = [];
   const messages = []; // Store received messages
@@ -581,7 +595,7 @@ export function renderLanding(container, router) {
     // Convert image bytes to data URL for display
     let imageDataUrl = null;
     if (clientMsg.type === 'IMAGE' && clientMsg.imageData && clientMsg.imageData.length > 0) {
-      const base64 = btoa(String.fromCharCode(...clientMsg.imageData));
+      const base64 = uint8ArrayToBase64(clientMsg.imageData);
       imageDataUrl = `data:${clientMsg.mimeType || 'image/png'};base64,${base64}`;
     }
 

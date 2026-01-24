@@ -6,6 +6,24 @@ import { logStore, LogEventType } from './logStore.js';
 class Logger {
   constructor() {
     this.enabled = true;
+    this.listeners = new Set();
+  }
+
+  // Subscribe to new log events
+  onLog(callback) {
+    this.listeners.add(callback);
+    return () => this.listeners.delete(callback);
+  }
+
+  // Notify listeners of new log
+  _emit(event) {
+    for (const listener of this.listeners) {
+      try {
+        listener(event);
+      } catch (err) {
+        console.warn('[Logger] Listener error:', err);
+      }
+    }
   }
 
   // Initialize logger for a device
@@ -22,7 +40,9 @@ class Logger {
   async log(eventType, data = {}, correlationId = null) {
     if (!this.enabled) return null;
     try {
-      return await logStore.log(eventType, data, correlationId);
+      const event = await logStore.log(eventType, data, correlationId);
+      this._emit(event);
+      return event;
     } catch (err) {
       console.warn('[Logger] Failed to log event:', err);
       return null;

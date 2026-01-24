@@ -56,8 +56,7 @@ export function renderLogs(container) {
   let events = [];
   let filter = 'all'; // 'all', 'send', 'receive', 'session', 'gateway'
   let expandedEvent = null;
-  let autoRefresh = true;
-  let refreshInterval = null;
+  let unsubscribe = null;
 
   async function loadEvents() {
     try {
@@ -66,6 +65,17 @@ export function renderLogs(container) {
       console.error('Failed to load events:', err);
       events = [];
     }
+  }
+
+  // Subscribe to new log events for real-time updates
+  function subscribe() {
+    unsubscribe = logger.onLog((event) => {
+      // Prepend new event (newest first)
+      events.unshift(event);
+      // Keep max 200
+      if (events.length > 200) events.pop();
+      render();
+    });
   }
 
   function getFilteredEvents() {
@@ -153,10 +163,7 @@ export function renderLogs(container) {
 
         <div class="logs-stats">
           <span class="stat">${filteredEvents.length} events</span>
-          <label class="auto-refresh">
-            <input type="checkbox" id="auto-refresh-toggle" ${autoRefresh ? 'checked' : ''}>
-            Auto-refresh
-          </label>
+          <span class="live-indicator">Live</span>
         </div>
 
         <div class="logs-list" id="logs-list">
@@ -234,18 +241,8 @@ export function renderLogs(container) {
     container.querySelector('#clear-btn')?.addEventListener('click', async () => {
       if (confirm('Clear all logs?')) {
         await logger.clearAll();
-        await loadEvents();
+        events = [];
         render();
-      }
-    });
-
-    // Auto-refresh toggle
-    container.querySelector('#auto-refresh-toggle')?.addEventListener('change', (e) => {
-      autoRefresh = e.target.checked;
-      if (autoRefresh) {
-        startAutoRefresh();
-      } else {
-        stopAutoRefresh();
       }
     });
 
@@ -259,34 +256,17 @@ export function renderLogs(container) {
     });
   }
 
-  function startAutoRefresh() {
-    if (refreshInterval) return;
-    refreshInterval = setInterval(async () => {
-      await loadEvents();
-      render();
-    }, 2000);
-  }
-
-  function stopAutoRefresh() {
-    if (refreshInterval) {
-      clearInterval(refreshInterval);
-      refreshInterval = null;
-    }
-  }
-
   // Initial load
   loadEvents().then(() => {
     render();
-    if (autoRefresh) {
-      startAutoRefresh();
-    }
+    subscribe();
   });
 
   // Return instance for cleanup
   return {
     render,
     cleanup: () => {
-      stopAutoRefresh();
+      if (unsubscribe) unsubscribe();
     },
   };
 }

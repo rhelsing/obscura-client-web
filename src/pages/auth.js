@@ -1,6 +1,14 @@
 // Mobile auth screen (login/register)
 import client from '../api/client.js';
-import { generateRegistrationKeys, storeKeys } from '../lib/crypto.js';
+import { generateRegistrationKeys, storeKeys, storeGeneratedKeys } from '../lib/crypto.js';
+import { signalStore } from '../lib/signalStore.js';
+import { friendStore } from '../lib/friendStore.js';
+
+// Initialize stores for a user - must be called after auth
+function initStoresForUser(userId) {
+  signalStore.init(userId);
+  friendStore.init(userId);
+}
 
 const LOADING_MESSAGES = [
   'Conbobulating...',
@@ -159,7 +167,6 @@ export function renderAuth(container, onSuccess) {
       if (mode === 'register') {
         // Generate Signal Protocol keys
         const keys = await generateRegistrationKeys();
-        storeKeys(keys);
 
         // Register with server
         await client.register({
@@ -171,11 +178,22 @@ export function renderAuth(container, onSuccess) {
           oneTimePreKeys: keys.oneTimePreKeys,
         });
 
+        // Init stores with user ID, then store keys
+        const userId = client.getUserId();
+        initStoresForUser(userId);
+        await storeGeneratedKeys(keys._rawKeys);
+        storeKeys(keys);
+
         // Store username locally
         localStorage.setItem('obscura_username', username);
       } else {
         // Login
         await client.login(username, password);
+
+        // Init stores with user ID
+        const userId = client.getUserId();
+        initStoresForUser(userId);
+
         localStorage.setItem('obscura_username', username);
 
         // Check if we have Signal keys locally - if not, regenerate
@@ -183,6 +201,7 @@ export function renderAuth(container, onSuccess) {
         if (!(await hasSignalKeys())) {
           console.log('No local keys found, regenerating...');
           const keys = await generateRegistrationKeys();
+          await storeGeneratedKeys(keys._rawKeys);
           storeKeys(keys);
           // Upload new keys to server
           await client.uploadKeys({

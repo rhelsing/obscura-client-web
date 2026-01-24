@@ -1,7 +1,15 @@
 import client from '../api/client.js';
 import gateway from '../api/gateway.js';
-import { generateRegistrationKeys, storeKeys } from '../lib/crypto.js';
+import { generateRegistrationKeys, storeKeys, storeGeneratedKeys } from '../lib/crypto.js';
 import { sessionManager } from '../lib/sessionManager.js';
+import { signalStore } from '../lib/signalStore.js';
+import { friendStore } from '../lib/friendStore.js';
+
+// Initialize stores for a user - must be called after auth
+function initStoresForUser(userId) {
+  signalStore.init(userId);
+  friendStore.init(userId);
+}
 
 export function renderLanding(container, router) {
   const logs = [];
@@ -320,7 +328,6 @@ export function renderLanding(container, router) {
       if (authMode === 'register') {
         log('Generating cryptographic keys...', 'info');
         const keys = await generateRegistrationKeys();
-        storeKeys(keys);
 
         log('Registering with server...', 'info');
         const regResult = await client.register({
@@ -333,12 +340,24 @@ export function renderLanding(container, router) {
         });
         console.log('=== REGISTER RESPONSE ===', regResult);
         console.log('=== JWT PAYLOAD ===', client.getTokenPayload());
+
+        // Init stores with user ID, then store keys
+        const userId = client.getUserId();
+        initStoresForUser(userId);
+        await storeGeneratedKeys(keys._rawKeys);
+        storeKeys(keys);
+
         log('Registration successful!', 'success');
       } else {
         log('Authenticating...', 'info');
         const loginResult = await client.login(username, password);
         console.log('=== LOGIN RESPONSE ===', loginResult);
         console.log('=== JWT PAYLOAD ===', client.getTokenPayload());
+
+        // Init stores with user ID
+        const userId = client.getUserId();
+        initStoresForUser(userId);
+
         log('Login successful!', 'success');
       }
     } catch (error) {
@@ -585,6 +604,11 @@ export function renderLanding(container, router) {
 
   // Try to load existing session
   if (client.loadTokens()) {
+    // Init stores with user ID from restored session
+    const userId = client.getUserId();
+    if (userId) {
+      initStoresForUser(userId);
+    }
     log('Session restored from storage', 'success');
   }
 

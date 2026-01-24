@@ -2,6 +2,7 @@
 import client from '../api/client.js';
 import gateway from '../api/gateway.js';
 import { friendStore, FriendStatus } from '../lib/friendStore.js';
+import { signalStore } from '../lib/signalStore.js';
 import { sessionManager } from '../lib/sessionManager.js';
 import { sessionResetManager } from '../lib/sessionResetManager.js';
 import { replenishPreKeys } from '../lib/crypto.js';
@@ -9,6 +10,12 @@ import { renderAuth } from './auth.js';
 import { renderCamera } from './camera.js';
 import { renderInbox } from './inbox.js';
 import QRCode from 'qrcode';
+
+// Initialize stores for a user - must be called after auth
+function initStoresForUser(userId) {
+  signalStore.init(userId);
+  friendStore.init(userId);
+}
 
 export function renderApp(container, options = {}) {
   let currentTab = 'camera'; // 'camera', 'inbox', 'profile'
@@ -27,6 +34,12 @@ export function renderApp(container, options = {}) {
   if (!client.loadTokens() || !client.isAuthenticated()) {
     renderAuth(container, onAuthSuccess);
     return;
+  }
+
+  // Init stores with user ID from restored session
+  const userId = client.getUserId();
+  if (userId) {
+    initStoresForUser(userId);
   }
 
   // Start the app

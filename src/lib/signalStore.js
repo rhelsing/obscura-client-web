@@ -3,7 +3,7 @@
 
 import { Direction } from '@privacyresearch/libsignal-protocol-typescript';
 
-const DB_NAME = 'obscura_signal_store';
+const DB_NAME_PREFIX = 'obscura_signal_store';
 const DB_VERSION = 1;
 
 const STORES = {
@@ -17,13 +17,32 @@ const STORES = {
 class SignalProtocolStore {
   constructor() {
     this.db = null;
+    this.userId = null;
+    this.dbName = null;
+  }
+
+  // Initialize store for a specific user - must be called before any operations
+  init(userId) {
+    if (this.userId === userId && this.db) {
+      return; // Already initialized for this user
+    }
+    // Close existing connection if switching users
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+    }
+    this.userId = userId;
+    this.dbName = `${DB_NAME_PREFIX}_${userId}`;
   }
 
   async open() {
+    if (!this.dbName) {
+      throw new Error('SignalStore not initialized. Call init(userId) first.');
+    }
     if (this.db) return this.db;
 
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      const request = indexedDB.open(this.dbName, DB_VERSION);
 
       request.onupgradeneeded = (event) => {
         const db = event.target.result;

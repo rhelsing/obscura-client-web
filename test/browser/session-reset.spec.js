@@ -41,10 +41,11 @@ async function getUserId(page) {
   return (await page.textContent('#user-id-display')).trim();
 }
 
-async function getIdentityKey(page) {
-  return await page.evaluate(async () => {
+async function getIdentityKey(page, userId) {
+  return await page.evaluate(async (userId) => {
+    const dbName = `obscura_signal_store_${userId}`;
     const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('obscura_signal_store', 1);
+      const request = indexedDB.open(dbName, 1);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve(request.result);
     });
@@ -64,7 +65,7 @@ async function getIdentityKey(page) {
     return Array.from(new Uint8Array(keyPair.pubKey))
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
-  });
+  }, userId);
 }
 
 async function sendFriendRequest(page, targetUserId) {
@@ -115,11 +116,12 @@ async function clearAllIndexedDB(page) {
   });
 }
 
-async function hasFriend(page, friendUserId) {
-  return await page.evaluate(async (friendUserId) => {
+async function hasFriend(page, userId, friendUserId) {
+  return await page.evaluate(async ({ userId, friendUserId }) => {
     try {
+      const dbName = `obscura_friends_${userId}`;
       const db = await new Promise((resolve, reject) => {
-        const request = indexedDB.open('obscura_friends', 1);
+        const request = indexedDB.open(dbName, 1);
         request.onerror = () => reject(request.error);
         request.onsuccess = () => resolve(request.result);
       });
@@ -137,7 +139,7 @@ async function hasFriend(page, friendUserId) {
     } catch {
       return false;
     }
-  }, friendUserId);
+  }, { userId, friendUserId });
 }
 
 async function waitForMessageReceived(page, timeout = 15000) {
@@ -203,7 +205,7 @@ test.describe('Session Reset Protocol', () => {
     // Register both users
     await registerUser(pageAlice, usernameAlice);
     const aliceId = await getUserId(pageAlice);
-    const aliceKeyBefore = await getIdentityKey(pageAlice);
+    const aliceKeyBefore = await getIdentityKey(pageAlice, aliceId);
     console.log('Alice registered:', aliceId);
     console.log('Alice identity key (first 16 chars):', aliceKeyBefore?.substring(0, 16));
 
@@ -264,7 +266,7 @@ test.describe('Session Reset Protocol', () => {
     console.log('Alice logged back in');
 
     // Verify Alice has NEW identity key
-    const aliceKeyAfter = await getIdentityKey(pageAlice);
+    const aliceKeyAfter = await getIdentityKey(pageAlice, aliceId);
     console.log('Alice identity key AFTER (first 16 chars):', aliceKeyAfter?.substring(0, 16));
 
     // Keys should be DIFFERENT (this is the root of the problem)
@@ -272,7 +274,7 @@ test.describe('Session Reset Protocol', () => {
     console.log('CONFIRMED: Alice has NEW identity key (different from before)');
 
     // Verify Alice does NOT have Bob in her friend list anymore
-    const aliceHasBob = await hasFriend(pageAlice, bobId);
+    const aliceHasBob = await hasFriend(pageAlice, aliceId, bobId);
     console.log('Alice has Bob in friend list:', aliceHasBob ? 'YES' : 'NO');
     expect(aliceHasBob).toBe(false);
     console.log('CONFIRMED: Alice lost Bob from friend list');
@@ -397,7 +399,7 @@ test.describe('Session Reset Protocol', () => {
 
     // Alice has no session with Bob, would need to establish new one
     // But she doesn't have Bob in her friend list!
-    const aliceHasBobNow = await hasFriend(pageAlice, bobId);
+    const aliceHasBobNow = await hasFriend(pageAlice, aliceId, bobId);
     console.log('Alice has Bob:', aliceHasBobNow);
 
     // WITH session reset protocol, this scenario should auto-recover:

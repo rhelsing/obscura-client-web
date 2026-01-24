@@ -15,11 +15,9 @@ function arrayBufferToBase64(buffer) {
 }
 
 // Generate all keys needed for registration
-// Returns data formatted for server registration AND stores keys locally
+// Returns data formatted for server registration AND raw keys for local storage
+// Does NOT store keys - caller must call storeGeneratedKeys() after getting user ID
 export async function generateRegistrationKeys() {
-  // Ensure the store is open
-  await signalStore.open();
-
   // Generate identity key pair (Curve25519)
   const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
 
@@ -36,20 +34,12 @@ export async function generateRegistrationKeys() {
     preKeys.push(preKey);
   }
 
-  // Store everything in IndexedDB via signalStore
-  await signalStore.storeIdentityKeyPair(identityKeyPair);
-  await signalStore.storeLocalRegistrationId(registrationId);
-  await signalStore.storeSignedPreKey(signedPreKey.keyId, signedPreKey.keyPair);
-
-  for (const preKey of preKeys) {
-    await signalStore.storePreKey(preKey.keyId, preKey.keyPair);
-  }
-
   // Return data formatted for server registration (base64 encoded public keys)
   // Public keys are 33 bytes (with 0x05 Curve25519 type prefix)
   // Private keys are 32 bytes
   // Signatures are 64 bytes (XEdDSA)
   return {
+    // Server registration data
     identityKey: arrayBufferToBase64(identityKeyPair.pubKey),
     registrationId,
     signedPreKey: {
@@ -61,7 +51,27 @@ export async function generateRegistrationKeys() {
       keyId: pk.keyId,
       publicKey: arrayBufferToBase64(pk.keyPair.pubKey),
     })),
+    // Raw keys for local storage (call storeGeneratedKeys after init)
+    _rawKeys: {
+      identityKeyPair,
+      registrationId,
+      signedPreKey,
+      preKeys,
+    },
   };
+}
+
+// Store generated keys in IndexedDB - call AFTER signalStore.init(userId)
+export async function storeGeneratedKeys(rawKeys) {
+  const { identityKeyPair, registrationId, signedPreKey, preKeys } = rawKeys;
+
+  await signalStore.storeIdentityKeyPair(identityKeyPair);
+  await signalStore.storeLocalRegistrationId(registrationId);
+  await signalStore.storeSignedPreKey(signedPreKey.keyId, signedPreKey.keyPair);
+
+  for (const preKey of preKeys) {
+    await signalStore.storePreKey(preKey.keyId, preKey.keyPair);
+  }
 }
 
 // Store reference to keys in localStorage for backwards compat

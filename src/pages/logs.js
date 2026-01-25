@@ -323,7 +323,8 @@ export function renderLogs(container) {
     });
   }
 
-  // Initial load
+  // Render immediately with empty state, then load data
+  render();
   loadEvents().then(() => {
     render();
     subscribe();

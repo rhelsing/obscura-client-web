@@ -1,5 +1,6 @@
-// Test client that uses REAL crypto/Signal code against real server
-import './setup.js'; // Must be first - polyfills IndexedDB, crypto, etc.
+// v2 Test client that uses REAL crypto/Signal code against real server
+// Uses v2 proto with proper nested message structs
+import '../../../test/helpers/setup.js'; // Must be first - polyfills IndexedDB, crypto, etc.
 
 import { KeyHelper, SessionBuilder, SessionCipher, SignalProtocolAddress } from '@privacyresearch/libsignal-protocol-typescript';
 import protobuf from 'protobufjs';
@@ -190,6 +191,28 @@ const SIGNAL_PREKEY_MESSAGE = 3;
 const PROTO_PREKEY_MESSAGE = 1;
 const PROTO_ENCRYPTED_MESSAGE = 2;
 
+// v2 Message Type enum values (must match proto)
+const MessageType = {
+  TEXT: 0,
+  IMAGE: 1,
+  FRIEND_REQUEST: 2,
+  FRIEND_RESPONSE: 3,
+  SESSION_RESET: 4,
+  // Note: 10 skipped - link "request" is out-of-band (QR/link code)
+  DEVICE_LINK_APPROVAL: 11,
+  DEVICE_ANNOUNCE: 12,
+  HISTORY_CHUNK: 20,
+  SETTINGS_SYNC: 21,
+  READ_SYNC: 22,
+  SYNC_BLOB: 23,
+  SENT_SYNC: 24,
+};
+
+// Reverse map for decoding
+const MessageTypeName = Object.fromEntries(
+  Object.entries(MessageType).map(([k, v]) => [v, k])
+);
+
 export class TestClient {
   constructor(apiUrl) {
     this.apiUrl = apiUrl;
@@ -207,22 +230,164 @@ export class TestClient {
     // Protobuf types (loaded lazily)
     this.proto = null;
     this.clientProto = null;
+
+    // Level 2: Friend tracking (no cheating!)
+    // Map of username -> { username, devices: [{ serverUserId, ... }], status: 'pending'|'accepted' }
+    this.friends = new Map();
+
+    // This device's info (for sharing in friend requests)
+    this.deviceInfo = null;
+
+    // Level 2: Own device tracking (for self-sync)
+    // Array of { serverUserId, deviceName, ... } - other devices belonging to same user
+    this.ownDevices = [];
+
+    // Message history (for sync verification)
+    this.messages = [];
+  }
+
+  // === Level 2: Friend Management ===
+
+  /**
+   * Get this client's device info for sharing in friend requests
+   */
+  getMyDeviceInfo() {
+    if (!this.deviceInfo) {
+      throw new Error('Device not registered yet');
+    }
+    return this.deviceInfo;
+  }
+
+  /**
+   * Get all device userIds for a friend (for fan-out)
+   * @param {string} friendUsername - Friend's username
+   * @returns {string[]} Array of serverUserIds to send to
+   */
+  getFanOutTargets(friendUsername) {
+    const friend = this.friends.get(friendUsername);
+    if (!friend) {
+      throw new Error(`Not friends with ${friendUsername}`);
+    }
+    if (friend.status !== 'accepted') {
+      throw new Error(`Friend request with ${friendUsername} not yet accepted`);
+    }
+    if (!friend.devices || friend.devices.length === 0) {
+      throw new Error(`No devices known for ${friendUsername}`);
+    }
+    return friend.devices.map(d => d.serverUserId);
+  }
+
+  /**
+   * Store a friend (from FRIEND_RESPONSE or after sending accepted response)
+   */
+  storeFriend(username, devices, status = 'accepted') {
+    this.friends.set(username, {
+      username,
+      devices,
+      status,
+      addedAt: Date.now(),
+    });
+    console.log(`  [Friends] Stored ${username} with ${devices.length} device(s), status: ${status}`);
+  }
+
+  /**
+   * Get a friend by username
+   */
+  getFriend(username) {
+    return this.friends.get(username);
+  }
+
+  /**
+   * Check if we're friends with someone
+   */
+  isFriendsWith(username) {
+    const friend = this.friends.get(username);
+    return friend && friend.status === 'accepted';
+  }
+
+  // === Level 2: Own Device Management (for self-sync) ===
+
+  /**
+   * Add an own device (from DEVICE_LINK_APPROVAL or manual setup)
+   * @param {object} deviceInfo - { serverUserId, deviceName, ... }
+   */
+  addOwnDevice(deviceInfo) {
+    // Don't add self
+    if (deviceInfo.serverUserId === this.userId) {
+      return;
+    }
+    // Don't add duplicates
+    const existing = this.ownDevices.find(d => d.serverUserId === deviceInfo.serverUserId);
+    if (!existing) {
+      this.ownDevices.push(deviceInfo);
+      console.log(`  [OwnDevices] Added ${deviceInfo.deviceName || deviceInfo.serverUserId}`);
+    }
+  }
+
+  /**
+   * Set all own devices (from DEVICE_LINK_APPROVAL)
+   * @param {Array} devices - Array of device info objects
+   */
+  setOwnDevices(devices) {
+    this.ownDevices = devices.filter(d => d.serverUserId !== this.userId);
+    console.log(`  [OwnDevices] Set ${this.ownDevices.length} other device(s)`);
+  }
+
+  /**
+   * Get serverUserIds of own devices for self-sync fan-out
+   * @returns {string[]} Array of serverUserIds (excluding self)
+   */
+  getOwnFanOutTargets() {
+    return this.ownDevices.map(d => d.serverUserId);
+  }
+
+  /**
+   * Process a SENT_SYNC message (add to local history as "sent by me")
+   * @param {object} msg - Decoded message with sentSync field
+   */
+  processSentSync(msg) {
+    const sentSync = msg.sentSync;
+    this.messages.push({
+      conversationId: sentSync.conversationId,
+      messageId: sentSync.messageId,
+      timestamp: Number(sentSync.timestamp),
+      content: sentSync.content,
+      isSent: true, // KEY: this is a message WE sent, not received
+    });
+    console.log(`  [SentSync] Added sent message to ${sentSync.conversationId}`);
+  }
+
+  /**
+   * Generate a unique message ID
+   * @returns {string} Unique message ID
+   */
+  generateMessageId() {
+    return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   }
 
   async loadProto() {
     if (this.proto) return;
 
-    const protoPath = join(__dirname, '../../public/proto/obscura/v1/obscura.proto');
-    const clientProtoPath = join(__dirname, '../../public/proto/client/client_message.proto');
+    // Server proto (v1 - for WebSocketFrame, EncryptedMessage)
+    const serverProtoPath = join(__dirname, '../../../public/proto/obscura/v1/obscura.proto');
+    // Client proto (v2 - unified client messages)
+    const clientProtoPath = join(__dirname, '../proto/client.proto');
 
-    this.proto = await protobuf.load(protoPath);
+    this.proto = await protobuf.load(serverProtoPath);
     this.WebSocketFrame = this.proto.lookupType('obscura.v1.WebSocketFrame');
     this.Envelope = this.proto.lookupType('obscura.v1.Envelope');
     this.EncryptedMessage = this.proto.lookupType('obscura.v1.EncryptedMessage');
     this.AckMessage = this.proto.lookupType('obscura.v1.AckMessage');
 
     this.clientProto = await protobuf.load(clientProtoPath);
-    this.ClientMessage = this.clientProto.lookupType('obscura.client.ClientMessage');
+    this.ClientMessage = this.clientProto.lookupType('obscura.v2.ClientMessage');
+    this.DeviceInfo = this.clientProto.lookupType('obscura.v2.DeviceInfo');
+    this.DeviceLinkApproval = this.clientProto.lookupType('obscura.v2.DeviceLinkApproval');
+    this.DeviceAnnounce = this.clientProto.lookupType('obscura.v2.DeviceAnnounce');
+    this.HistoryChunk = this.clientProto.lookupType('obscura.v2.HistoryChunk');
+    this.MessageEntry = this.clientProto.lookupType('obscura.v2.MessageEntry');
+    this.SyncBlob = this.clientProto.lookupType('obscura.v2.SyncBlob');
+    this.SentSync = this.clientProto.lookupType('obscura.v2.SentSync');
   }
 
   // === Key Generation ===
@@ -311,6 +476,14 @@ export class TestClient {
     this.token = result.token;
     this.refreshToken = result.refreshToken;
     this.userId = this.parseUserId(result.token);
+
+    // Store this device's info for Level 2 friend exchange
+    const identityKeyPair = await this.store.getIdentityKeyPair();
+    this.deviceInfo = {
+      serverUserId: this.userId,
+      username: this.username,
+      signalIdentityKey: new Uint8Array(identityKeyPair.pubKey),
+    };
 
     console.log(`Registered user: ${username} (${this.userId})`);
     await sleep(500); // Avoid rate limiting
@@ -583,50 +756,188 @@ export class TestClient {
     return bytes;
   }
 
-  // === Message Encoding/Decoding ===
+  // === Message Encoding/Decoding (v2 with proper nested structs) ===
 
   encodeClientMessage(opts) {
-    const typeMap = {
-      TEXT: 0, IMAGE: 1, FRIEND_REQUEST: 2, FRIEND_RESPONSE: 3, SESSION_RESET: 4,
-      DEVICE_LINK_REQUEST: 10, DEVICE_LINK_APPROVAL: 11, DEVICE_ANNOUNCE: 12
-    };
-    const typeValue = typeMap[opts.type] ?? 0;
+    const typeValue = typeof opts.type === 'string' ? MessageType[opts.type] : opts.type;
 
-    const msg = this.ClientMessage.create({
+    // Build base message
+    const msgData = {
       type: typeValue,
+      timestamp: opts.timestamp || Date.now(),
       text: opts.text || '',
-      imageData: opts.imageData || new Uint8Array(0),
       mimeType: opts.mimeType || '',
-      timestamp: Date.now(),
       displayDuration: opts.displayDuration || 8,
-      username: opts.username || '',
-      accepted: opts.accepted || false,
       attachmentId: opts.attachmentId || '',
       attachmentExpires: opts.attachmentExpires || 0,
-    });
+      username: opts.username || '',
+      accepted: opts.accepted || false,
+      resetReason: opts.resetReason || '',
+    };
 
+    // Add nested structs based on type
+    if (typeValue === MessageType.DEVICE_LINK_APPROVAL && opts.deviceLinkApproval) {
+      msgData.deviceLinkApproval = this.DeviceLinkApproval.create({
+        p2pPublicKey: opts.deviceLinkApproval.p2pPublicKey,
+        p2pPrivateKey: opts.deviceLinkApproval.p2pPrivateKey,
+        recoveryPublicKey: opts.deviceLinkApproval.recoveryPublicKey,
+        challengeResponse: opts.deviceLinkApproval.challengeResponse,
+        ownDevices: (opts.deviceLinkApproval.ownDevices || []).map(d => this.DeviceInfo.create({
+          deviceUuid: d.deviceUUID || d.deviceUuid,
+          serverUserId: d.serverUserId,
+          deviceName: d.deviceName,
+          signalIdentityKey: d.signalIdentityKey,
+        })),
+        friendsExport: opts.deviceLinkApproval.friendsExport || new Uint8Array(0),
+        sessionsExport: opts.deviceLinkApproval.sessionsExport || new Uint8Array(0),
+        trustedIdsExport: opts.deviceLinkApproval.trustedIdsExport || new Uint8Array(0),
+      });
+    }
+
+    // deviceAnnounce can be included in DEVICE_ANNOUNCE, FRIEND_REQUEST, or FRIEND_RESPONSE
+    if (opts.deviceAnnounce) {
+      msgData.deviceAnnounce = this.DeviceAnnounce.create({
+        devices: (opts.deviceAnnounce.devices || []).map(d => this.DeviceInfo.create({
+          deviceUuid: d.deviceUUID || d.deviceUuid,
+          serverUserId: d.serverUserId,
+          deviceName: d.deviceName,
+          signalIdentityKey: d.signalIdentityKey,
+        })),
+        timestamp: opts.deviceAnnounce.timestamp || Date.now(),
+        isRevocation: opts.deviceAnnounce.isRevocation || false,
+        signature: opts.deviceAnnounce.signature || new Uint8Array(0),
+      });
+    }
+
+    if (typeValue === MessageType.HISTORY_CHUNK && opts.historyChunk) {
+      msgData.historyChunk = this.HistoryChunk.create({
+        entries: (opts.historyChunk.entries || []).map(e => this.MessageEntry.create({
+          messageId: e.messageId,
+          timestamp: e.timestamp,
+          content: e.content,
+          authorDeviceId: e.authorDeviceId,
+          signature: e.signature,
+        })),
+        isFinal: opts.historyChunk.isFinal || false,
+      });
+    }
+
+    if (typeValue === MessageType.SETTINGS_SYNC && opts.settingsData) {
+      msgData.settingsData = opts.settingsData;
+    }
+
+    if (typeValue === MessageType.READ_SYNC && opts.readMessageId) {
+      msgData.readMessageId = opts.readMessageId;
+    }
+
+    if (typeValue === MessageType.SYNC_BLOB && opts.syncBlob) {
+      msgData.syncBlob = this.SyncBlob.create({
+        compressedData: opts.syncBlob.compressedData,
+      });
+    }
+
+    if (typeValue === MessageType.SENT_SYNC && opts.sentSync) {
+      msgData.sentSync = this.SentSync.create({
+        conversationId: opts.sentSync.conversationId,
+        messageId: opts.sentSync.messageId,
+        timestamp: opts.sentSync.timestamp,
+        content: typeof opts.sentSync.content === 'string'
+          ? new TextEncoder().encode(opts.sentSync.content)
+          : opts.sentSync.content,
+      });
+    }
+
+    const msg = this.ClientMessage.create(msgData);
     return this.ClientMessage.encode(msg).finish();
   }
 
   decodeClientMessage(bytes) {
     const msg = this.ClientMessage.decode(bytes);
-    const typeMap = {
-      0: 'TEXT', 1: 'IMAGE', 2: 'FRIEND_REQUEST', 3: 'FRIEND_RESPONSE', 4: 'SESSION_RESET',
-      10: 'DEVICE_LINK_REQUEST', 11: 'DEVICE_LINK_APPROVAL', 12: 'DEVICE_ANNOUNCE'
-    };
+    const typeName = MessageTypeName[msg.type] || 'TEXT';
 
-    return {
-      type: typeMap[msg.type] || 'TEXT',
-      text: msg.text,
-      imageData: msg.imageData,
-      mimeType: msg.mimeType,
-      timestamp: msg.timestamp,
+    const result = {
+      type: typeName,
+      timestamp: Number(msg.timestamp) || 0,
+      text: msg.text || '',
+      mimeType: msg.mimeType || '',
       displayDuration: msg.displayDuration || 8,
-      username: msg.username || '',
-      accepted: msg.accepted || false,
       attachmentId: msg.attachmentId || '',
       attachmentExpires: Number(msg.attachmentExpires) || 0,
+      username: msg.username || '',
+      accepted: msg.accepted || false,
+      resetReason: msg.resetReason || '',
     };
+
+    // Extract nested structs
+    if (msg.deviceLinkApproval) {
+      result.deviceLinkApproval = {
+        p2pPublicKey: msg.deviceLinkApproval.p2pPublicKey,
+        p2pPrivateKey: msg.deviceLinkApproval.p2pPrivateKey,
+        recoveryPublicKey: msg.deviceLinkApproval.recoveryPublicKey,
+        challengeResponse: msg.deviceLinkApproval.challengeResponse,
+        ownDevices: (msg.deviceLinkApproval.ownDevices || []).map(d => ({
+          deviceUUID: d.deviceUuid,
+          serverUserId: d.serverUserId,
+          deviceName: d.deviceName,
+          signalIdentityKey: d.signalIdentityKey,
+        })),
+        friendsExport: msg.deviceLinkApproval.friendsExport,
+        sessionsExport: msg.deviceLinkApproval.sessionsExport,
+        trustedIdsExport: msg.deviceLinkApproval.trustedIdsExport,
+      };
+    }
+
+    if (msg.deviceAnnounce) {
+      result.deviceAnnounce = {
+        devices: (msg.deviceAnnounce.devices || []).map(d => ({
+          deviceUUID: d.deviceUuid,
+          serverUserId: d.serverUserId,
+          deviceName: d.deviceName,
+          signalIdentityKey: d.signalIdentityKey,
+        })),
+        timestamp: Number(msg.deviceAnnounce.timestamp) || 0,
+        isRevocation: msg.deviceAnnounce.isRevocation || false,
+        signature: msg.deviceAnnounce.signature,
+      };
+    }
+
+    if (msg.historyChunk) {
+      result.historyChunk = {
+        entries: (msg.historyChunk.entries || []).map(e => ({
+          messageId: e.messageId,
+          timestamp: Number(e.timestamp) || 0,
+          content: e.content,
+          authorDeviceId: e.authorDeviceId,
+          signature: e.signature,
+        })),
+        isFinal: msg.historyChunk.isFinal || false,
+      };
+    }
+
+    if (msg.settingsData && msg.settingsData.length > 0) {
+      result.settingsData = msg.settingsData;
+    }
+
+    if (msg.readMessageId) {
+      result.readMessageId = msg.readMessageId;
+    }
+
+    if (msg.syncBlob) {
+      result.syncBlob = {
+        compressedData: msg.syncBlob.compressedData,
+      };
+    }
+
+    if (msg.sentSync) {
+      result.sentSync = {
+        conversationId: msg.sentSync.conversationId,
+        messageId: msg.sentSync.messageId,
+        timestamp: Number(msg.sentSync.timestamp) || 0,
+        content: msg.sentSync.content,
+      };
+    }
+
+    return result;
   }
 
   encodeOutgoingMessage(body, protoType) {
@@ -660,14 +971,174 @@ export class TestClient {
       throw new Error(`Failed to send message: HTTP ${response.status}`);
     }
 
-    console.log(`Sent ${opts.type} to ${targetUserId}`);
+    const typeName = typeof opts.type === 'string' ? opts.type : MessageTypeName[opts.type];
+    console.log(`Sent ${typeName} to ${targetUserId}`);
   }
 
-  async sendFriendRequest(targetUserId) {
+  /**
+   * Send FRIEND_REQUEST with our device info (Level 2 compliant)
+   * Per protocol-spec: Includes sender's device list so recipient knows where to respond
+   */
+  async sendFriendRequest(targetUserId, targetUsername) {
+    // Include our device info so recipient knows our devices
+    const myDeviceAnnounce = {
+      devices: [{
+        deviceUUID: this.userId, // Using userId as device identifier for now
+        serverUserId: this.userId,
+        deviceName: this.username,
+        signalIdentityKey: this.deviceInfo.signalIdentityKey,
+      }],
+      timestamp: Date.now(),
+      isRevocation: false,
+      signature: new Uint8Array(64), // Placeholder - would be signed in real impl
+    };
+
     await this.sendMessage(targetUserId, {
       type: 'FRIEND_REQUEST',
       username: this.username,
+      deviceAnnounce: myDeviceAnnounce,
     });
+
+    // Mark as pending friend
+    this.friends.set(targetUsername, {
+      username: targetUsername,
+      devices: [], // Don't know their devices yet
+      status: 'pending_outgoing',
+      addedAt: Date.now(),
+    });
+
+    console.log(`  [Friends] Sent FRIEND_REQUEST to ${targetUsername}`);
+  }
+
+  /**
+   * Send FRIEND_RESPONSE with our device info (Level 2 compliant)
+   * Per protocol-spec: If accepted, includes our device list
+   */
+  async sendFriendResponse(targetUserId, targetUsername, accepted) {
+    const myDeviceAnnounce = accepted ? {
+      devices: [{
+        deviceUUID: this.userId,
+        serverUserId: this.userId,
+        deviceName: this.username,
+        signalIdentityKey: this.deviceInfo.signalIdentityKey,
+      }],
+      timestamp: Date.now(),
+      isRevocation: false,
+      signature: new Uint8Array(64),
+    } : null;
+
+    await this.sendMessage(targetUserId, {
+      type: 'FRIEND_RESPONSE',
+      username: this.username,
+      accepted,
+      deviceAnnounce: myDeviceAnnounce,
+    });
+
+    if (accepted) {
+      // Get their devices from the pending request we stored
+      const pending = this.friends.get(targetUsername);
+      if (pending && pending.devices) {
+        this.storeFriend(targetUsername, pending.devices, 'accepted');
+      }
+    }
+
+    console.log(`  [Friends] Sent FRIEND_RESPONSE (${accepted ? 'accepted' : 'rejected'}) to ${targetUsername}`);
+  }
+
+  /**
+   * Process incoming FRIEND_REQUEST
+   * Returns the parsed request for the test to decide how to respond
+   */
+  processFriendRequest(msg) {
+    const senderUsername = msg.username;
+    const senderDevices = msg.deviceAnnounce?.devices || [];
+
+    // Store as pending incoming
+    this.friends.set(senderUsername, {
+      username: senderUsername,
+      devices: senderDevices.map(d => ({
+        serverUserId: d.serverUserId,
+        deviceName: d.deviceName,
+        signalIdentityKey: d.signalIdentityKey,
+      })),
+      status: 'pending_incoming',
+      addedAt: Date.now(),
+    });
+
+    console.log(`  [Friends] Received FRIEND_REQUEST from ${senderUsername} (${senderDevices.length} device(s))`);
+
+    return {
+      username: senderUsername,
+      devices: senderDevices,
+      sourceUserId: msg.sourceUserId,
+    };
+  }
+
+  /**
+   * Process incoming FRIEND_RESPONSE
+   * Updates friend status and stores their devices
+   */
+  processFriendResponse(msg) {
+    const senderUsername = msg.username;
+    const accepted = msg.accepted;
+    const senderDevices = msg.deviceAnnounce?.devices || [];
+
+    if (accepted) {
+      this.storeFriend(senderUsername, senderDevices.map(d => ({
+        serverUserId: d.serverUserId,
+        deviceName: d.deviceName,
+        signalIdentityKey: d.signalIdentityKey,
+      })), 'accepted');
+      console.log(`  [Friends] ${senderUsername} ACCEPTED friend request (${senderDevices.length} device(s))`);
+    } else {
+      this.friends.delete(senderUsername);
+      console.log(`  [Friends] ${senderUsername} REJECTED friend request`);
+    }
+
+    return { username: senderUsername, accepted, devices: senderDevices };
+  }
+
+  /**
+   * Send message to a friend using their device list (Level 2 - no cheating!)
+   * Fans out to all their devices AND syncs to own devices
+   */
+  async sendToFriend(friendUsername, opts) {
+    const targets = this.getFanOutTargets(friendUsername);
+    const messageId = this.generateMessageId();
+    const timestamp = Date.now();
+
+    // Send to friend's devices
+    for (const targetUserId of targets) {
+      await this.sendMessage(targetUserId, opts);
+    }
+
+    // Store locally as sent message
+    this.messages.push({
+      conversationId: friendUsername,
+      messageId,
+      timestamp,
+      content: opts.text || opts.content,
+      isSent: true,
+    });
+
+    // Self-sync: send SENT_SYNC to own devices (Level 2 compliant)
+    const ownTargets = this.getOwnFanOutTargets();
+    if (ownTargets.length > 0) {
+      for (const targetUserId of ownTargets) {
+        await this.sendMessage(targetUserId, {
+          type: 'SENT_SYNC',
+          sentSync: {
+            conversationId: friendUsername,
+            messageId,
+            timestamp,
+            content: opts.text || opts.content,
+          },
+        });
+      }
+      console.log(`  [SentSync] Synced to ${ownTargets.length} own device(s)`);
+    }
+
+    console.log(`  [Friends] Sent ${opts.type} to ${friendUsername} (${targets.length} device(s))`);
   }
 
   // === Attachments ===
@@ -753,3 +1224,6 @@ export class TestClient {
 export function randomUsername() {
   return 'test_user_' + randomToken();
 }
+
+// Export message type constants for tests
+export { MessageType, MessageTypeName };

@@ -7,6 +7,8 @@ import { FriendManager } from './friends.js';
 import { DeviceManager, parseLinkCode, buildLinkApproval } from './devices.js';
 import { Messenger, MessageType } from './messenger.js';
 import { AttachmentManager } from './attachments.js';
+import { createStore } from './store.js';
+import { createMessageStore } from '../store/messageStore.js';
 import { compress, decompress } from '../crypto/compress.js';
 import {
   signWithRecoveryPhrase,
@@ -56,15 +58,19 @@ export class ObscuraClient {
       apiUrl: this.apiUrl,
       store: this.store,
       token: this.token,
+      protoBasePath: opts.protoBasePath,
     });
     this.attachments = new AttachmentManager({
       apiUrl: this.apiUrl,
       token: this.token,
     });
 
-    // WebSocket
+    // WebSocket - detect dev mode and use /ws proxy
     this.ws = null;
-    this.wsUrl = this.apiUrl.replace('https://', 'wss://');
+    const isBrowser = typeof window !== 'undefined';
+    const isDev = isBrowser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    this.wsUrl = isDev ? `ws://${window.location.host}/ws` : this.apiUrl.replace('https://', 'wss://');
+    console.log('[ObscuraClient] WS setup:', { isBrowser, isDev, apiUrl: this.apiUrl, wsUrl: this.wsUrl });
     this._reconnectAttempts = 0;
     this._shouldReconnect = true;
 
@@ -84,12 +90,82 @@ export class ObscuraClient {
       error: [],
     };
 
-    // Message history
+    // Message history (in-memory cache, persisted to IndexedDB)
     this.messages = [];
+
+    // Message store for persistence (browser only)
+    this.messageStore = null;
+    if (typeof window !== 'undefined' && typeof indexedDB !== 'undefined') {
+      this.messageStore = createMessageStore(this.username || this.userId || 'default');
+    }
 
     // ORM Layer (initialized by schema())
     this._ormModels = null;
     this._ormSyncManager = null;
+
+    // Auto-save session in browser
+    if (typeof window !== 'undefined') {
+      this.saveSession();
+    }
+  }
+
+  /**
+   * Save session to localStorage
+   */
+  saveSession() {
+    if (typeof localStorage === 'undefined') return;
+    const session = {
+      apiUrl: this.apiUrl,
+      token: this.token,
+      refreshToken: this.refreshToken,
+      userId: this.userId,
+      username: this.username,
+      deviceUsername: this.deviceUsername,
+      deviceUUID: this.deviceUUID,
+    };
+    localStorage.setItem('obscura_session', JSON.stringify(session));
+  }
+
+  /**
+   * Clear session from localStorage
+   */
+  static clearSession() {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('obscura_session');
+    }
+  }
+
+  /**
+   * Restore session from localStorage
+   * @returns {ObscuraClient|null}
+   */
+  static restoreSession() {
+    if (typeof localStorage === 'undefined') return null;
+
+    const saved = localStorage.getItem('obscura_session');
+    if (!saved) return null;
+
+    try {
+      const session = JSON.parse(saved);
+      if (!session.token || !session.username) return null;
+
+      // Recreate store from IndexedDB using username
+      const store = createStore(session.username);
+
+      return new ObscuraClient({
+        apiUrl: session.apiUrl,
+        store,
+        token: session.token,
+        refreshToken: session.refreshToken,
+        userId: session.userId,
+        username: session.username,
+        deviceUsername: session.deviceUsername,
+        deviceUUID: session.deviceUUID,
+      });
+    } catch (e) {
+      console.warn('Failed to restore session:', e);
+      return null;
+    }
   }
 
   /**
@@ -130,6 +206,43 @@ export class ObscuraClient {
     const identityKey = this.deviceInfo?.signalIdentityKey;
     if (!identityKey) return null;
     return generateVerifyCode(identityKey);
+  }
+
+  // === Message Persistence ===
+
+  /**
+   * Get messages for a conversation (from IndexedDB or in-memory)
+   * @param {string} conversationId - Friend username
+   * @returns {Promise<Array>} Messages sorted by timestamp
+   */
+  async getMessages(conversationId) {
+    if (this.messageStore) {
+      return this.messageStore.getMessages(conversationId);
+    }
+    // Fallback to in-memory
+    return this.messages.filter(m =>
+      m.from === conversationId || m.to === conversationId || m.conversationId === conversationId
+    );
+  }
+
+  /**
+   * Persist a message to IndexedDB (and in-memory cache)
+   * @private
+   */
+  async _persistMessage(conversationId, message) {
+    // Add to in-memory cache
+    this.messages.push(message);
+
+    // Persist to IndexedDB
+    if (this.messageStore) {
+      await this.messageStore.addMessage(conversationId, {
+        messageId: message.messageId || `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        content: message.text || message.content,
+        timestamp: message.timestamp || Date.now(),
+        isSent: message.isSent || false,
+        authorDeviceId: message.authorDeviceId || this.deviceUUID,
+      });
+    }
   }
 
   /**
@@ -190,14 +303,18 @@ export class ObscuraClient {
 
     return new Promise((resolve, reject) => {
       const url = `${this.wsUrl}/v1/gateway?token=${encodeURIComponent(this.token)}`;
+      console.log('[ObscuraClient] Connecting to WebSocket:', url);
+      console.log('[ObscuraClient] wsUrl:', this.wsUrl);
       this.ws = new WS(url);
 
       const onOpen = () => {
+        console.log('[ObscuraClient] WebSocket connected!');
         this._reconnectAttempts = 0;
         resolve();
       };
 
       const onError = (err) => {
+        console.log('[ObscuraClient] WebSocket error:', err);
         if (this._reconnectAttempts === 0) {
           reject(err);
         }
@@ -387,11 +504,14 @@ export class ObscuraClient {
       case 'TEXT':
       case 'IMAGE':
       default:
-        this.messages.push({
+        // Persist received message - use sourceUserId as conversationId
+        // (we'll need to map this to username when displaying)
+        this._persistMessage(msg.sourceUserId, {
           from: msg.sourceUserId,
           type: msg.type,
           text: msg.text,
           timestamp: msg.timestamp,
+          isSent: false,
         });
         this._emit('message', msg);
         break;
@@ -481,8 +601,8 @@ export class ObscuraClient {
       await this.messenger.sendMessage(targetUserId, msgOpts);
     }
 
-    // Store locally
-    this.messages.push({
+    // Store locally and persist to IndexedDB
+    await this._persistMessage(friendUsername, {
       to: friendUsername,
       messageId,
       timestamp,
@@ -800,11 +920,12 @@ export class ObscuraClient {
    */
   _processSentSync(msg) {
     const sync = msg.sentSync;
-    this.messages.push({
+    // Persist to IndexedDB using conversationId as the key
+    this._persistMessage(sync.conversationId, {
       conversationId: sync.conversationId,
       messageId: sync.messageId,
       timestamp: sync.timestamp,
-      content: sync.content,
+      text: typeof sync.content === 'string' ? sync.content : new TextDecoder().decode(sync.content),
       isSent: true,
     });
   }

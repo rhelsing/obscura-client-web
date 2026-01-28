@@ -13,9 +13,9 @@ export function render({ myLink = '', error = null, success = false, loading = f
     return `
       <div class="view add-friend">
         <h1>Friend Request Sent!</h1>
-        <div class="success">
+        <ry-alert type="success">
           <p>Waiting for them to accept...</p>
-        </div>
+        </ry-alert>
         <button id="done-btn">Done</button>
       </div>
     `;
@@ -25,35 +25,41 @@ export function render({ myLink = '', error = null, success = false, loading = f
     <div class="view add-friend">
       <h1>Add Friend</h1>
 
-      <section class="my-link-section">
-        <h2>Share Your Link</h2>
-        <div class="qr-placeholder" id="my-qr">
-          <div class="qr-fallback">${myLink}</div>
-        </div>
-        <div class="link-display">
-          <input type="text" readonly value="${myLink}" id="my-link-input" />
-          <button id="copy-btn" class="secondary">Copy</button>
-        </div>
-      </section>
+      <stack gap="lg">
+        <card>
+          <h2>Share Your Link</h2>
+          <div class="qr-placeholder" id="my-qr" style="background: var(--ry-color-bg-secondary); padding: var(--ry-space-4); border-radius: var(--ry-radius-md); text-align: center; margin: var(--ry-space-3) 0">
+            <span style="font-family: monospace; font-size: var(--ry-text-sm); word-break: break-all">${myLink}</span>
+          </div>
+          <cluster>
+            <input type="text" readonly value="${myLink}" id="my-link-input" style="flex: 1" />
+            <button variant="secondary" id="copy-btn"><ry-icon name="copy"></ry-icon> Copy</button>
+          </cluster>
+        </card>
 
-      <section class="add-section">
-        <h2>Add Someone</h2>
-        ${error ? `<div class="error">${error}</div>` : ''}
-        <form id="add-form">
-          <input
-            type="text"
-            id="friend-link"
-            placeholder="Paste friend's link"
-            required
-            ${loading ? 'disabled' : ''}
-          />
-          <button type="submit" ${loading ? 'disabled' : ''}>
-            ${loading ? 'Sending...' : 'Send Request'}
-          </button>
-        </form>
-      </section>
+        <card>
+          <h2>Add Someone</h2>
+          ${error ? `<ry-alert type="danger">${error}</ry-alert>` : ''}
+          <form id="add-form">
+            <stack gap="md">
+              <ry-field label="Friend's Link">
+                <input
+                  type="text"
+                  id="friend-link"
+                  placeholder="Paste friend's link"
+                  required
+                  ${loading ? 'disabled' : ''}
+                />
+              </ry-field>
+              <button type="submit" ${loading ? 'disabled' : ''}>
+                ${loading ? 'Sending...' : 'Send Request'}
+              </button>
+            </stack>
+          </form>
+        </card>
+      </stack>
 
-      <p class="link"><a href="/friends" data-navigo>Back to Friends</a></p>
+      <p class="link"><a href="/friends" data-navigo><ry-icon name="chevron-left"></ry-icon> Back to Friends</a></p>
     </div>
   `;
 }

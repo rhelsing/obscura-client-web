@@ -5,10 +5,23 @@
  * Pure functional - does NOT auto-store tokens (auth layer handles that)
  */
 
-// Get API URL from environment
-const API_URL = typeof process !== 'undefined' && process.env?.VITE_API_URL
-  ? process.env.VITE_API_URL
-  : (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_API_URL : null);
+// Get API URL - use proxy in browser dev mode, direct URL in Node.js tests
+const API_URL = (() => {
+  // Node.js (tests)
+  if (typeof process !== 'undefined' && process.env?.VITE_API_URL) {
+    return process.env.VITE_API_URL;
+  }
+  // Browser
+  if (typeof import.meta !== 'undefined') {
+    // Use /api proxy in dev mode to avoid CORS
+    if (import.meta.env?.DEV) {
+      return '/api';
+    }
+    // Production - use full URL
+    return import.meta.env?.VITE_API_URL;
+  }
+  return null;
+})();
 
 /**
  * Create an API client instance
@@ -257,6 +270,12 @@ export function createClient(baseUrl = API_URL) {
      * Get WebSocket gateway URL
      */
     getGatewayUrl() {
+      // In dev mode with proxy, use /ws proxy path
+      if (baseUrl === '/api') {
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${wsProtocol}//${window.location.host}/ws/v1/gateway?token=${encodeURIComponent(token)}`;
+      }
+      // Direct connection
       const wsBase = baseUrl.replace('https://', 'wss://').replace('http://', 'ws://');
       return `${wsBase}/v1/gateway?token=${encodeURIComponent(token)}`;
     },

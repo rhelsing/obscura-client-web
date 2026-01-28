@@ -3,7 +3,9 @@
  * - List all groups
  * - Create new group button
  */
-import { navigate } from '../index.js';
+import { navigate, clearClient } from '../index.js';
+import { renderNav, initNav } from '../components/Nav.js';
+import { ObscuraClient } from '../../lib/ObscuraClient.js';
 
 let cleanup = null;
 
@@ -15,30 +17,35 @@ export function render({ groups = [], loading = false } = {}) {
   return `
     <div class="view group-list">
       <header>
-        <a href="/messages" data-navigo class="back">← Back</a>
+        <a href="/messages" data-navigo class="back"><ry-icon name="chevron-left"></ry-icon> Back</a>
         <h1>Groups</h1>
       </header>
 
       ${groups.length === 0 ? `
         <div class="empty">
           <p>No groups yet</p>
-          <a href="/groups/new" data-navigo class="button">Create a Group</a>
+          <a href="/groups/new" data-navigo><button>Create a Group</button></a>
         </div>
       ` : `
-        <ul class="group-items">
+        <stack gap="sm" class="group-items">
           ${groups.map(g => `
-            <li class="group-item" data-id="${g.id}">
-              <div class="group-info">
-                <span class="group-name">${escapeHtml(g.data.name)}</span>
-                <span class="member-count">${getMemberCount(g.data.members)} members</span>
-              </div>
-              <span class="arrow">→</span>
-            </li>
+            <card class="group-item" data-id="${g.id}">
+              <cluster>
+                <ry-icon name="star"></ry-icon>
+                <stack gap="none" style="flex: 1">
+                  <strong>${escapeHtml(g.data.name)}</strong>
+                  <span style="color: var(--ry-color-text-muted); font-size: var(--ry-text-sm)">${getMemberCount(g.data.members)} members</span>
+                </stack>
+                <ry-icon name="chevron-right"></ry-icon>
+              </cluster>
+            </card>
           `).join('')}
-        </ul>
+        </stack>
       `}
 
       <a href="/groups/new" data-navigo class="fab">+</a>
+
+      ${renderNav('groups')}
     </div>
   `;
 }
@@ -75,6 +82,14 @@ export async function mount(container, client, router) {
       item.addEventListener('click', () => {
         navigate(`/groups/${item.dataset.id}`);
       });
+    });
+
+    // Init nav
+    initNav(container, () => {
+      client.disconnect();
+      ObscuraClient.clearSession();
+      clearClient();
+      navigate('/login');
     });
 
     router.updatePageLinks();

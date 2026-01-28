@@ -26,51 +26,60 @@ export function render({ story = null, loading = false, error = null } = {}) {
   return `
     <div class="view story-detail">
       <header>
-        <a href="/stories" data-navigo class="back">← Back</a>
+        <a href="/stories" data-navigo class="back"><ry-icon name="chevron-left"></ry-icon> Back</a>
       </header>
 
-      <article class="story-full">
-        <div class="story-header">
-          <span class="author">${story.authorName || 'Unknown'}</span>
-          <span class="time">${formatTime(story.timestamp)}</span>
-        </div>
+      <card>
+        <cluster>
+          <strong>${story.authorName || 'Unknown'}</strong>
+          <span style="color: var(--ry-color-text-muted)">${formatTime(story.timestamp)}</span>
+        </cluster>
 
-        <div class="story-content">${escapeHtml(story.data.content)}</div>
+        <p style="margin: var(--ry-space-3) 0">${escapeHtml(story.data.content)}</p>
 
-        ${story.data.mediaUrl ? `
+        ${story.mediaBlobUrl ? `
           <div class="story-media">
-            <img src="${story.data.mediaUrl}" alt="" />
+            <img src="${story.mediaBlobUrl}" alt="" style="width: 100%; border-radius: var(--ry-radius-md)" />
+          </div>
+        ` : story.hasMedia ? `
+          <div class="story-media">
+            <button variant="secondary" size="sm" id="load-media-btn">
+              <ry-icon name="download"></ry-icon> Load Media
+            </button>
           </div>
         ` : ''}
 
-        <div class="reactions-section">
-          <div class="reactions-list">
-            ${formatReactionGroups(reactions)}
-          </div>
-          <div class="reaction-picker">
-            ${['❤️', '🔥', '😂', '😮', '😢', '👏'].map(emoji => `
-              <button class="reaction-btn" data-emoji="${emoji}">${emoji}</button>
-            `).join('')}
-          </div>
-        </div>
-      </article>
+        <divider></divider>
 
-      <section class="comments-section">
+        <cluster>
+          ${formatReactionGroups(reactions) || '<span style="color: var(--ry-color-text-muted)">No reactions</span>'}
+        </cluster>
+
+        <cluster class="reaction-picker">
+          ${['❤️', '🔥', '😂', '😮', '😢', '👏'].map(emoji => `
+            <button variant="ghost" size="sm" class="reaction-btn" data-emoji="${emoji}">${emoji}</button>
+          `).join('')}
+        </cluster>
+      </card>
+
+      <stack gap="md" class="comments-section" style="margin-top: var(--ry-space-4)">
         <h2>Comments (${comments.length})</h2>
 
-        <div class="comments-list">
+        <stack gap="sm" class="comments-list">
           ${comments.length === 0 ? `
-            <p class="empty">No comments yet</p>
+            <p style="color: var(--ry-color-text-muted)">No comments yet</p>
           ` : `
             ${renderComments(comments)}
           `}
-        </div>
+        </stack>
 
-        <form id="comment-form" class="comment-input">
-          <input type="text" id="comment-text" placeholder="Add a comment..." autocomplete="off" />
-          <button type="submit">Post</button>
+        <form id="comment-form">
+          <cluster>
+            <input type="text" id="comment-text" placeholder="Add a comment..." autocomplete="off" style="flex: 1" />
+            <button type="submit">Post</button>
+          </cluster>
         </form>
-      </section>
+      </stack>
     </div>
   `;
 }
@@ -85,6 +94,78 @@ function escapeHtml(text) {
 function formatTime(ts) {
   if (!ts) return '';
   return new Date(ts).toLocaleString();
+}
+
+/**
+ * Resolve authorDeviceId to a username
+ */
+function resolveAuthorName(authorDeviceId, client) {
+  if (authorDeviceId === client.deviceUUID) {
+    return 'You';
+  }
+
+  if (client.friends && client.friends.friends) {
+    for (const [username, data] of client.friends.friends) {
+      if (data.devices) {
+        for (const device of data.devices) {
+          if (device.deviceUUID === authorDeviceId || device.serverUserId === authorDeviceId) {
+            return username;
+          }
+        }
+      }
+    }
+  }
+
+  return authorDeviceId?.slice(0, 8) || 'Unknown';
+}
+
+/**
+ * Parse mediaUrl - could be a direct URL or a JSON attachment reference
+ */
+function parseMediaUrl(mediaUrl) {
+  if (!mediaUrl) return null;
+
+  try {
+    const parsed = JSON.parse(mediaUrl);
+    if (parsed.attachmentId && parsed.contentKey) {
+      return {
+        isRef: true,
+        ref: {
+          attachmentId: parsed.attachmentId,
+          contentKey: new Uint8Array(parsed.contentKey),
+          nonce: new Uint8Array(parsed.nonce),
+          contentType: parsed.contentType || 'application/octet-stream',
+        },
+      };
+    }
+  } catch {
+    // Not JSON
+  }
+
+  if (mediaUrl.startsWith('http') || mediaUrl.startsWith('blob:') || mediaUrl.startsWith('data:')) {
+    return { isRef: false, url: mediaUrl };
+  }
+
+  return null;
+}
+
+/**
+ * Download and decrypt media attachment
+ */
+async function loadMedia(mediaUrl, client) {
+  const parsed = parseMediaUrl(mediaUrl);
+  if (!parsed) return null;
+
+  if (!parsed.isRef) return parsed.url;
+
+  try {
+    const bytes = await client.attachments.download(parsed.ref);
+    const blob = new Blob([bytes], { type: parsed.ref.contentType });
+    return URL.createObjectURL(blob);
+  } catch (err) {
+    console.error('Failed to load media:', err);
+    return null;
+  }
 }
 
 function formatReactionGroups(reactions) {
@@ -107,15 +188,15 @@ function renderComments(comments, depth = 0) {
     : comments;
 
   return topLevel.map(c => `
-    <div class="comment" style="margin-left: ${depth * 20}px">
-      <div class="comment-header">
-        <span class="author">${c.authorName || 'Unknown'}</span>
-        <span class="time">${formatTime(c.timestamp)}</span>
-      </div>
-      <div class="comment-text">${escapeHtml(c.data?.text)}</div>
-      <button class="reply-btn" data-comment-id="${c.id}">Reply</button>
+    <card style="margin-left: ${depth * 20}px">
+      <cluster>
+        <strong>${c.authorName || 'Unknown'}</strong>
+        <span style="color: var(--ry-color-text-muted); font-size: var(--ry-text-sm)">${formatTime(c.timestamp)}</span>
+      </cluster>
+      <p style="margin: var(--ry-space-2) 0">${escapeHtml(c.data?.text)}</p>
+      <button variant="ghost" size="sm" class="reply-btn" data-comment-id="${c.id}">Reply</button>
       ${c.replies ? renderComments(c.replies, depth + 1) : ''}
-    </div>
+    </card>
   `).join('');
 }
 
@@ -141,7 +222,11 @@ export async function mount(container, client, router, params) {
       const comments = await client.comment.where({
         'data.storyId': storyId
       }).exec();
-      story.comments = comments;
+      // Resolve comment author names
+      story.comments = comments.map(c => ({
+        ...c,
+        authorName: resolveAuthorName(c.authorDeviceId, client),
+      }));
     }
 
     if (client.reaction) {
@@ -151,51 +236,76 @@ export async function mount(container, client, router, params) {
       story.reactions = reactions;
     }
 
-    container.innerHTML = render({ story });
+    // Resolve story author name and check for media
+    story.authorName = resolveAuthorName(story.authorDeviceId, client);
+    story.hasMedia = !!parseMediaUrl(story.data?.mediaUrl);
+    story.mediaBlobUrl = null;
 
-    // Comment form
-    const commentForm = container.querySelector('#comment-form');
-    commentForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const text = container.querySelector('#comment-text').value.trim();
-      if (!text) return;
+    const rerender = () => {
+      container.innerHTML = render({ story });
+      attachEventHandlers();
+    };
 
-      try {
-        await client.comment.create({ storyId, text });
-        // Refresh
-        mount(container, client, router, params);
-      } catch (err) {
-        alert('Failed to post comment: ' + err.message);
+    const attachEventHandlers = () => {
+      // Load media button
+      const loadMediaBtn = container.querySelector('#load-media-btn');
+      if (loadMediaBtn) {
+        loadMediaBtn.addEventListener('click', async () => {
+          loadMediaBtn.textContent = 'Loading...';
+          loadMediaBtn.disabled = true;
+          story.mediaBlobUrl = await loadMedia(story.data?.mediaUrl, client);
+          rerender();
+        });
       }
-    });
 
-    // Reaction buttons
-    container.querySelectorAll('.reaction-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const emoji = btn.dataset.emoji;
-        try {
-          await client.reaction.create({ storyId, emoji });
-          mount(container, client, router, params);
-        } catch (err) {
-          console.error('Failed to add reaction:', err);
-        }
-      });
-    });
+      // Comment form
+      const commentForm = container.querySelector('#comment-form');
+      if (commentForm) {
+        commentForm.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const text = container.querySelector('#comment-text').value.trim();
+          if (!text) return;
 
-    // Reply buttons
-    container.querySelectorAll('.reply-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const commentId = btn.dataset.commentId;
-        const text = prompt('Enter reply:');
-        if (text) {
-          client.comment.create({ commentId, text }).then(() => {
+          try {
+            await client.comment.create({ storyId, text });
             mount(container, client, router, params);
-          });
-        }
-      });
-    });
+          } catch (err) {
+            alert('Failed to post comment: ' + err.message);
+          }
+        });
+      }
 
-    router.updatePageLinks();
+      // Reaction buttons
+      container.querySelectorAll('.reaction-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const emoji = btn.dataset.emoji;
+          try {
+            await client.reaction.create({ storyId, emoji });
+            mount(container, client, router, params);
+          } catch (err) {
+            console.error('Failed to add reaction:', err);
+          }
+        });
+      });
+
+      // Reply buttons
+      container.querySelectorAll('.reply-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const commentId = btn.dataset.commentId;
+          const text = prompt('Enter reply:');
+          if (text) {
+            client.comment.create({ commentId, text }).then(() => {
+              mount(container, client, router, params);
+            });
+          }
+        });
+      });
+
+      router.updatePageLinks();
+    };
+
+    container.innerHTML = render({ story });
+    attachEventHandlers();
 
   } catch (err) {
     container.innerHTML = render({ error: err.message });

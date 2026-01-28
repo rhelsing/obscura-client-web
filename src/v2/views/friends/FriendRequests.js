@@ -3,17 +3,57 @@
  * - List pending incoming requests
  * - Accept/Reject buttons
  * - Verify code option
+ *
+ * IMPORTANT: Loads existing pending requests from FriendManager on mount.
+ * The server dumps queued messages on connect, so requests may already exist.
  */
 import { navigate } from '../index.js';
+import { generateVerifyCode } from '../../crypto/signatures.js';
 
 let cleanup = null;
 let pendingRequests = [];
+let currentClient = null;
+
+/**
+ * Reconstruct a request object from stored friend data
+ * Provides accept/reject/getVerifyCode methods
+ */
+function reconstructRequest(friend, client) {
+  const devices = friend.devices || [];
+  const primaryDevice = devices[0];
+  const signalIdentityKey = primaryDevice?.signalIdentityKey;
+
+  return {
+    username: friend.username,
+    devices: devices,
+    sourceUserId: primaryDevice?.serverUserId,
+
+    async getVerifyCode() {
+      if (!signalIdentityKey) return null;
+      return generateVerifyCode(signalIdentityKey);
+    },
+
+    async accept() {
+      client.friends.store(friend.username, devices, 'accepted');
+      if (primaryDevice?.serverUserId) {
+        await client._sendFriendResponse(primaryDevice.serverUserId, friend.username, true);
+      }
+    },
+
+    async reject() {
+      client.friends.remove(friend.username);
+      if (primaryDevice?.serverUserId) {
+        await client._sendFriendResponse(primaryDevice.serverUserId, friend.username, false);
+      }
+    },
+  };
+}
 
 export function render({ requests = [] } = {}) {
   return `
     <div class="view friend-requests">
       <header>
-        <a href="/friends" data-navigo class="back">← Back</a>
+        <a href="/friends" data-navigo class="back"><ry-icon name="chevron-left"></ry-icon> Back</a>
         <h1>Friend Requests</h1>
       </header>
 
@@ -22,36 +62,44 @@ export function render({ requests = [] } = {}) {
           <p>No pending requests</p>
         </div>
       ` : `
-        <ul class="request-list">
+        <stack gap="sm" class="request-list">
           ${requests.map((req, i) => `
-            <li class="request-item" data-index="${i}">
-              <div class="request-info">
-                <span class="username">${req.username || 'Unknown'}</span>
-              </div>
-              <div class="request-actions">
-                <button class="accept-btn" data-index="${i}">Accept</button>
-                <button class="reject-btn secondary" data-index="${i}">Reject</button>
-                <button class="verify-btn secondary" data-index="${i}">Verify</button>
-              </div>
-            </li>
+            <card class="request-item" data-index="${i}">
+              <cluster>
+                <ry-icon name="user"></ry-icon>
+                <strong style="flex: 1">${req.username || 'Unknown'}</strong>
+              </cluster>
+              <actions>
+                <button size="sm" class="accept-btn" data-index="${i}">Accept</button>
+                <button variant="secondary" size="sm" class="reject-btn" data-index="${i}">Reject</button>
+                <button variant="ghost" size="sm" class="verify-btn" data-index="${i}">Verify</button>
+              </actions>
+            </card>
           `).join('')}
-        </ul>
+        </stack>
       `}
     </div>
   `;
 }
 
 export function mount(container, client, router) {
-  // Get current pending requests
-  pendingRequests = [];
+  currentClient = client;
+
+  // Load existing pending requests from FriendManager
+  const existingPending = client.friends.getPendingIncoming();
+  pendingRequests = existingPending.map(f => reconstructRequest(f, client));
 
   container.innerHTML = render({ requests: pendingRequests });
 
   // Listen for new friend requests
   const handleRequest = (req) => {
-    pendingRequests.push(req);
-    container.innerHTML = render({ requests: pendingRequests });
-    attachListeners();
+    // Check if we already have this request (avoid duplicates)
+    const exists = pendingRequests.some(r => r.username === req.username);
+    if (!exists) {
+      pendingRequests.push(req);
+      container.innerHTML = render({ requests: pendingRequests });
+      attachListeners();
+    }
   };
 
   client.on('friendRequest', handleRequest);
@@ -63,10 +111,18 @@ export function mount(container, client, router) {
         const index = parseInt(btn.dataset.index);
         const req = pendingRequests[index];
         if (req) {
-          await req.accept();
-          pendingRequests.splice(index, 1);
-          container.innerHTML = render({ requests: pendingRequests });
-          attachListeners();
+          btn.disabled = true;
+          btn.textContent = '...';
+          try {
+            await req.accept();
+            pendingRequests.splice(index, 1);
+            container.innerHTML = render({ requests: pendingRequests });
+            attachListeners();
+          } catch (err) {
+            console.error('Failed to accept:', err);
+            btn.disabled = false;
+            btn.textContent = 'Accept';
+          }
         }
       });
     });
@@ -76,12 +132,20 @@ export function mount(container, client, router) {
       btn.addEventListener('click', async () => {
         const index = parseInt(btn.dataset.index);
         const req = pendingRequests[index];
-        if (req && req.reject) {
-          await req.reject();
+        if (req) {
+          btn.disabled = true;
+          btn.textContent = '...';
+          try {
+            await req.reject();
+            pendingRequests.splice(index, 1);
+            container.innerHTML = render({ requests: pendingRequests });
+            attachListeners();
+          } catch (err) {
+            console.error('Failed to reject:', err);
+            btn.disabled = false;
+            btn.textContent = 'Reject';
+          }
         }
-        pendingRequests.splice(index, 1);
-        container.innerHTML = render({ requests: pendingRequests });
-        attachListeners();
       });
     });
 

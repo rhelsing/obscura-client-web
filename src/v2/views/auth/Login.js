@@ -4,19 +4,25 @@
  * - Handle: ok (existing device), newDevice, error
  */
 import { Obscura } from '../../lib/index.js';
-import { setClient, navigate } from '../index.js';
+import { setClient, navigate, getApiUrl } from '../index.js';
+import { fullSchema } from '../../lib/schema.js';
 
 let cleanup = null;
 
-export function render({ error = null, loading = false } = {}) {
+export function render({ loading = false } = {}) {
   return `
     <div class="view login">
       <h1>Login</h1>
-      ${error ? `<div class="error">${error}</div>` : ''}
       <form id="login-form">
-        <input type="text" id="username" placeholder="Username" required autocomplete="username" ${loading ? 'disabled' : ''} />
-        <input type="password" id="password" placeholder="Password" required autocomplete="current-password" ${loading ? 'disabled' : ''} />
-        <button type="submit" ${loading ? 'disabled' : ''}>${loading ? 'Logging in...' : 'Login'}</button>
+        <stack gap="md">
+          <ry-field label="Username">
+            <input type="text" id="username" placeholder="Enter username" required autocomplete="username" ${loading ? 'disabled' : ''} />
+          </ry-field>
+          <ry-field label="Password">
+            <input type="password" id="password" placeholder="Enter password" required autocomplete="current-password" ${loading ? 'disabled' : ''} />
+          </ry-field>
+          <button type="submit" ${loading ? 'disabled' : ''}>${loading ? 'Logging in...' : 'Login'}</button>
+        </stack>
       </form>
       <p class="link">Don't have an account? <a href="/register" data-navigo>Register</a></p>
     </div>
@@ -37,29 +43,22 @@ export function mount(container, client, router) {
     container.innerHTML = render({ loading: true });
 
     try {
-      const apiUrl = import.meta.env.VITE_API_URL;
+      const apiUrl = getApiUrl();
 
-      // Try to get existing store from localStorage
-      const storeKey = `obscura_store_${username}`;
-      let existingStore = null;
-      try {
-        const stored = localStorage.getItem(storeKey);
-        if (stored) {
-          existingStore = JSON.parse(stored);
-        }
-      } catch (e) {
-        // No existing store
-      }
-
+      // Note: Obscura.login() automatically uses IndexedDBStore which persists to IndexedDB.
+      // It checks store.getDeviceIdentity() to detect if this is an existing device.
+      // No need to manually load from localStorage.
       const result = await Obscura.login(username, password, {
         apiUrl,
-        store: existingStore
+        protoBasePath: '/'
       });
 
       if (result.status === 'ok') {
         // Existing device, go to main app
-        setClient(result.client || client);
-        await (result.client || client).connect();
+        const c = result.client || client;
+        await c.schema(fullSchema);
+        await c.connect();
+        setClient(c);
         navigate('/stories');
 
       } else if (result.status === 'newDevice') {
@@ -70,13 +69,13 @@ export function mount(container, client, router) {
 
       } else {
         // Error
-        container.innerHTML = render({ error: result.reason || 'Login failed' });
-        mount(container, client, router);
+        RyToast.error(result.reason || 'Login failed');
+        container.innerHTML = render();
       }
 
     } catch (err) {
-      container.innerHTML = render({ error: err.message });
-      mount(container, client, router);
+      RyToast.error(err.message || 'Login failed');
+      container.innerHTML = render();
     }
   };
 

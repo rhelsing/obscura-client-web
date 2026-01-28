@@ -81,6 +81,36 @@ function parseMembers(membersJson) {
   }
 }
 
+/**
+ * Resolve authorDeviceId to a username
+ * @param {string} authorDeviceId - Device UUID of the author
+ * @param {object} client - ObscuraClient instance
+ * @returns {string} - Username or truncated ID
+ */
+function resolveAuthorName(authorDeviceId, client) {
+  // Check if it's our own message
+  if (authorDeviceId === client.deviceUUID) {
+    return 'You';
+  }
+
+  // Search through friends to find matching device
+  if (client.friends && client.friends.friends) {
+    for (const [username, data] of client.friends.friends) {
+      if (data.devices) {
+        for (const device of data.devices) {
+          // Check both deviceUUID and serverUserId
+          if (device.deviceUUID === authorDeviceId || device.serverUserId === authorDeviceId) {
+            return username;
+          }
+        }
+      }
+    }
+  }
+
+  // Fallback: truncated ID
+  return authorDeviceId?.slice(0, 8) || 'Unknown';
+}
+
 export async function mount(container, client, router, params) {
   const groupId = params.id;
 
@@ -105,11 +135,11 @@ export async function mount(container, client, router, params) {
         'data.groupId': groupId
       }).orderBy('timestamp', 'asc').exec();
 
-      // Mark which are from me
+      // Mark which are from me and resolve author names
       messages = messages.map(m => ({
         ...m,
         fromMe: m.authorDeviceId === client.deviceUUID,
-        author: m.authorDeviceId === client.deviceUUID ? 'You' : m.authorDeviceId?.slice(0, 8)
+        author: resolveAuthorName(m.authorDeviceId, client),
       }));
     }
 

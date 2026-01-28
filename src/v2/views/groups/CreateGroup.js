@@ -11,55 +11,57 @@ export function render({ friends = [], selectedMembers = [], name = '', error = 
   return `
     <div class="view create-group">
       <header>
-        <a href="/groups" data-navigo class="back">← Cancel</a>
+        <a href="/groups" data-navigo class="back"><ry-icon name="chevron-left"></ry-icon> Cancel</a>
         <h1>New Group</h1>
       </header>
 
-      ${error ? `<div class="error">${error}</div>` : ''}
+      ${error ? `<ry-alert type="danger">${error}</ry-alert>` : ''}
 
       <form id="group-form">
-        <label>
-          Group Name
-          <input
-            type="text"
-            id="group-name"
-            value="${name}"
-            placeholder="Enter group name"
-            required
-            ${loading ? 'disabled' : ''}
-          />
-        </label>
+        <stack gap="md">
+          <ry-field label="Group Name">
+            <input
+              type="text"
+              id="group-name"
+              value="${name}"
+              placeholder="Enter group name"
+              required
+              ${loading ? 'disabled' : ''}
+            />
+          </ry-field>
 
-        <div class="member-section">
-          <h2>Add Members</h2>
-          ${friends.length === 0 ? `
-            <p class="empty">No friends to add</p>
-          ` : `
-            <ul class="friend-picker">
-              ${friends.map(f => `
-                <li class="friend-option">
-                  <label>
-                    <input
-                      type="checkbox"
-                      value="${f.username}"
-                      ${selectedMembers.includes(f.username) ? 'checked' : ''}
-                      ${loading ? 'disabled' : ''}
-                    />
-                    ${f.username}
-                  </label>
-                </li>
-              `).join('')}
-            </ul>
-          `}
-        </div>
+          <div>
+            <h2>Add Members</h2>
+            ${friends.length === 0 ? `
+              <p style="color: var(--ry-color-text-muted)">No friends to add</p>
+            ` : `
+              <stack gap="sm" class="friend-picker">
+                ${friends.map(f => `
+                  <card class="friend-option">
+                    <label style="display: flex; align-items: center; gap: var(--ry-space-3); cursor: pointer">
+                      <input
+                        type="checkbox"
+                        value="${f.username}"
+                        ${selectedMembers.includes(f.username) ? 'checked' : ''}
+                        ${loading ? 'disabled' : ''}
+                      />
+                      <ry-icon name="user"></ry-icon>
+                      ${f.username}
+                    </label>
+                  </card>
+                `).join('')}
+              </stack>
+            `}
+          </div>
 
-        <div class="selected-count">
-          ${selectedMembers.length} member${selectedMembers.length !== 1 ? 's' : ''} selected
-        </div>
+          <badge variant="primary" class="selected-count">
+            ${selectedMembers.length} member${selectedMembers.length !== 1 ? 's' : ''} selected
+          </badge>
 
-        <button type="submit" class="primary" ${loading ? 'disabled' : ''}>
-          ${loading ? 'Creating...' : 'Create Group'}
-        </button>
+          <button type="submit" ${loading ? 'disabled' : ''}>
+            ${loading ? 'Creating...' : 'Create Group'}
+          </button>
+        </stack>
       </form>
     </div>
   `;
@@ -68,8 +70,8 @@ export function render({ friends = [], selectedMembers = [], name = '', error = 
 export function mount(container, client, router) {
   // Get friends list
   const friends = [];
-  if (client.friends) {
-    for (const [username, data] of client.friends) {
+  if (client.friends && client.friends.friends) {
+    for (const [username, data] of client.friends.friends) {
       if (data.status === 'accepted') {
         friends.push({ username });
       }

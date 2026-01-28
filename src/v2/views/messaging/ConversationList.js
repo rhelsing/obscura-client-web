@@ -4,7 +4,9 @@
  * - Show last message preview (if available)
  * - Tap → Chat
  */
-import { navigate } from '../index.js';
+import { navigate, clearClient } from '../index.js';
+import { renderNav, initNav } from '../components/Nav.js';
+import { ObscuraClient } from '../../lib/ObscuraClient.js';
 
 let cleanup = null;
 
@@ -18,47 +20,63 @@ export function render({ conversations = [] } = {}) {
       ${conversations.length === 0 ? `
         <div class="empty">
           <p>No conversations yet</p>
-          <a href="/friends/add" data-navigo class="button">Add a Friend</a>
+          <a href="/friends/add" data-navigo><button>Add a Friend</button></a>
         </div>
       ` : `
-        <ul class="conversation-items">
+        <stack gap="sm" class="conversation-items">
           ${conversations.map(c => `
-            <li class="conversation-item" data-username="${c.username}">
-              <div class="conversation-info">
-                <span class="username">${c.username}</span>
-                ${c.lastMessage ? `
-                  <span class="preview">${c.lastMessage}</span>
-                ` : `
-                  <span class="preview empty">No messages yet</span>
-                `}
-              </div>
-              ${c.unread ? `<span class="unread-badge">${c.unread}</span>` : ''}
-              <span class="arrow">→</span>
-            </li>
+            <card class="conversation-item" data-username="${c.username}">
+              <cluster>
+                <ry-icon name="edit"></ry-icon>
+                <stack gap="none" style="flex: 1">
+                  <strong>${c.username}</strong>
+                  ${c.lastMessage ? `
+                    <span style="color: var(--ry-color-text-muted); font-size: var(--ry-text-sm)">${c.lastMessage}</span>
+                  ` : `
+                    <span style="color: var(--ry-color-text-muted); font-size: var(--ry-text-sm); font-style: italic">No messages yet</span>
+                  `}
+                </stack>
+                ${c.unread ? `<badge variant="primary">${c.unread}</badge>` : ''}
+                <ry-icon name="chevron-right"></ry-icon>
+              </cluster>
+            </card>
           `).join('')}
-        </ul>
+        </stack>
       `}
 
-      <nav class="bottom-nav">
-        <a href="/stories" data-navigo>Feed</a>
-        <a href="/messages" data-navigo class="active">Messages</a>
-        <a href="/friends" data-navigo>Friends</a>
-        <a href="/settings" data-navigo>Settings</a>
-      </nav>
+      ${renderNav('messages')}
     </div>
   `;
 }
 
-export function mount(container, client, router) {
+export async function mount(container, client, router) {
   const conversations = [];
 
   // Build conversation list from friends
-  if (client && client.friends) {
-    for (const [username, data] of client.friends) {
+  if (client && client.friends && client.friends.friends) {
+    for (const [username, data] of client.friends.friends) {
       if (data.status === 'accepted') {
+        // Load last message for this conversation
+        let lastMessage = null;
+        try {
+          const messages = await client.getMessages(username);
+          if (messages.length > 0) {
+            const last = messages[messages.length - 1];
+            const text = last.text || last.content || '';
+            // Truncate if too long
+            lastMessage = text.length > 40 ? text.slice(0, 40) + '...' : text;
+            // Prefix with "You: " if sent by us
+            if (last.isSent) {
+              lastMessage = 'You: ' + lastMessage;
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to load messages for', username, err);
+        }
+
         conversations.push({
           username,
-          lastMessage: null, // TODO: Query from message store
+          lastMessage,
           unread: 0 // TODO: Track unread count
         });
       }
@@ -74,6 +92,14 @@ export function mount(container, client, router) {
       const username = item.dataset.username;
       navigate(`/messages/${username}`);
     });
+  });
+
+  // Init nav
+  initNav(container, () => {
+    client.disconnect();
+    ObscuraClient.clearSession();
+    clearClient();
+    navigate('/login');
   });
 
   router.updatePageLinks();

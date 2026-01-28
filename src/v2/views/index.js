@@ -3,6 +3,20 @@
  */
 import Navigo from 'navigo';
 
+/**
+ * Get the API URL - uses proxy in dev to avoid CORS
+ */
+export function getApiUrl() {
+  return import.meta.env.DEV ? '/api' : import.meta.env.VITE_API_URL;
+}
+
+/**
+ * Get the WebSocket URL - uses /ws proxy in dev
+ */
+export function getWsUrl() {
+  return import.meta.env.DEV ? '/ws' : import.meta.env.VITE_API_URL?.replace('https://', 'wss://');
+}
+
 // View imports
 import * as Register from './auth/Register.js';
 import * as Login from './auth/Login.js';
@@ -32,6 +46,8 @@ import * as RevokeDevice from './devices/RevokeDevice.js';
 import * as GroupList from './groups/GroupList.js';
 import * as CreateGroup from './groups/CreateGroup.js';
 import * as GroupChat from './groups/GroupChat.js';
+
+import * as Logs from './logs/Logs.js';
 
 let router = null;
 let currentView = null;
@@ -87,17 +103,25 @@ export function init(appContainer, obscuraClient = null) {
   router.on('/groups/new', () => requireAuth(() => mountView(CreateGroup)));
   router.on('/groups/:id', ({ data }) => requireAuth(() => mountView(GroupChat, data)));
 
-  // Default route
+  // Logs route
+  router.on('/logs', () => requireAuth(() => mountView(Logs)));
+
+  // Default route - show login directly
   router.on('/', () => {
     if (client) {
-      router.navigate('/stories');
+      mountView(StoryFeed);
     } else {
-      router.navigate('/login');
+      mountView(Login);
     }
   });
 
   router.notFound(() => {
-    container.innerHTML = '<div class="view error">Page not found</div>';
+    // Default to login for any unknown route
+    if (client) {
+      mountView(StoryFeed);
+    } else {
+      mountView(Login);
+    }
   });
 
   router.resolve();
@@ -173,28 +197,71 @@ function setupGlobalEventHandlers() {
   if (!client) return;
 
   // Friend request notification
+  // Note: FriendManager.processRequest() already stores the request
   client.on('friendRequest', (req) => {
-    // Could show a toast/badge
-    console.log('Friend request from:', req.username);
+    console.log('[Global] Friend request from:', req.username);
+    // Show toast if available
+    if (typeof RyToast !== 'undefined') {
+      RyToast.info(`Friend request from ${req.username}`);
+    }
   });
 
   // Friend response
   client.on('friendResponse', (resp) => {
-    console.log('Friend response:', resp.accepted ? 'accepted' : 'rejected');
+    console.log('[Global] Friend response:', resp.accepted ? 'accepted' : 'rejected', 'from', resp.username);
+    if (typeof RyToast !== 'undefined') {
+      if (resp.accepted) {
+        RyToast.success(`${resp.username} accepted your friend request!`);
+      } else {
+        RyToast.info(`${resp.username} declined your friend request`);
+      }
+    }
   });
 
-  // Incoming message
+  // Incoming message - just log, views handle their own display
   client.on('message', (msg) => {
-    console.log('Message from:', msg.from);
+    console.log('[Global] Message from:', msg.sourceUserId || msg.from);
   });
 
-  // Device announce
-  client.on('deviceAnnounce', (announce) => {
-    console.log('Device announce:', announce.isRevocation ? 'revocation' : 'update');
+  // Device announce - auto-apply to update friend device lists
+  client.on('deviceAnnounce', async (announce) => {
+    console.log('[Global] Device announce:', announce.isRevocation ? 'revocation' : 'update');
+    try {
+      await announce.apply();
+      console.log('[Global] Device announce applied');
+    } catch (err) {
+      console.error('[Global] Failed to apply device announce:', err);
+    }
   });
 
-  // Model sync
+  // Model sync - just log, ORM handles via _ormSyncManager
   client.on('modelSync', (sync) => {
-    console.log('Model sync:', sync.model, sync.id);
+    console.log('[Global] Model sync:', sync.model, sync.id);
+  });
+
+  // Sent sync - log when messages are synced from other devices
+  client.on('sentSync', (sync) => {
+    console.log('[Global] Sent sync:', sync.conversationId, sync.messageId);
+  });
+
+  // Sync blob - log when full state is received (device linking)
+  client.on('syncBlob', () => {
+    console.log('[Global] Sync blob received');
+  });
+
+  // Connection events
+  client.on('disconnect', () => {
+    console.log('[Global] Disconnected from server');
+  });
+
+  client.on('reconnect', () => {
+    console.log('[Global] Reconnected to server');
+    if (typeof RyToast !== 'undefined') {
+      RyToast.success('Reconnected');
+    }
+  });
+
+  client.on('error', (err) => {
+    console.error('[Global] Client error:', err);
   });
 }

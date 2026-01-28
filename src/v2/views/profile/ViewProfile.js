@@ -15,30 +15,32 @@ export function render({ profile = null, isOwn = false, loading = false, usernam
   return `
     <div class="view profile">
       <header>
-        <a href="/friends" data-navigo class="back">← Back</a>
+        <a href="/friends" data-navigo class="back"><ry-icon name="chevron-left"></ry-icon> Back</a>
         <h1>${isOwn ? 'My Profile' : username}</h1>
-        ${isOwn ? `<a href="/profile/edit" data-navigo class="edit-link">Edit</a>` : ''}
+        ${isOwn ? `<a href="/profile/edit" data-navigo><button variant="ghost" size="sm"><ry-icon name="edit"></ry-icon> Edit</button></a>` : ''}
       </header>
 
-      <div class="profile-content">
-        ${profile?.data?.avatarUrl ? `
-          <img class="avatar" src="${profile.data.avatarUrl}" alt="Avatar" />
-        ` : `
-          <div class="avatar-placeholder">${(username || 'U')[0].toUpperCase()}</div>
-        `}
+      <card>
+        <stack gap="md" style="text-align: center; padding: var(--ry-space-4)">
+          ${profile?.data?.avatarUrl ? `
+            <img class="avatar" src="${profile.data.avatarUrl}" alt="Avatar" style="width: 120px; height: 120px; border-radius: 50%; object-fit: cover; margin: 0 auto" />
+          ` : `
+            <div style="width: 120px; height: 120px; border-radius: 50%; background: var(--ry-color-bg-secondary); display: flex; align-items: center; justify-content: center; font-size: 48px; font-weight: bold; margin: 0 auto; color: var(--ry-color-text-muted)">${(username || 'U')[0].toUpperCase()}</div>
+          `}
 
-        <h2 class="display-name">${profile?.data?.displayName || username || 'Unknown'}</h2>
+          <h2 style="margin: 0">${profile?.data?.displayName || username || 'Unknown'}</h2>
 
-        ${profile?.data?.bio ? `
-          <p class="bio">${escapeHtml(profile.data.bio)}</p>
-        ` : `
-          <p class="bio empty">No bio yet</p>
-        `}
-      </div>
+          ${profile?.data?.bio ? `
+            <p style="color: var(--ry-color-text-muted)">${escapeHtml(profile.data.bio)}</p>
+          ` : `
+            <p style="color: var(--ry-color-text-muted); font-style: italic">No bio yet</p>
+          `}
+        </stack>
+      </card>
 
       ${!isOwn ? `
-        <div class="profile-actions">
-          <a href="/messages/${username}" data-navigo class="button">Send Message</a>
+        <div style="margin-top: var(--ry-space-4)">
+          <a href="/messages/${username}" data-navigo><button><ry-icon name="edit"></ry-icon> Send Message</button></a>
         </div>
       ` : ''}
     </div>

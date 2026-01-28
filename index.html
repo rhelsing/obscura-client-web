@@ -1,13 +1,18 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-ry-theme="light">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#007aff">
   <title>Obscura</title>
-  <link rel="stylesheet" href="/src/styles/mobile.css" id="main-stylesheet">
+  <link rel="stylesheet" href="/src/v2/styles.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@ryanhelsing/ry-ui@1.0.0/dist/css/ry-ui.css">
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@ryanhelsing/ry-ui@1.0.0/dist/ry-ui.js"></script>
 </head>
 <body>
-  <div id="app"></div>
-  <script type="module" src="/src/main.js"></script>
+  <ry-page>
+    <div id="app"></div>
+  </ry-page>
+  <script type="module" src="/src/v2/main.js"></script>
 </body>
 </html>

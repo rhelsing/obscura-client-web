@@ -4,7 +4,9 @@
  * - Show username, status
  * - Tap → Chat view
  */
-import { navigate } from '../index.js';
+import { navigate, clearClient } from '../index.js';
+import { renderNav, initNav } from '../components/Nav.js';
+import { ObscuraClient } from '../../lib/ObscuraClient.js';
 
 let cleanup = null;
 
@@ -14,37 +16,35 @@ export function render({ friends = [], pendingCount = 0 } = {}) {
       <header>
         <h1>Friends</h1>
         ${pendingCount > 0 ? `
-          <a href="/friends/requests" data-navigo class="badge">${pendingCount} pending</a>
+          <a href="/friends/requests" data-navigo><badge variant="primary">${pendingCount} pending</badge></a>
         ` : ''}
       </header>
 
       ${friends.length === 0 ? `
         <div class="empty">
           <p>No friends yet</p>
-          <a href="/friends/add" data-navigo class="button">Add a Friend</a>
+          <a href="/friends/add" data-navigo><button>Add a Friend</button></a>
         </div>
       ` : `
-        <ul class="friend-list-items">
+        <stack gap="sm" class="friend-list-items">
           ${friends.map(f => `
-            <li class="friend-item" data-username="${f.username}">
-              <div class="friend-info">
-                <span class="username">${f.username}</span>
-                <span class="status ${f.status}">${f.status}</span>
-              </div>
-              <span class="arrow">→</span>
-            </li>
+            <card class="friend-item" data-username="${f.username}">
+              <cluster>
+                <ry-icon name="user"></ry-icon>
+                <stack gap="none">
+                  <strong>${f.username}</strong>
+                  <badge variant="${f.status === 'accepted' ? 'success' : 'warning'}">${f.status}</badge>
+                </stack>
+                <ry-icon name="chevron-right"></ry-icon>
+              </cluster>
+            </card>
           `).join('')}
-        </ul>
+        </stack>
       `}
 
       <a href="/friends/add" data-navigo class="fab">+</a>
 
-      <nav class="bottom-nav">
-        <a href="/stories" data-navigo>Feed</a>
-        <a href="/messages" data-navigo>Messages</a>
-        <a href="/friends" data-navigo class="active">Friends</a>
-        <a href="/settings" data-navigo>Settings</a>
-      </nav>
+      ${renderNav('friends')}
     </div>
   `;
 }
@@ -53,10 +53,11 @@ export function mount(container, client, router) {
   const friends = [];
   let pendingCount = 0;
 
-  if (client && client.friends) {
-    for (const [username, data] of client.friends) {
+  if (client && client.friends && client.friends.friends) {
+    for (const [username, data] of client.friends.friends) {
       friends.push({ username, ...data });
-      if (data.status === 'pending') {
+      // FriendManager uses 'pending_incoming' for incoming requests
+      if (data.status === 'pending_incoming') {
         pendingCount++;
       }
     }
@@ -71,6 +72,14 @@ export function mount(container, client, router) {
       const username = item.dataset.username;
       navigate(`/messages/${username}`);
     });
+  });
+
+  // Init nav
+  initNav(container, () => {
+    client.disconnect();
+    ObscuraClient.clearSession();
+    clearClient();
+    navigate('/login');
   });
 
   router.updatePageLinks();

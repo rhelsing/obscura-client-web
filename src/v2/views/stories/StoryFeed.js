@@ -3,7 +3,9 @@
  * - List stories from friends (ephemeral, 24h)
  * - Batch load comments + reactions
  */
-import { navigate } from '../index.js';
+import { navigate, clearClient } from '../index.js';
+import { renderNav, initNav } from '../components/Nav.js';
+import { ObscuraClient } from '../../lib/ObscuraClient.js';
 
 let cleanup = null;
 
@@ -19,39 +21,44 @@ export function render({ stories = [], loading = false } = {}) {
       ` : stories.length === 0 ? `
         <div class="empty">
           <p>No stories yet</p>
-          <p class="hint">Stories disappear after 24 hours</p>
+          <ry-alert type="info">Stories disappear after 24 hours</ry-alert>
         </div>
       ` : `
-        <div class="stories-list">
+        <stack gap="md" class="stories-list">
           ${stories.map(s => `
-            <article class="story-card" data-id="${s.id}">
-              <div class="story-header">
-                <span class="author">${s.authorName || 'Unknown'}</span>
-                <span class="time">${formatTimeAgo(s.timestamp)}</span>
-              </div>
-              <div class="story-content">${escapeHtml(s.data.content)}</div>
-              ${s.data.mediaUrl ? `
+            <card class="story-card" data-id="${s.id}">
+              <cluster>
+                <strong>${s.authorName || 'Unknown'}</strong>
+                <span style="color: var(--ry-color-text-muted)">${formatTimeAgo(s.timestamp)}</span>
+              </cluster>
+              <p style="margin: var(--ry-space-3) 0">${escapeHtml(s.data.content)}</p>
+              ${s.mediaBlobUrl ? `
                 <div class="story-media">
-                  <img src="${s.data.mediaUrl}" alt="" />
+                  <img src="${s.mediaBlobUrl}" alt="" style="width: 100%; border-radius: var(--ry-radius-md)" />
+                </div>
+              ` : s.hasMedia && !s.mediaLoading ? `
+                <div class="story-media">
+                  <button variant="secondary" size="sm" class="load-media-btn" data-story-id="${s.id}">
+                    <ry-icon name="download"></ry-icon> Load Media
+                  </button>
+                </div>
+              ` : s.mediaLoading ? `
+                <div class="story-media">
+                  <span style="color: var(--ry-color-text-muted)">Loading media...</span>
                 </div>
               ` : ''}
-              <div class="story-footer">
-                <span class="reactions">${formatReactions(s.reactions || [])}</span>
-                <span class="comments">${(s.comments || []).length} comments</span>
-              </div>
-            </article>
+              <actions>
+                <button variant="ghost" size="sm">${formatReactions(s.reactions || []) || '❤️ 0'}</button>
+                <button variant="ghost" size="sm">💬 ${(s.comments || []).length}</button>
+              </actions>
+            </card>
           `).join('')}
-        </div>
+        </stack>
       `}
 
       <a href="/stories/new" data-navigo class="fab">+</a>
 
-      <nav class="bottom-nav">
-        <a href="/stories" data-navigo class="active">Feed</a>
-        <a href="/messages" data-navigo>Messages</a>
-        <a href="/friends" data-navigo>Friends</a>
-        <a href="/settings" data-navigo>Settings</a>
-      </nav>
+      ${renderNav('feed')}
     </div>
   `;
 }
@@ -88,6 +95,93 @@ function formatReactions(reactions) {
     .join(' ');
 }
 
+/**
+ * Parse mediaUrl - could be a direct URL or a JSON attachment reference
+ * @param {string} mediaUrl - The stored mediaUrl value
+ * @returns {object|null} - { isRef: true, ref: {...} } or { isRef: false, url: '...' } or null
+ */
+function parseMediaUrl(mediaUrl) {
+  if (!mediaUrl) return null;
+
+  // Try to parse as JSON (new encrypted attachment format)
+  try {
+    const parsed = JSON.parse(mediaUrl);
+    if (parsed.attachmentId && parsed.contentKey) {
+      return {
+        isRef: true,
+        ref: {
+          attachmentId: parsed.attachmentId,
+          contentKey: new Uint8Array(parsed.contentKey),
+          nonce: new Uint8Array(parsed.nonce),
+          contentType: parsed.contentType || 'application/octet-stream',
+        },
+      };
+    }
+  } catch {
+    // Not JSON, treat as direct URL
+  }
+
+  // Direct URL (legacy or external)
+  if (mediaUrl.startsWith('http') || mediaUrl.startsWith('blob:') || mediaUrl.startsWith('data:')) {
+    return { isRef: false, url: mediaUrl };
+  }
+
+  return null;
+}
+
+/**
+ * Download and decrypt a media attachment, return blob URL
+ */
+async function loadMediaForStory(story, client) {
+  const parsed = parseMediaUrl(story.data?.mediaUrl);
+  if (!parsed) return null;
+
+  if (!parsed.isRef) {
+    // Direct URL, use as-is
+    return parsed.url;
+  }
+
+  // Download and decrypt
+  try {
+    const bytes = await client.attachments.download(parsed.ref);
+    const blob = new Blob([bytes], { type: parsed.ref.contentType });
+    return URL.createObjectURL(blob);
+  } catch (err) {
+    console.error('Failed to load media:', err);
+    return null;
+  }
+}
+
+/**
+ * Resolve authorDeviceId to a username
+ * @param {string} authorDeviceId - Device UUID of the author
+ * @param {object} client - ObscuraClient instance
+ * @returns {string} - Username or truncated ID
+ */
+function resolveAuthorName(authorDeviceId, client) {
+  // Check if it's our own story
+  if (authorDeviceId === client.deviceUUID) {
+    return 'You';
+  }
+
+  // Search through friends to find matching device
+  if (client.friends && client.friends.friends) {
+    for (const [username, data] of client.friends.friends) {
+      if (data.devices) {
+        for (const device of data.devices) {
+          // Check both deviceUUID and serverUserId
+          if (device.deviceUUID === authorDeviceId || device.serverUserId === authorDeviceId) {
+            return username;
+          }
+        }
+      }
+    }
+  }
+
+  // Fallback: truncated ID
+  return authorDeviceId?.slice(0, 8) || 'Unknown';
+}
+
 export async function mount(container, client, router) {
   container.innerHTML = render({ loading: true });
 
@@ -111,16 +205,66 @@ export async function mount(container, client, router) {
       await client.reaction.loadInto(stories, 'storyId');
     }
 
-    container.innerHTML = render({ stories });
+    // Resolve author names and check for media
+    const storiesWithNames = stories.map(s => ({
+      ...s,
+      authorName: resolveAuthorName(s.authorDeviceId, client),
+      hasMedia: !!parseMediaUrl(s.data?.mediaUrl),
+      mediaBlobUrl: null,
+      mediaLoading: false,
+    }));
 
-    // Click handlers
-    container.querySelectorAll('.story-card').forEach(card => {
-      card.addEventListener('click', () => {
-        navigate(`/stories/${card.dataset.id}`);
+    // Store stories for later reference (for loading media)
+    let displayStories = storiesWithNames;
+
+    const rerender = () => {
+      container.innerHTML = render({ stories: displayStories });
+      attachEventHandlers();
+    };
+
+    const attachEventHandlers = () => {
+      // Click handlers for story cards
+      container.querySelectorAll('.story-card').forEach(card => {
+        card.addEventListener('click', (e) => {
+          // Don't navigate if clicking a button
+          if (e.target.closest('.load-media-btn') || e.target.closest('button')) return;
+          navigate(`/stories/${card.dataset.id}`);
+        });
       });
-    });
 
-    router.updatePageLinks();
+      // Load media buttons
+      container.querySelectorAll('.load-media-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const storyId = btn.dataset.storyId;
+          const story = displayStories.find(s => s.id === storyId);
+          if (!story) return;
+
+          // Mark as loading
+          story.mediaLoading = true;
+          rerender();
+
+          // Download and decrypt
+          const blobUrl = await loadMediaForStory(story, client);
+          story.mediaLoading = false;
+          story.mediaBlobUrl = blobUrl;
+          rerender();
+        });
+      });
+
+      // Init nav
+      initNav(container, () => {
+        client.disconnect();
+        ObscuraClient.clearSession();
+        clearClient();
+        navigate('/login');
+      });
+
+      router.updatePageLinks();
+    };
+
+    container.innerHTML = render({ stories: displayStories });
+    attachEventHandlers();
 
   } catch (err) {
     container.innerHTML = `<div class="error">Failed to load stories: ${err.message}</div>`;

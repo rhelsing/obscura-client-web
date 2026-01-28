@@ -16,41 +16,49 @@ export function render({ devices = [], currentDeviceId = '', loading = false } =
   return `
     <div class="view device-list">
       <header>
-        <a href="/settings" data-navigo class="back">← Back</a>
+        <a href="/settings" data-navigo class="back"><ry-icon name="chevron-left"></ry-icon> Back</a>
         <h1>Devices</h1>
       </header>
 
-      <section class="current-device">
-        <h2>This Device</h2>
-        <div class="device-item current">
-          <span class="device-id">${currentDeviceId.slice(0, 8)}...</span>
-          <span class="badge">Current</span>
-        </div>
-      </section>
+      <stack gap="lg">
+        <section>
+          <h2>This Device</h2>
+          <card style="border: 2px solid var(--ry-color-primary)">
+            <cluster>
+              <ry-icon name="settings"></ry-icon>
+              <span style="font-family: monospace; flex: 1">${currentDeviceId.slice(0, 8)}...</span>
+              <badge variant="primary">Current</badge>
+            </cluster>
+          </card>
+        </section>
 
-      <section class="other-devices">
-        <h2>Other Devices</h2>
-        ${devices.length === 0 ? `
-          <p class="empty">No other devices linked</p>
-        ` : `
-          <ul class="device-items">
-            ${devices.map(d => `
-              <li class="device-item">
-                <span class="device-id">${d.deviceUUID.slice(0, 8)}...</span>
-                <button class="revoke-btn danger" data-device-id="${d.deviceUUID}">Revoke</button>
-              </li>
-            `).join('')}
-          </ul>
-        `}
-      </section>
+        <section>
+          <h2>Other Devices</h2>
+          ${devices.length === 0 ? `
+            <p style="color: var(--ry-color-text-muted)">No other devices linked</p>
+          ` : `
+            <stack gap="sm" class="device-items">
+              ${devices.map(d => `
+                <card>
+                  <cluster>
+                    <ry-icon name="settings"></ry-icon>
+                    <span style="font-family: monospace; flex: 1">${d.deviceUUID.slice(0, 8)}...</span>
+                    <button variant="danger" size="sm" class="revoke-btn" data-device-id="${d.deviceUUID}">Revoke</button>
+                  </cluster>
+                </card>
+              `).join('')}
+            </stack>
+          `}
+        </section>
 
-      <section class="actions">
-        <a href="/link-device" data-navigo class="button primary">Link New Device</a>
-      </section>
+        <section>
+          <a href="/link-device" data-navigo><button><ry-icon name="plus"></ry-icon> Link New Device</button></a>
+        </section>
+      </stack>
 
-      <p class="hint">
+      <ry-alert type="info" style="margin-top: var(--ry-space-4)">
         To revoke a device, you'll need your 12-word recovery phrase.
-      </p>
+      </ry-alert>
     </div>
   `;
 }
@@ -58,9 +66,13 @@ export function render({ devices = [], currentDeviceId = '', loading = false } =
 export async function mount(container, client, router) {
   container.innerHTML = render({ loading: true });
 
-  // Get devices - this would come from local storage or sync
-  // For now, we only know about our own device
-  const devices = []; // TODO: Track linked devices
+  // Get devices from DeviceManager (our own devices, excluding current)
+  let devices = [];
+  if (client.devices && client.devices.devices) {
+    devices = client.devices.devices.filter(d =>
+      d.deviceUUID !== client.deviceUUID
+    );
+  }
 
   container.innerHTML = render({
     devices,

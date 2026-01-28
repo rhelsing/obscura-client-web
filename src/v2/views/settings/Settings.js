@@ -6,6 +6,8 @@
  * - Logout
  */
 import { navigate, clearClient } from '../index.js';
+import { renderNav, initNav } from '../components/Nav.js';
+import { ObscuraClient } from '../../lib/ObscuraClient.js';
 
 let cleanup = null;
 
@@ -23,63 +25,85 @@ export function render({ settings = null, loading = false, saving = false } = {}
         <h1>Settings</h1>
       </header>
 
-      <section class="settings-group">
-        <h2>Appearance</h2>
-        <label class="setting-row">
-          <span>Dark Mode</span>
-          <input
-            type="checkbox"
-            id="theme-toggle"
-            ${theme === 'dark' ? 'checked' : ''}
-            ${saving ? 'disabled' : ''}
-          />
-        </label>
-      </section>
+      <stack gap="lg">
+        <section class="settings-group">
+          <h2>Appearance</h2>
+          <card>
+            <cluster>
+              <span>Theme</span>
+              <ry-theme-toggle id="theme-toggle" themes="light,dark"></ry-theme-toggle>
+            </cluster>
+          </card>
+        </section>
 
-      <section class="settings-group">
-        <h2>Notifications</h2>
-        <label class="setting-row">
-          <span>Enable Notifications</span>
-          <input
-            type="checkbox"
-            id="notifications-toggle"
-            ${notifications ? 'checked' : ''}
-            ${saving ? 'disabled' : ''}
-          />
-        </label>
-      </section>
+        <section class="settings-group">
+          <h2>Notifications</h2>
+          <card>
+            <ry-switch id="notifications-toggle" ${notifications ? 'checked' : ''} ${saving ? 'disabled' : ''}>
+              Enable Notifications
+            </ry-switch>
+          </card>
+        </section>
 
-      <section class="settings-group">
-        <h2>Devices</h2>
-        <a href="/devices" data-navigo class="setting-link">
-          Manage Devices →
-        </a>
-        <a href="/link-device" data-navigo class="setting-link">
-          Link New Device →
-        </a>
-      </section>
+        <section class="settings-group">
+          <h2>Devices</h2>
+          <stack gap="sm">
+            <card>
+              <a href="/devices" data-navigo>
+                <cluster>
+                  <span>Manage Devices</span>
+                  <ry-icon name="chevron-right"></ry-icon>
+                </cluster>
+              </a>
+            </card>
+            <card>
+              <a href="/link-device" data-navigo>
+                <cluster>
+                  <span>Link New Device</span>
+                  <ry-icon name="chevron-right"></ry-icon>
+                </cluster>
+              </a>
+            </card>
+          </stack>
+        </section>
 
-      <section class="settings-group">
-        <h2>Profile</h2>
-        <a href="/profile" data-navigo class="setting-link">
-          View Profile →
-        </a>
-        <a href="/profile/edit" data-navigo class="setting-link">
-          Edit Profile →
-        </a>
-      </section>
+        <section class="settings-group">
+          <h2>Profile</h2>
+          <stack gap="sm">
+            <card>
+              <a href="/profile" data-navigo>
+                <cluster>
+                  <span>View Profile</span>
+                  <ry-icon name="chevron-right"></ry-icon>
+                </cluster>
+              </a>
+            </card>
+            <card>
+              <a href="/profile/edit" data-navigo>
+                <cluster>
+                  <span>Edit Profile</span>
+                  <ry-icon name="chevron-right"></ry-icon>
+                </cluster>
+              </a>
+            </card>
+          </stack>
+        </section>
 
-      <section class="settings-group danger">
-        <h2>Account</h2>
-        <button id="logout-btn" class="danger">Log Out</button>
-      </section>
+        <section class="settings-group danger">
+          <h2>Account</h2>
+          <button variant="danger" modal="logout-modal">Log Out</button>
+        </section>
+      </stack>
 
-      <nav class="bottom-nav">
-        <a href="/stories" data-navigo>Feed</a>
-        <a href="/messages" data-navigo>Messages</a>
-        <a href="/friends" data-navigo>Friends</a>
-        <a href="/settings" data-navigo class="active">Settings</a>
-      </nav>
+      <ry-modal id="logout-modal" title="Confirm Logout">
+        <p>Are you sure you want to log out?</p>
+        <actions slot="footer">
+          <button variant="ghost" close>Cancel</button>
+          <button variant="danger" id="confirm-logout">Logout</button>
+        </actions>
+      </ry-modal>
+
+      ${renderNav('more')}
     </div>
   `;
 }
@@ -100,42 +124,46 @@ export async function mount(container, client, router) {
 
     container.innerHTML = render({ settings });
 
-    // Theme toggle
+    // Theme toggle - ry-theme-toggle auto-handles the toggle
+    // Listen for theme change to save to ORM
     const themeToggle = container.querySelector('#theme-toggle');
-    themeToggle.addEventListener('change', async () => {
-      const newTheme = themeToggle.checked ? 'dark' : 'light';
+    if (themeToggle) {
+      // ry-theme-toggle emits ry:change when theme changes
+      themeToggle.addEventListener('ry:change', async (e) => {
+        const newTheme = e.detail?.theme || document.documentElement.getAttribute('data-ry-theme') || 'light';
+        localStorage.setItem('ry-theme', newTheme);
 
-      // Apply immediately
-      document.body.classList.toggle('dark', newTheme === 'dark');
+        // Save to ORM
+        if (client.settings) {
+          try {
+            const notifToggle = container.querySelector('#notifications-toggle');
+            const data = {
+              theme: newTheme,
+              notificationsEnabled: notifToggle?.checked ?? true
+            };
 
-      // Save
-      if (client.settings) {
-        try {
-          const data = {
-            theme: newTheme,
-            notificationsEnabled: container.querySelector('#notifications-toggle').checked
-          };
-
-          if (settingsId) {
-            await client.settings.upsert(settingsId, data);
-          } else {
-            const created = await client.settings.create(data);
-            settingsId = created.id;
+            if (settingsId) {
+              await client.settings.upsert(settingsId, data);
+            } else {
+              const created = await client.settings.create(data);
+              settingsId = created.id;
+            }
+          } catch (err) {
+            console.error('Failed to save settings:', err);
           }
-        } catch (err) {
-          console.error('Failed to save settings:', err);
         }
-      }
-    });
+      });
+    }
 
-    // Notifications toggle
+    // Notifications toggle - listen for ry:change event from switch
     const notifToggle = container.querySelector('#notifications-toggle');
-    notifToggle.addEventListener('change', async () => {
+    notifToggle.addEventListener('ry:change', async (e) => {
       if (client.settings) {
         try {
+          const currentTheme = document.documentElement.getAttribute('data-ry-theme') || 'light';
           const data = {
-            theme: container.querySelector('#theme-toggle').checked ? 'dark' : 'light',
-            notificationsEnabled: notifToggle.checked
+            theme: currentTheme,
+            notificationsEnabled: e.detail.checked
           };
 
           if (settingsId) {
@@ -150,13 +178,21 @@ export async function mount(container, client, router) {
       }
     });
 
-    // Logout
-    const logoutBtn = container.querySelector('#logout-btn');
-    logoutBtn.addEventListener('click', () => {
-      if (confirm('Are you sure you want to log out?')) {
-        client.disconnect();
-        clearClient();
-      }
+    // Logout - modal handles confirmation, just attach to confirm button
+    const confirmLogout = container.querySelector('#confirm-logout');
+    confirmLogout.addEventListener('click', () => {
+      client.disconnect();
+      ObscuraClient.clearSession();
+      clearClient();
+      navigate('/login');
+    });
+
+    // Init nav
+    initNav(container, () => {
+      client.disconnect();
+      ObscuraClient.clearSession();
+      clearClient();
+      navigate('/login');
     });
 
     router.updatePageLinks();

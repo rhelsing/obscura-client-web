@@ -18,7 +18,15 @@ message WebSocketFrame {
 
     // Client -> Server: Acknowledge receipt of a message (Triggers DB deletion).
     AckMessage ack = 11;
+
+    // Server -> Client: Notification that one-time pre-keys are running low.
+    PreKeyStatus pre_key_status = 12;
   }
+}
+
+message PreKeyStatus {
+  int32 one_time_pre_key_count = 1;
+  int32 min_threshold = 2; // The server's configured threshold
 }
 
 // Represents a message waiting in the queue for the connected device.

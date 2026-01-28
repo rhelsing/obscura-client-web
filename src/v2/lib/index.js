@@ -26,6 +26,8 @@ export const Obscura = {
 
     return new ObscuraClient({
       apiUrl: opts.apiUrl,
+      wsBasePath: opts.wsBasePath,
+      protoBasePath: opts.protoBasePath,
       store: result.store,
       token: result.token,
       refreshToken: result.refreshToken,
@@ -55,6 +57,7 @@ export const Obscura = {
         status: 'ok',
         client: new ObscuraClient({
           apiUrl: opts.apiUrl,
+          protoBasePath: opts.protoBasePath,
           store: result.client.store,
           token: result.client.token,
           refreshToken: result.client.refreshToken,
@@ -72,6 +75,7 @@ export const Obscura = {
         linkCode: result.linkCode,
         client: new ObscuraClient({
           apiUrl: opts.apiUrl,
+          protoBasePath: opts.protoBasePath,
           store: result.client.store,
           token: result.client.token,
           refreshToken: result.client.refreshToken,

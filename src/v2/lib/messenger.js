@@ -38,6 +38,7 @@ export class Messenger {
     this.apiUrl = opts.apiUrl;
     this.store = opts.store;
     this.token = opts.token;
+    this.protoBasePath = opts.protoBasePath;
     this.proto = null;
     this.clientProto = null;
   }
@@ -49,24 +50,37 @@ export class Messenger {
   async loadProto() {
     if (this.proto) return;
 
-    // Dynamic import for protobuf
     const protobuf = (await import('protobufjs')).default;
-    const { fileURLToPath } = await import('url');
-    const { dirname, join } = await import('path');
 
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = dirname(__filename);
+    const isBrowser = typeof window !== 'undefined';
+    let serverProtoPath, clientProtoPath;
 
-    const serverProtoPath = join(__dirname, '../../../public/proto/obscura/v1/obscura.proto');
-    const clientProtoPath = join(__dirname, '../proto/client.proto');
+    if (isBrowser) {
+      // Browser: use URL paths (Vite serves from public/)
+      const base = this.protoBasePath || import.meta.env?.BASE_URL || '/';
+      serverProtoPath = `${base}proto/obscura/v1/obscura.proto`;
+      clientProtoPath = `${base}proto/v2/client.proto`;
+    } else {
+      // Node.js: use filesystem paths
+      const { fileURLToPath } = await import('url');
+      const { dirname, join } = await import('path');
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = dirname(__filename);
+      serverProtoPath = join(__dirname, '../../../public/proto/obscura/v1/obscura.proto');
+      clientProtoPath = join(__dirname, '../../../public/proto/v2/client.proto');
+    }
+
+    console.log('[Messenger] loadProto:', { isBrowser, serverProtoPath, clientProtoPath });
 
     this.proto = await protobuf.load(serverProtoPath);
+    console.log('[Messenger] Server proto loaded:', Object.keys(this.proto.nested || {}));
     this.WebSocketFrame = this.proto.lookupType('obscura.v1.WebSocketFrame');
     this.Envelope = this.proto.lookupType('obscura.v1.Envelope');
     this.EncryptedMessage = this.proto.lookupType('obscura.v1.EncryptedMessage');
     this.AckMessage = this.proto.lookupType('obscura.v1.AckMessage');
 
     this.clientProto = await protobuf.load(clientProtoPath);
+    console.log('[Messenger] Client proto loaded:', Object.keys(this.clientProto.nested || {}));
     this.ClientMessage = this.clientProto.lookupType('obscura.v2.ClientMessage');
     this.DeviceInfo = this.clientProto.lookupType('obscura.v2.DeviceInfo');
     this.DeviceLinkApproval = this.clientProto.lookupType('obscura.v2.DeviceLinkApproval');
@@ -75,6 +89,11 @@ export class Messenger {
     this.SyncBlob = this.clientProto.lookupType('obscura.v2.SyncBlob');
     this.ContentReference = this.clientProto.lookupType('obscura.v2.ContentReference');
     this.ModelSync = this.clientProto.lookupType('obscura.v2.ModelSync');
+    console.log('[Messenger] Proto loading complete. Types:', {
+      WebSocketFrame: !!this.WebSocketFrame,
+      ClientMessage: !!this.ClientMessage,
+      ModelSync: !!this.ModelSync,
+    });
   }
 
   /**

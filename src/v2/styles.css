@@ -20,7 +20,8 @@
   --shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
-body.dark {
+/* Dark theme - works with ry-ui data-ry-theme attribute */
+[data-ry-theme="dark"] {
   --bg: #1a1a1a;
   --bg-secondary: #2a2a2a;
   --text: #fff;
@@ -762,14 +763,7 @@ ul {
   font-family: monospace;
 }
 
-.badge {
-  padding: 4px 8px;
-  background: var(--primary);
-  color: white;
-  border-radius: 12px;
-  font-size: 12px;
-  text-decoration: none;
-}
+/* Badge now handled by ry-ui badge */
 
 /* Groups */
 .group-header {
@@ -817,6 +811,187 @@ ul {
   color: var(--text-secondary);
   text-align: center;
   margin-top: 16px;
+}
+
+/* 5-item Bottom Nav */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  padding: 4px 0;
+  padding-bottom: env(safe-area-inset-bottom, 4px);
+  z-index: 100;
+}
+
+.bottom-nav a,
+.bottom-nav button {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.bottom-nav a .icon,
+.bottom-nav button .icon {
+  font-size: 20px;
+}
+
+.bottom-nav a.active,
+.bottom-nav button.active {
+  color: var(--primary);
+}
+
+/* Drawer link styling */
+ry-drawer a[data-navigo],
+.drawer-link {
+  display: flex;
+  align-items: center;
+  gap: var(--ry-space-3, 12px);
+  padding: var(--ry-space-3, 12px);
+  color: var(--text);
+  text-decoration: none;
+  border-radius: var(--ry-radius-md, 8px);
+}
+
+ry-drawer a[data-navigo]:hover,
+.drawer-link:hover {
+  background: var(--bg-secondary);
+}
+
+/* Logs View */
+.logs header {
+  flex-wrap: wrap;
+}
+
+.logs-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.log-select {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.logs-stats {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--success);
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.logs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 100px;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+}
+
+.log-event {
+  background: var(--bg-secondary);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.log-event:hover {
+  background: var(--border);
+}
+
+.log-event-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.log-dir {
+  font-size: 14px;
+  width: 20px;
+  text-align: center;
+}
+
+.log-dir.out { color: #3b82f6; }
+.log-dir.in { color: #a855f7; }
+.log-dir.session { color: #f97316; }
+.log-dir.gateway { color: #6b7280; }
+
+.log-time {
+  font-family: monospace;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.log-type {
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: white;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.log-corr {
+  font-family: monospace;
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-left: auto;
+}
+
+.log-expand {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.log-event-details {
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+
+.log-data {
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--bg);
+  padding: 12px;
+  border-radius: var(--radius);
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 /* Responsive */

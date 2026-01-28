@@ -1,0 +1,183 @@
+// Obscura v2 Client Protocol
+// Unified client-to-client message format for all v2 operations.
+// This is the payload inside EncryptedMessage.content - server never sees it.
+//
+// See: docs/protocol-spec.md, docs/identity.md
+
+syntax = "proto3";
+package obscura.v2;
+
+// =============================================================================
+// Main Message Wrapper
+// =============================================================================
+
+message ClientMessage {
+  Type type = 1;
+  uint64 timestamp = 2;
+
+  // Base messaging
+  string text = 10;
+  string mime_type = 11;
+  uint32 display_duration = 12;
+
+  // Attachment reference (replaces inline image_data)
+  string attachment_id = 15;
+  uint64 attachment_expires = 16;
+
+  // Friend request/response
+  string username = 20;
+  bool accepted = 21;
+
+  // Session reset
+  string reset_reason = 25;
+
+  // Device management payloads
+  DeviceLinkApproval device_link_approval = 30;
+  DeviceAnnounce device_announce = 31;
+
+  // Sync payloads (for new device onboarding)
+  HistoryChunk history_chunk = 40;
+  bytes settings_data = 41;
+  string read_message_id = 42;
+  SyncBlob sync_blob = 43;
+  SentSync sent_sync = 44;
+
+  // Attachment reference (E2E encrypted key sharing)
+  ContentReference content_reference = 45;
+
+  enum Type {
+    // Base messaging (0-9)
+    TEXT = 0;
+    IMAGE = 1;
+    FRIEND_REQUEST = 2;
+    FRIEND_RESPONSE = 3;
+    SESSION_RESET = 4;
+
+    // Device management (10-19)
+    // Note: 10 intentionally skipped - link "request" is out-of-band (QR/link code)
+    DEVICE_LINK_APPROVAL = 11;
+    DEVICE_ANNOUNCE = 12;
+
+    // Sync (20-29)
+    HISTORY_CHUNK = 20;
+    SETTINGS_SYNC = 21;
+    READ_SYNC = 22;
+    SYNC_BLOB = 23;      // Full state transfer (gzipped JSON)
+    SENT_SYNC = 24;      // Notify own devices of sent message
+    CONTENT_REFERENCE = 25;  // E2E encrypted attachment key sharing
+
+    // ORM Layer (30-39)
+    MODEL_SYNC = 30;     // CRDT model operation (create/update/delete)
+  }
+
+  // ORM Layer payload
+  ModelSync model_sync = 50;
+}
+
+// =============================================================================
+// Device Management
+// =============================================================================
+
+// Information about a single device
+message DeviceInfo {
+  string device_uuid = 1;           // Device UUID (e.g., "550e8400-e29b-41d4...")
+  string server_user_id = 2;        // Server username (e.g., "alice_abc123")
+  string device_name = 3;           // Human-readable name (e.g., "iPhone")
+  bytes signal_identity_key = 4;    // Signal identity public key (33 bytes with 0x05 prefix)
+}
+
+// Sent from existing device to new device to complete linking
+// Per identity.md: transfers P2P identity, device list, and optionally data exports
+message DeviceLinkApproval {
+  bytes p2p_public_key = 1;         // P2P identity public key (33 bytes - Curve25519 with prefix)
+  bytes p2p_private_key = 2;        // P2P identity private key (32 bytes) - transferred securely
+  bytes recovery_public_key = 3;    // Recovery public key (32 bytes) for revocation verification
+  bytes challenge_response = 4;     // Echo back challenge from link code
+  repeated DeviceInfo own_devices = 5;  // Complete list of linked devices
+  bytes friends_export = 6;         // Serialized friend list (optional)
+  bytes sessions_export = 7;        // Serialized Signal sessions (optional)
+  bytes trusted_ids_export = 8;     // Serialized trusted identities (optional)
+}
+
+// Broadcast to all friends when device list changes
+// Per identity.md: LWW semantics - latest timestamp wins
+message DeviceAnnounce {
+  repeated DeviceInfo devices = 1;  // Current complete device list (replaces old list)
+  uint64 timestamp = 2;             // For LWW merge (latest wins)
+  bool is_revocation = 3;           // True if this removes a device
+  bytes signature = 4;              // Signed with device key (add) or recovery key (revoke)
+}
+
+// =============================================================================
+// Sync (New Device Onboarding)
+// =============================================================================
+
+// Chunk of history sent to new device
+message HistoryChunk {
+  repeated MessageEntry entries = 1;
+  bool is_final = 2;                // True if this is the last chunk
+}
+
+// Single message entry for history sync
+message MessageEntry {
+  string message_id = 1;            // Unique ID: hash(content + timestamp + author_device)
+  uint64 timestamp = 2;             // Client timestamp (ms since epoch)
+  bytes content = 3;                // The actual message payload
+  bytes author_device_id = 4;       // Which device created this
+  bytes signature = 5;              // sign(message_id + timestamp + content, device_key)
+}
+
+// Full state transfer blob (gzipped JSON)
+// Sent from existing device to new device after link approval
+message SyncBlob {
+  bytes compressed_data = 1;        // gzip(JSON.stringify({ friends, messages, settings }))
+}
+
+// Notify own devices of sent message (for incremental sync)
+// Sent to all own devices when a message is sent to a friend
+message SentSync {
+  string conversation_id = 1;       // Friend username (who the message was sent to)
+  string message_id = 2;            // Unique message ID
+  uint64 timestamp = 3;             // When the message was sent
+  bytes content = 4;                // The message content
+}
+
+// =============================================================================
+// Attachments (E2E Encrypted)
+// =============================================================================
+
+// Reference to an encrypted attachment
+// The blob is encrypted with AES-256-GCM before upload.
+// This message carries the key to recipients via Signal encryption.
+// Upload once, share key to many.
+message ContentReference {
+  string attachment_id = 1;         // Server attachment ID
+  bytes content_key = 2;            // AES-256-GCM key (32 bytes)
+  bytes nonce = 3;                  // AES-GCM nonce (12 bytes)
+  bytes content_hash = 4;           // SHA-256 of plaintext for integrity
+  string content_type = 5;          // MIME type (e.g., "image/jpeg")
+  uint64 size_bytes = 6;            // Original size for progress/preview
+}
+
+// =============================================================================
+// ORM Layer (Level 3)
+// =============================================================================
+
+// CRDT model sync operation
+// Sent between devices to synchronize model state (stories, streaks, etc.)
+// Uses existing fan-out + self-sync patterns from Level 2
+message ModelSync {
+  string model = 1;                 // Model name: "story", "streak", "settings"
+  string id = 2;                    // Entry ID: "story_1706389200_abc123"
+  Op op = 3;                        // Operation type
+  uint64 timestamp = 4;             // Lamport timestamp for CRDT ordering
+  bytes data = 5;                   // JSON-encoded model data
+  bytes signature = 6;              // sign(model + id + data + timestamp, deviceKey)
+  string author_device_id = 7;      // Which device created this entry
+
+  enum Op {
+    CREATE = 0;
+    UPDATE = 1;                     // Only for LWW models
+    DELETE = 2;                     // Soft delete (tombstone)
+  }
+}

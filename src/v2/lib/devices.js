@@ -73,10 +73,12 @@ export class DeviceManager {
 
   /**
    * Remove a device (revocation)
-   * @param {string} serverUserId
+   * @param {string} idOrUUID - serverUserId or deviceUUID
    */
-  remove(serverUserId) {
-    this.ownDevices = this.ownDevices.filter(d => d.serverUserId !== serverUserId);
+  remove(idOrUUID) {
+    this.ownDevices = this.ownDevices.filter(d =>
+      d.serverUserId !== idOrUUID && d.deviceUUID !== idOrUUID
+    );
   }
 
   /**
@@ -117,7 +119,7 @@ export class DeviceManager {
 /**
  * Parse link code from another device
  * @param {string} linkCode - Base64 encoded link code
- * @returns {object} { userId, serverUserId, deviceUsername, signalIdentityKey, challenge }
+ * @returns {object} { userId, serverUserId, deviceUsername, signalIdentityKey, challenge, signature, expiresAt }
  */
 export function parseLinkCode(linkCode) {
   try {
@@ -128,6 +130,8 @@ export function parseLinkCode(linkCode) {
       deviceUsername: data.u,     // Username for display
       signalIdentityKey: base64ToUint8Array(data.k),
       challenge: base64ToUint8Array(data.c),
+      signature: data.s ? base64ToUint8Array(data.s) : null,  // Signature proving ownership
+      expiresAt: data.e || null,  // Expiry timestamp (ms)
     };
   } catch (e) {
     throw new Error('Invalid link code');

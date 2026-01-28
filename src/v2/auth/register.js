@@ -5,7 +5,8 @@
 
 import { generateDeviceUUID, uuidPrefix } from '../crypto/uuid.js';
 import { generateP2PIdentity } from '../crypto/ed25519.js';
-import { generateMnemonic, deriveKeypair } from '../crypto/bip39.js';
+import { generateMnemonic } from '../crypto/bip39.js';
+import { deriveRecoveryKeypair } from '../crypto/signatures.js';
 import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
 
 /**
@@ -22,8 +23,8 @@ export async function generateFirstDeviceKeys() {
   // Generate 12-word recovery phrase (BIP39)
   const recoveryPhrase = await generateMnemonic();
 
-  // Derive recovery keypair from phrase
-  const recoveryKeypair = await deriveKeypair(recoveryPhrase);
+  // Derive recovery keypair from phrase (Ed25519 for signing)
+  const recoveryKeypair = await deriveRecoveryKeypair(recoveryPhrase);
 
   // Generate Signal Protocol keys
   const signalIdentityKeyPair = await KeyHelper.generateIdentityKeyPair();

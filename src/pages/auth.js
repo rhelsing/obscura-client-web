@@ -79,6 +79,10 @@ export function renderAuth(container, onSuccess) {
             ${mode === 'login' ? 'Sign Up' : 'Sign In'}
           </button>
         </div>
+
+        <div class="auth-v2-link">
+          <a href="/v2.html">Try V2 →</a>
+        </div>
       </div>
     `;
 

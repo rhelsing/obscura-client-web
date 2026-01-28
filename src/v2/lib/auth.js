@@ -7,7 +7,8 @@ import { generateFirstDeviceKeys, formatSignalKeysForServer } from '../auth/regi
 import { LoginScenario, detectScenario } from '../auth/scenarios.js';
 import { generateDeviceUUID, uuidPrefix } from '../crypto/uuid.js';
 import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
-import { InMemoryStore } from './store.js';
+import { createStore, InMemoryStore } from './store.js';
+import { signLinkChallenge } from '../crypto/signatures.js';
 
 /**
  * Register a new user (creates shell + device accounts internally)
@@ -18,7 +19,7 @@ import { InMemoryStore } from './store.js';
  */
 export async function register(username, password, opts = {}) {
   const { apiUrl } = opts;
-  const store = opts.store || new InMemoryStore();
+  const store = opts.store || createStore(username);
 
   // Generate all keys
   const keys = await generateFirstDeviceKeys();
@@ -76,7 +77,8 @@ export async function register(username, password, opts = {}) {
     deviceUsername,
     deviceUUID: keys.deviceUUID,
     p2pIdentity: keys.p2pIdentity,
-    recoveryKeypair: keys.recoveryKeypair,
+    // Only store PUBLIC key - private key is never stored, must re-derive from phrase
+    recoveryPublicKey: keys.recoveryKeypair.publicKey,
     deviceInfo: {
       deviceUUID: keys.deviceUUID,
       serverUserId: userId,  // Use UUID, not deviceUsername!
@@ -102,7 +104,7 @@ export async function register(username, password, opts = {}) {
  */
 export async function login(username, password, opts = {}) {
   const { apiUrl } = opts;
-  const store = opts.store || new InMemoryStore();
+  const store = opts.store || createStore(username);
 
   // Try shell login
   let shellLoginSuccess = false;
@@ -208,7 +210,8 @@ export async function login(username, password, opts = {}) {
 
   // Generate link code for existing device to scan
   // Use userId (UUID) for server communication, deviceUsername for display
-  const linkCode = generateLinkCode(userId, deviceUsername, identityKeyPair.pubKey);
+  // Sign the challenge with identity key for security
+  const linkCode = await generateLinkCode(userId, deviceUsername, identityKeyPair);
 
   return {
     status: 'newDevice',
@@ -253,13 +256,19 @@ function parseUserId(token) {
   return decoded.sub || decoded.user_id || decoded.userId || decoded.id;
 }
 
-// Helper: generate simple link code (base64 encoded)
-function generateLinkCode(userId, deviceUsername, publicKey) {
+// Helper: generate signed link code with expiry (base64 encoded)
+async function generateLinkCode(userId, deviceUsername, identityKeyPair) {
+  const challenge = crypto.getRandomValues(new Uint8Array(16));
+  const signature = await signLinkChallenge(challenge, identityKeyPair.privKey);
+  const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes from now
+
   const data = {
     i: userId,         // UUID for server API calls
     u: deviceUsername, // Username for display
-    k: arrayBufferToBase64(publicKey),
-    c: arrayBufferToBase64(crypto.getRandomValues(new Uint8Array(16))),
+    k: arrayBufferToBase64(identityKeyPair.pubKey),
+    c: arrayBufferToBase64(challenge),
+    s: arrayBufferToBase64(signature),  // Signature proves this device owns the key
+    e: expiresAt,      // Expiry timestamp
   };
   return btoa(JSON.stringify(data));
 }

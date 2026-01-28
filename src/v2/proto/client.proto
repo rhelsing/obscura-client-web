@@ -42,6 +42,9 @@ message ClientMessage {
   SyncBlob sync_blob = 43;
   SentSync sent_sync = 44;
 
+  // Attachment reference (E2E encrypted key sharing)
+  ContentReference content_reference = 45;
+
   enum Type {
     // Base messaging (0-9)
     TEXT = 0;
@@ -61,7 +64,14 @@ message ClientMessage {
     READ_SYNC = 22;
     SYNC_BLOB = 23;      // Full state transfer (gzipped JSON)
     SENT_SYNC = 24;      // Notify own devices of sent message
+    CONTENT_REFERENCE = 25;  // E2E encrypted attachment key sharing
+
+    // ORM Layer (30-39)
+    MODEL_SYNC = 30;     // CRDT model operation (create/update/delete)
   }
+
+  // ORM Layer payload
+  ModelSync model_sync = 50;
 }
 
 // =============================================================================
@@ -130,4 +140,44 @@ message SentSync {
   string message_id = 2;            // Unique message ID
   uint64 timestamp = 3;             // When the message was sent
   bytes content = 4;                // The message content
+}
+
+// =============================================================================
+// Attachments (E2E Encrypted)
+// =============================================================================
+
+// Reference to an encrypted attachment
+// The blob is encrypted with AES-256-GCM before upload.
+// This message carries the key to recipients via Signal encryption.
+// Upload once, share key to many.
+message ContentReference {
+  string attachment_id = 1;         // Server attachment ID
+  bytes content_key = 2;            // AES-256-GCM key (32 bytes)
+  bytes nonce = 3;                  // AES-GCM nonce (12 bytes)
+  bytes content_hash = 4;           // SHA-256 of plaintext for integrity
+  string content_type = 5;          // MIME type (e.g., "image/jpeg")
+  uint64 size_bytes = 6;            // Original size for progress/preview
+}
+
+// =============================================================================
+// ORM Layer (Level 3)
+// =============================================================================
+
+// CRDT model sync operation
+// Sent between devices to synchronize model state (stories, streaks, etc.)
+// Uses existing fan-out + self-sync patterns from Level 2
+message ModelSync {
+  string model = 1;                 // Model name: "story", "streak", "settings"
+  string id = 2;                    // Entry ID: "story_1706389200_abc123"
+  Op op = 3;                        // Operation type
+  uint64 timestamp = 4;             // Lamport timestamp for CRDT ordering
+  bytes data = 5;                   // JSON-encoded model data
+  bytes signature = 6;              // sign(model + id + data + timestamp, deviceKey)
+  string author_device_id = 7;      // Which device created this entry
+
+  enum Op {
+    CREATE = 0;
+    UPDATE = 1;                     // Only for LWW models
+    DELETE = 2;                     // Soft delete (tombstone)
+  }
 }

@@ -3,6 +3,26 @@
  * Supports in-memory (tests) or IndexedDB (browser)
  */
 
+import { IndexedDBStore } from './IndexedDBStore.js';
+
+/**
+ * Auto-detect environment and create appropriate store
+ * @param {string} namespace - Optional namespace for the store (usually username)
+ * @returns {InMemoryStore|IndexedDBStore}
+ */
+export function createStore(namespace = 'default') {
+  // Only use IndexedDB in real browser (not Node.js with fake-indexeddb)
+  // Check for both indexedDB and window to detect actual browser
+  const isBrowser = typeof window !== 'undefined' && typeof indexedDB !== 'undefined';
+  if (!isBrowser) {
+    return new InMemoryStore();
+  }
+  // Browser - use IndexedDB for persistence
+  return new IndexedDBStore(namespace);
+}
+
+export { IndexedDBStore };
+
 export class InMemoryStore {
   constructor() {
     this.identityKeyPair = null;

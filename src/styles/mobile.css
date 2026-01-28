@@ -159,6 +159,25 @@ body::before {
   margin-left: 0.25rem;
 }
 
+.auth-v2-link {
+  margin-top: 3rem;
+  font-size: 0.875rem;
+}
+
+.auth-v2-link a {
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.auth-v2-link a:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .auth-error {
   background: rgba(255, 59, 48, 0.1);
   border: 1px solid var(--danger);

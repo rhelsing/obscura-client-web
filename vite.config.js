@@ -1,4 +1,5 @@
 import { defineConfig, loadEnv } from 'vite';
+import { resolve } from 'path';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
@@ -27,6 +28,12 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: 'dist',
+      rollupOptions: {
+        input: {
+          main: resolve(__dirname, 'index.html'),
+          v2: resolve(__dirname, 'v2.html'),
+        },
+      },
     },
   };
 });

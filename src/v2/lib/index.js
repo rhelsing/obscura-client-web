@@ -5,7 +5,7 @@
 
 import { register, login } from './auth.js';
 import { ObscuraClient } from './ObscuraClient.js';
-import { InMemoryStore } from './store.js';
+import { createStore, InMemoryStore, IndexedDBStore } from './store.js';
 import { FriendManager } from './friends.js';
 import { DeviceManager } from './devices.js';
 import { Messenger, MessageType, MessageTypeName } from './messenger.js';
@@ -35,7 +35,7 @@ export const Obscura = {
       deviceUUID: result.deviceUUID,
       deviceInfo: result.deviceInfo,
       p2pIdentity: result.p2pIdentity,
-      recoveryKeypair: result.recoveryKeypair,
+      recoveryPublicKey: result.recoveryPublicKey,  // Only public key, never private
       recoveryPhrase: result.getRecoveryPhrase(),
     });
   },
@@ -95,7 +95,9 @@ export const Obscura = {
 // Export individual modules for advanced use
 export {
   ObscuraClient,
+  createStore,
   InMemoryStore,
+  IndexedDBStore,
   FriendManager,
   DeviceManager,
   Messenger,

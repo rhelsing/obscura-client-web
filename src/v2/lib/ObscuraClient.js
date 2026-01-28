@@ -6,11 +6,25 @@
 import { FriendManager } from './friends.js';
 import { DeviceManager, parseLinkCode, buildLinkApproval } from './devices.js';
 import { Messenger, MessageType } from './messenger.js';
+import { AttachmentManager } from './attachments.js';
 import { compress, decompress } from '../crypto/compress.js';
+import {
+  signWithRecoveryPhrase,
+  verifyRecoverySignature,
+  verifyLinkChallenge,
+  serializeAnnounceForSigning,
+  generateVerifyCode,
+} from '../crypto/signatures.js';
+import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
+import { createSchema } from '../orm/index.js';
 
 // Default reconnect settings
 const RECONNECT_DELAY_MS = 1000;
 const RECONNECT_MAX_DELAY_MS = 30000;
+
+// Prekey replenishment settings
+const PREKEY_MIN_COUNT = 20;
+const PREKEY_REPLENISH_COUNT = 50;
 
 export class ObscuraClient {
   constructor(opts) {
@@ -24,7 +38,7 @@ export class ObscuraClient {
     this.deviceUUID = opts.deviceUUID;
     this.deviceInfo = opts.deviceInfo;
     this.p2pIdentity = opts.p2pIdentity;
-    this.recoveryKeypair = opts.recoveryKeypair;
+    this.recoveryPublicKey = opts.recoveryPublicKey;  // Only public key, never private
 
     // Recovery phrase - private, cleared after read
     this._recoveryPhrase = opts.recoveryPhrase || null;
@@ -32,12 +46,19 @@ export class ObscuraClient {
     // Link code for new device linking
     this.linkCode = opts.linkCode || null;
 
+    // Track used link codes (one-use enforcement)
+    this._usedLinkCodes = new Set();
+
     // Managers
     this.friends = new FriendManager();
     this.devices = new DeviceManager(this.userId);
     this.messenger = new Messenger({
       apiUrl: this.apiUrl,
       store: this.store,
+      token: this.token,
+    });
+    this.attachments = new AttachmentManager({
+      apiUrl: this.apiUrl,
       token: this.token,
     });
 
@@ -50,12 +71,14 @@ export class ObscuraClient {
     // Event handlers
     this._handlers = {
       message: [],
+      attachment: [],
       friendRequest: [],
       friendResponse: [],
       deviceAnnounce: [],
       linkApproval: [],
       sentSync: [],
       syncBlob: [],
+      modelSync: [],
       disconnect: [],
       reconnect: [],
       error: [],
@@ -63,6 +86,29 @@ export class ObscuraClient {
 
     // Message history
     this.messages = [];
+
+    // ORM Layer (initialized by schema())
+    this._ormModels = null;
+    this._ormSyncManager = null;
+  }
+
+  /**
+   * Define models for the ORM layer
+   *
+   * Usage:
+   *   await client.schema({
+   *     story: { fields: { content: 'string' }, sync: 'g-set', ephemeral: true, ttl: '24h' },
+   *     streak: { fields: { count: 'number' }, sync: 'lww', collectable: true },
+   *   });
+   *
+   *   // Then use:
+   *   await client.story.create({ content: 'Hello!' });
+   *
+   * @param {object} definitions - Model definitions
+   * @returns {Promise<SchemaBuilder>}
+   */
+  async schema(definitions) {
+    return createSchema(this, definitions);
   }
 
   /**
@@ -73,6 +119,17 @@ export class ObscuraClient {
     const phrase = this._recoveryPhrase;
     this._recoveryPhrase = null;
     return phrase;
+  }
+
+  /**
+   * Get my 4-digit verify code for sharing with friends
+   * They can use this to verify friend requests came from me
+   * @returns {Promise<string>} 4-digit code ("0000" - "9999")
+   */
+  async getMyVerifyCode() {
+    const identityKey = this.deviceInfo?.signalIdentityKey;
+    if (!identityKey) return null;
+    return generateVerifyCode(identityKey);
   }
 
   /**
@@ -257,6 +314,9 @@ export class ObscuraClient {
 
         this._routeMessage(msg);
         this._acknowledge(frame.envelope.id);
+
+        // Check and replenish prekeys (non-blocking)
+        this._checkAndReplenishPrekeys().catch(() => {});
       }
     } catch (e) {
       // Suppress replay protection errors (stale messages)
@@ -302,6 +362,26 @@ export class ObscuraClient {
       case 'SYNC_BLOB':
         this._processSyncBlob(msg);
         this._emit('syncBlob', msg.syncBlob);
+        break;
+
+      case 'CONTENT_REFERENCE':
+        this._emit('attachment', {
+          from: msg.sourceUserId,
+          contentReference: msg.contentReference,
+          timestamp: msg.timestamp,
+        });
+        break;
+
+      case 'MODEL_SYNC':
+        // Route to ORM sync manager if available (non-blocking)
+        if (this._ormSyncManager) {
+          this._ormSyncManager.handleIncoming(msg.modelSync, msg.sourceUserId)
+            .catch(e => console.error('MODEL_SYNC handling failed:', e.message));
+        }
+        this._emit('modelSync', {
+          ...msg.modelSync,
+          sourceUserId: msg.sourceUserId,
+        });
         break;
 
       case 'TEXT':
@@ -428,15 +508,84 @@ export class ObscuraClient {
   }
 
   /**
+   * Send an attachment to a friend (upload once, fan-out ContentReference)
+   * @param {string} friendUsername - Friend to send to
+   * @param {Blob|ArrayBuffer|Uint8Array} content - Content to upload
+   * @param {object} opts - Optional: { contentType }
+   * @returns {Promise<object>} The ContentReference
+   */
+  async sendAttachment(friendUsername, content, opts = {}) {
+    // Upload and encrypt once
+    const ref = await this.attachments.upload(content);
+
+    // Fan-out ContentReference to all friend devices
+    const targets = this.friends.getFanOutTargets(friendUsername);
+    const timestamp = Date.now();
+
+    for (const targetUserId of targets) {
+      await this.messenger.sendMessage(targetUserId, {
+        type: 'CONTENT_REFERENCE',
+        contentReference: ref,
+        timestamp,
+      });
+    }
+
+    // Self-sync to own devices
+    const selfTargets = this.devices.getSelfSyncTargets();
+    for (const targetUserId of selfTargets) {
+      await this.messenger.sendMessage(targetUserId, {
+        type: 'SENT_SYNC',
+        sentSync: {
+          conversationId: friendUsername,
+          messageId: ref.attachmentId,
+          timestamp,
+          contentReference: ref,
+        },
+      });
+    }
+
+    return ref;
+  }
+
+  /**
    * Approve a device link (existing device approves new)
    * Sends DEVICE_LINK_APPROVAL followed by SYNC_BLOB
+   *
+   * Security checks:
+   * - Link code expiry (5 min)
+   * - One-use (can't replay)
+   * - Signature verification (proves code came from device with that key)
    */
   async approveLink(linkCode) {
     const parsed = parseLinkCode(linkCode);
 
+    // Check expiry (if present - for backwards compat)
+    if (parsed.expiresAt && Date.now() > parsed.expiresAt) {
+      throw new Error('Link code expired');
+    }
+
+    // Check one-use (convert challenge to string for Set)
+    const challengeKey = Array.from(parsed.challenge).join(',');
+    if (this._usedLinkCodes.has(challengeKey)) {
+      throw new Error('Link code already used');
+    }
+    this._usedLinkCodes.add(challengeKey);
+
+    // Verify signature (if present - for backwards compat)
+    if (parsed.signature && parsed.signalIdentityKey) {
+      const valid = await verifyLinkChallenge(
+        parsed.challenge,
+        parsed.signature,
+        parsed.signalIdentityKey
+      );
+      if (!valid) {
+        throw new Error('Invalid link code signature');
+      }
+    }
+
     const approval = buildLinkApproval({
       p2pPublicKey: this.p2pIdentity?.publicKey || new Uint8Array(32),
-      recoveryPublicKey: this.recoveryKeypair?.publicKey || new Uint8Array(32),
+      recoveryPublicKey: this.recoveryPublicKey || new Uint8Array(32),
       challenge: parsed.challenge,
       ownDevices: this.devices.buildFullList(this.deviceInfo || {
         serverUserId: this.userId,
@@ -559,7 +708,45 @@ export class ObscuraClient {
   }
 
   /**
+   * Revoke a device (remove from own list, broadcast to friends)
+   * Requires recovery phrase to sign the revocation.
+   *
+   * @param {string} recoveryPhrase - 12-word BIP39 phrase
+   * @param {string} deviceUUID - UUID of device to revoke
+   */
+  async revokeDevice(recoveryPhrase, deviceUUID) {
+    // Remove from local device list
+    this.devices.remove(deviceUUID);
+
+    // Build revocation announcement with updated device list
+    const announce = {
+      devices: this.devices.buildFullList(this.deviceInfo || {
+        serverUserId: this.userId,
+        deviceUUID: this.deviceUUID,
+        deviceName: this.username,
+      }),
+      timestamp: Date.now(),
+      isRevocation: true,
+    };
+
+    // Sign with recovery key (derives keypair from phrase, signs, discards private key)
+    const dataToSign = serializeAnnounceForSigning(announce);
+    announce.signature = await signWithRecoveryPhrase(recoveryPhrase, dataToSign);
+
+    // Broadcast to all friends
+    for (const friend of this.friends.getAll()) {
+      for (const device of friend.devices) {
+        await this.messenger.sendMessage(device.serverUserId, {
+          type: 'DEVICE_ANNOUNCE',
+          deviceAnnounce: announce,
+        });
+      }
+    }
+  }
+
+  /**
    * Process device announce (update friend's device list)
+   * For revocations, verifies signature if recovery public key is known.
    */
   _processAnnounce(msg) {
     const announce = msg.deviceAnnounce;
@@ -568,15 +755,42 @@ export class ObscuraClient {
     return {
       ...announce,
       sourceUserId: msg.sourceUserId,
-      apply() {
-        // Find which friend this is from and update their devices
-        for (const friend of self.friends.getAll()) {
-          const isFromFriend = friend.devices.some(d => d.serverUserId === msg.sourceUserId);
+
+      /**
+       * Apply the device list update
+       * For revocations, optionally verify signature first
+       */
+      async apply() {
+        // Find which friend this is from
+        let friend = null;
+        for (const f of self.friends.getAll()) {
+          const isFromFriend = f.devices.some(d => d.serverUserId === msg.sourceUserId);
           if (isFromFriend) {
-            self.friends.setDevices(friend.username, announce.devices);
+            friend = f;
             break;
           }
         }
+
+        if (!friend) return;
+
+        // For revocations, verify signature if we have their recovery public key
+        if (announce.isRevocation) {
+          if (friend.recoveryPublicKey && announce.signature) {
+            const dataToSign = serializeAnnounceForSigning(announce);
+            const valid = await verifyRecoverySignature(
+              friend.recoveryPublicKey,
+              dataToSign,
+              announce.signature
+            );
+            if (!valid) {
+              console.warn(`Invalid revocation signature from ${friend.username}, ignoring`);
+              return;
+            }
+          }
+          // If no recoveryPublicKey stored, accept anyway (backwards compat)
+        }
+
+        self.friends.setDevices(friend.username, announce.devices);
       },
     };
   }
@@ -594,4 +808,80 @@ export class ObscuraClient {
       isSent: true,
     });
   }
+
+  /**
+   * Check prekey count and replenish if below threshold
+   * Called after successful message decryption (prekeys consumed on first message from new sender)
+   */
+  async _checkAndReplenishPrekeys() {
+    try {
+      const count = await this.store.getPreKeyCount();
+      if (count >= PREKEY_MIN_COUNT) return;
+
+      const highestId = await this.store.getHighestPreKeyId();
+      const newPreKeys = [];
+
+      // Generate new prekeys
+      for (let i = 1; i <= PREKEY_REPLENISH_COUNT; i++) {
+        const pk = await KeyHelper.generatePreKey(highestId + i);
+        await this.store.storePreKey(pk.keyId, pk.keyPair);
+        newPreKeys.push({
+          keyId: pk.keyId,
+          publicKey: arrayBufferToBase64(pk.keyPair.pubKey),
+        });
+      }
+
+      // Get identity key and registration ID for upload
+      const identityKeyPair = await this.store.getIdentityKeyPair();
+      const registrationId = await this.store.getLocalRegistrationId();
+      const signedPreKey = await this._getSignedPreKeyForUpload();
+
+      // Upload to server
+      const response = await fetch(`${this.apiUrl}/v1/keys`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.token}`,
+        },
+        body: JSON.stringify({
+          identityKey: arrayBufferToBase64(identityKeyPair.pubKey),
+          registrationId,
+          signedPreKey,
+          oneTimePreKeys: newPreKeys,
+        }),
+      });
+
+      if (!response.ok) {
+        console.warn('Prekey replenishment upload failed:', response.status);
+      }
+    } catch (e) {
+      console.warn('Prekey replenishment failed:', e.message);
+    }
+  }
+
+  /**
+   * Get signed prekey in server format for upload
+   */
+  async _getSignedPreKeyForUpload() {
+    // Get the current signed prekey (ID 1)
+    const signedPreKey = await this.store.loadSignedPreKey(1);
+    if (!signedPreKey) {
+      throw new Error('No signed prekey found');
+    }
+    return {
+      keyId: 1,
+      publicKey: arrayBufferToBase64(signedPreKey.pubKey),
+      signature: '', // Server should already have signature from registration
+    };
+  }
+}
+
+// Helper function for base64 encoding
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }

@@ -24,6 +24,9 @@ export const MessageType = {
   READ_SYNC: 22,
   SYNC_BLOB: 23,
   SENT_SYNC: 24,
+  CONTENT_REFERENCE: 25,
+  // ORM Layer
+  MODEL_SYNC: 30,
 };
 
 export const MessageTypeName = Object.fromEntries(
@@ -70,6 +73,8 @@ export class Messenger {
     this.DeviceAnnounce = this.clientProto.lookupType('obscura.v2.DeviceAnnounce');
     this.SentSync = this.clientProto.lookupType('obscura.v2.SentSync');
     this.SyncBlob = this.clientProto.lookupType('obscura.v2.SyncBlob');
+    this.ContentReference = this.clientProto.lookupType('obscura.v2.ContentReference');
+    this.ModelSync = this.clientProto.lookupType('obscura.v2.ModelSync');
   }
 
   /**
@@ -259,6 +264,33 @@ export class Messenger {
       });
     }
 
+    if (typeValue === MessageType.CONTENT_REFERENCE && opts.contentReference) {
+      msgData.contentReference = this.ContentReference.create({
+        attachmentId: opts.contentReference.attachmentId,
+        contentKey: opts.contentReference.contentKey,
+        nonce: opts.contentReference.nonce,
+        contentHash: opts.contentReference.contentHash,
+        contentType: opts.contentReference.contentType || '',
+        sizeBytes: opts.contentReference.sizeBytes || 0,
+      });
+    }
+
+    if (typeValue === MessageType.MODEL_SYNC && opts.modelSync) {
+      msgData.modelSync = this.ModelSync.create({
+        model: opts.modelSync.model,
+        id: opts.modelSync.id,
+        op: opts.modelSync.op || 0,
+        timestamp: opts.modelSync.timestamp || Date.now(),
+        data: opts.modelSync.data instanceof Uint8Array
+          ? opts.modelSync.data
+          : typeof opts.modelSync.data === 'string'
+            ? new TextEncoder().encode(opts.modelSync.data)
+            : new TextEncoder().encode(JSON.stringify(opts.modelSync.data)),
+        signature: opts.modelSync.signature || new Uint8Array(0),
+        authorDeviceId: opts.modelSync.authorDeviceId || '',
+      });
+    }
+
     const msg = this.ClientMessage.create(msgData);
     return this.ClientMessage.encode(msg).finish();
   }
@@ -324,6 +356,29 @@ export class Messenger {
     if (msg.syncBlob) {
       result.syncBlob = {
         compressedData: msg.syncBlob.compressedData,
+      };
+    }
+
+    if (msg.contentReference) {
+      result.contentReference = {
+        attachmentId: msg.contentReference.attachmentId,
+        contentKey: msg.contentReference.contentKey,
+        nonce: msg.contentReference.nonce,
+        contentHash: msg.contentReference.contentHash,
+        contentType: msg.contentReference.contentType || '',
+        sizeBytes: Number(msg.contentReference.sizeBytes) || 0,
+      };
+    }
+
+    if (msg.modelSync) {
+      result.modelSync = {
+        model: msg.modelSync.model,
+        id: msg.modelSync.id,
+        op: msg.modelSync.op,
+        timestamp: Number(msg.modelSync.timestamp) || 0,
+        data: msg.modelSync.data,
+        signature: msg.modelSync.signature,
+        authorDeviceId: msg.modelSync.authorDeviceId || '',
       };
     }
 

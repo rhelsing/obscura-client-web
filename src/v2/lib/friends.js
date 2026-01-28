@@ -3,6 +3,8 @@
  * Tracks friends and their devices for fan-out messaging
  */
 
+import { generateVerifyCode } from '../crypto/signatures.js';
+
 export class FriendManager {
   constructor() {
     // Map of username -> { username, devices: [{ serverUserId, deviceName, signalIdentityKey }], status }
@@ -140,11 +142,12 @@ export class FriendManager {
   /**
    * Process incoming FRIEND_REQUEST
    * @param {object} msg - Message with username and deviceAnnounce
-   * @returns {object} FriendRequest object with accept/reject methods
+   * @returns {object} FriendRequest object with accept/reject methods and verifyCode
    */
   processRequest(msg, sendFn) {
     const senderUsername = msg.username;
     const senderDevices = msg.deviceAnnounce?.devices || [];
+    const senderIdentityKey = senderDevices[0]?.signalIdentityKey;
 
     this.store(senderUsername, senderDevices, 'pending_incoming');
 
@@ -153,6 +156,15 @@ export class FriendManager {
       username: senderUsername,
       devices: senderDevices,
       sourceUserId: msg.sourceUserId,
+
+      /**
+       * Get the 4-digit verify code for out-of-band verification
+       * @returns {Promise<string>} 4-digit code ("0000" - "9999")
+       */
+      async getVerifyCode() {
+        if (!senderIdentityKey) return null;
+        return generateVerifyCode(senderIdentityKey);
+      },
 
       async accept() {
         self.store(senderUsername, senderDevices, 'accepted');

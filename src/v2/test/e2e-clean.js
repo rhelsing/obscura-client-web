@@ -5,6 +5,7 @@
  */
 import '../../../test/helpers/setup.js'; // Polyfills for Node.js
 import { Obscura } from '../lib/index.js';
+import { Snap } from '../models/Snap.js';
 
 const API = process.env.VITE_API_URL || process.env.OBSCURA_API_URL;
 if (!API) {
@@ -270,6 +271,9 @@ async function main() {
       ttl: '24h',
     },
 
+    // SNAP MODEL - pulled from actual model class
+    snap: Snap.toConfig(),
+
     // COLLECTABLE MODELS
     streak: {
       fields: { count: 'number', lastActivity: 'timestamp' },
@@ -308,7 +312,7 @@ async function main() {
   await alice3.schema(fullSchema);
   await bob.schema(fullSchema);
   await bob2.schema(fullSchema);
-  ok('Full schema defined (6 models)');
+  ok('Full schema defined (7 models)');
   await delay(300);
 
   // --- Test 1: Auto-generation (ID, timestamp, signature, author) ---
@@ -574,6 +578,40 @@ async function main() {
   const deleted = await alice.reaction.find(tempReaction.id);
   if (!deleted || !deleted.data._deleted) throw new Error('Deletion failed - tombstone not set');
   ok('Deletion (LWW tombstone)');
+  await delay(300);
+
+  // --- Test 17b: Snap model ---
+  const bobSnapPromise = once(bob, 'modelSync');
+  const snap = await alice.snap.create({
+    recipientUsername: bob.username,
+    senderUsername: alice.username,
+    mediaRef: '{"attachmentId":"abc123"}',
+    caption: 'Hello!',
+    displayDuration: 8,
+  });
+  if (!snap.id.startsWith('snap_')) throw new Error('Snap ID wrong');
+  if (snap.data.displayDuration !== 8) throw new Error('displayDuration not stored');
+  ok('Snap create');
+
+  // Wait for bob to receive the snap
+  const bobSnap = await bobSnapPromise;
+  if (bobSnap.model !== 'snap') throw new Error('Bob did not receive snap sync');
+  ok('Snap syncs to recipient');
+  await delay(300);
+
+  // Query unviewed snaps on bob's client (viewedAt is undefined/null)
+  const allSnaps = await bob.snap.all();
+  const unviewed = allSnaps.filter(s => !s.data.viewedAt && !s.data._deleted);
+  if (unviewed.length !== 1) throw new Error(`Expected 1 unviewed snap, got ${unviewed.length}`);
+  ok('Snap query unviewed');
+  await delay(300);
+
+  // Delete snap after viewing
+  await bob.snap.delete(snap.id);
+  await delay(300);
+  const deletedSnap = await bob.snap.find(snap.id);
+  if (!deletedSnap || !deletedSnap.data._deleted) throw new Error('Snap deletion failed');
+  ok('Snap delete after viewing');
   await delay(300);
 
   // ==========================================================================

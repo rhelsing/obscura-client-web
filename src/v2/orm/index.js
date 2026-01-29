@@ -3,14 +3,17 @@
  *
  * Provides the schema() method that wires everything together.
  *
- * Usage:
+ * Usage with model classes (preferred):
+ *   import { modelsToSchema } from './models/index.js';
+ *   client.schema(modelsToSchema());
+ *
+ * Usage with inline schema (legacy):
  *   client.schema({
- *     story: { fields: { content: 'string' }, sync: 'g-set', ephemeral: true, ttl: '24h' },
- *     streak: { fields: { count: 'number' }, sync: 'lww', collectable: true },
+ *     story: { fields: { content: 'string' }, sync: 'g-set', collectable: true, ttl: '24h' },
+ *     profile: { fields: { name: 'string' }, sync: 'lww', collectable: true },
  *   });
  *
  *   await client.story.create({ content: 'Hello!' });
- *   await client.streak.upsert('streak_bob', { count: 5 });
  */
 
 import { ModelStore } from './storage/ModelStore.js';
@@ -127,18 +130,14 @@ export class SchemaBuilder {
       throw new Error(`Model "${name}": sync must be 'g-set', 'lww', or 'counter'`);
     }
 
-    // Must declare persistence mode
-    if (!config.ephemeral && !config.collectable) {
-      throw new Error(`Model "${name}": must declare ephemeral: true or collectable: true`);
-    }
-
-    if (config.ephemeral && config.collectable) {
-      throw new Error(`Model "${name}": cannot be both ephemeral and collectable`);
-    }
-
-    // Ephemeral models should have TTL
-    if (config.ephemeral && !config.ttl) {
-      console.warn(`Model "${name}": ephemeral model without TTL, will never expire`);
+    // collectable is required (true = user can pin, false = cannot pin)
+    if (typeof config.collectable !== 'boolean') {
+      // Backwards compat: accept ephemeral as alias for collectable: true
+      if (config.ephemeral) {
+        config.collectable = true;
+      } else {
+        throw new Error(`Model "${name}": collectable: true/false is required`);
+      }
     }
 
     // Validate field types

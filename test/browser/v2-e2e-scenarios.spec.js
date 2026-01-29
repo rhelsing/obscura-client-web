@@ -1253,15 +1253,16 @@ test.describe('V2 Full E2E Flow', () => {
     // Test 8: LWW upsert + query operators
     const ts = Date.now();
     await page.evaluate(async (timestamp) => {
-      // Create streaks for testing
-      await window.__client.streak.create({ count: 1, lastActivity: Date.now() });
-      await window.__client.streak.upsert(`streak_a_${timestamp}`, { count: 3, lastActivity: Date.now() });
-      await window.__client.streak.upsert(`streak_b_${timestamp}`, { count: 7, lastActivity: Date.now() });
-      await window.__client.streak.upsert(`streak_c_${timestamp}`, { count: 15, lastActivity: Date.now() });
+      // Create streaks for testing (using correct schema fields)
+      const now = Date.now();
+      await window.__client.streak.create({ friendUsername: 'test_friend', count: 1, lastSentAt: now, lastReceivedAt: now, expiresAt: now + 86400000 });
+      await window.__client.streak.upsert(`streak_a_${timestamp}`, { friendUsername: 'user_a', count: 3, lastSentAt: now, lastReceivedAt: now, expiresAt: now + 86400000 });
+      await window.__client.streak.upsert(`streak_b_${timestamp}`, { friendUsername: 'user_b', count: 7, lastSentAt: now, lastReceivedAt: now, expiresAt: now + 86400000 });
+      await window.__client.streak.upsert(`streak_c_${timestamp}`, { friendUsername: 'user_c', count: 15, lastSentAt: now, lastReceivedAt: now, expiresAt: now + 86400000 });
 
       // Test LWW upsert (update existing)
       await new Promise(r => setTimeout(r, 10));
-      await window.__client.streak.upsert(`streak_a_${timestamp}`, { count: 5, lastActivity: Date.now() });
+      await window.__client.streak.upsert(`streak_a_${timestamp}`, { friendUsername: 'user_a', count: 5, lastSentAt: Date.now(), lastReceivedAt: Date.now(), expiresAt: Date.now() + 86400000 });
     }, ts);
     await delay(300);
 
@@ -1308,7 +1309,8 @@ test.describe('V2 Full E2E Flow', () => {
       timeout: 15000,
     });
     await page.evaluate(async () => {
-      await window.__client.streak.create({ count: 42, lastActivity: Date.now() });
+      const now = Date.now();
+      await window.__client.streak.create({ friendUsername: 'sync_test', count: 42, lastSentAt: now, lastReceivedAt: now, expiresAt: now + 86400000 });
     });
     await bobStreakSyncPromise;
     console.log('Test 8b: Streak sync to friends ✓');
@@ -1655,11 +1657,334 @@ test.describe('V2 Full E2E Flow', () => {
 
     console.log('\n=== SCENARIO 8 COMPLETE ===\n');
 
-    // Cleanup scenario 8 contexts
+    // NOTE: Keep alice3 and carol contexts open for SCENARIO 9 multi-recipient test
+
+    // ============================================================
+    // SCENARIO 9: Snap Flow (Camera → Send → Receive)
+    // ============================================================
+    console.log('\n=== SCENARIO 9: Snap Flow ===');
+
+    // --- 9.1: Alice sends snap to Bob via camera UI ---
+    // Set up Bob's listener for snap sync BEFORE Alice sends
+    const bobSnapPromise = bobPage.waitForEvent('console', {
+      predicate: msg => msg.text().includes('[Global] Model sync:') && msg.text().includes('snap'),
+      timeout: 30000,
+    });
+
+    // Alice navigates to snap camera
+    await page.goto('/snap/camera');
+    await delay(500);
+    console.log('Alice navigated to /snap/camera');
+
+    // Wait for video stream to be active
+    const videoReady = await page.waitForFunction(() => {
+      const video = document.querySelector('#camera-video');
+      return video && video.srcObject && video.readyState >= 2;
+    }, { timeout: 15000 });
+    console.log('Camera video stream active ✓');
+
+    // Click capture button
+    await page.click('#capture-btn');
+    await delay(500);
+
+    // Wait for preview mode
+    await page.waitForSelector('.snap-camera--preview', { timeout: 10000 });
+    console.log('Alice captured photo ✓');
+
+    // Select Bob from friend picker
+    await page.click(`.snap-camera__friend-item[data-username="${bobUsername}"]`);
+    await delay(300);
+    console.log('Alice selected Bob as recipient ✓');
+
+    // Click send
+    await page.click('#send-btn');
+    console.log('Alice clicked send');
+
+    // Wait for navigation to chat (success indicator)
+    await page.waitForURL(`**/messages/${bobUsername}`, { timeout: 30000 });
+    console.log('Alice sent snap (navigated to chat) ✓');
+
+    // --- Wait for Bob to receive snap via modelSync ---
+    await bobSnapPromise;
+    console.log('Bob received snap via modelSync ✓');
+    await delay(500);
+
+    // --- 9.2: Bob queries unviewed snap ---
+    const snapQuery = await bobPage.evaluate(async (aliceUser) => {
+      // Get all snaps and filter manually (simpler than complex where clause)
+      const allSnaps = await window.__client.snap.all();
+      console.log('[bob] All snaps:', allSnaps.length, allSnaps.map(s => ({
+        id: s.id,
+        sender: s.data.senderUsername,
+        recipient: s.data.recipientUsername,
+        viewedAt: s.data.viewedAt,
+        deleted: s.data._deleted
+      })));
+
+      // Filter for unviewed snaps from Alice to Bob
+      const unviewed = allSnaps.filter(s =>
+        s.data.recipientUsername === window.__client.username &&
+        !s.data.viewedAt &&
+        !s.data._deleted
+      );
+      console.log('[bob] Unviewed snaps:', unviewed.length);
+
+      // Find snap from Alice
+      const aliceSnap = unviewed.find(s => s.data.senderUsername === aliceUser);
+      if (!aliceSnap) {
+        return {
+          error: 'No snap from Alice found',
+          totalSnaps: allSnaps.length,
+          unviewedCount: unviewed.length,
+          bobUsername: window.__client.username,
+          aliceUser: aliceUser
+        };
+      }
+
+      return {
+        id: aliceSnap.id,
+        senderUsername: aliceSnap.data.senderUsername,
+        recipientUsername: aliceSnap.data.recipientUsername,
+        mediaRef: aliceSnap.data.mediaRef,
+        displayDuration: aliceSnap.data.displayDuration,
+      };
+    }, username);
+
+    if (snapQuery.error) {
+      console.log('Snap query debug:', snapQuery);
+    }
+    expect(snapQuery.error).toBeUndefined();
+    expect(snapQuery.senderUsername).toBe(username);
+    expect(snapQuery.recipientUsername).toBe(bobUsername);
+    expect(snapQuery.mediaRef).toBeTruthy();
+    console.log('Bob queried unviewed snap ✓');
+
+    // Verify mediaRef is valid JSON with attachmentId
+    const mediaRef = JSON.parse(snapQuery.mediaRef);
+    expect(mediaRef.attachmentId).toBeTruthy();
+    expect(mediaRef.contentKey).toBeTruthy();
+    expect(mediaRef.nonce).toBeTruthy();
+    console.log('Snap mediaRef has encrypted attachment reference ✓');
+
+    // --- 9.3: Bob downloads and decrypts attachment ---
+    const snapDownload = await bobPage.evaluate(async (mediaRefJson) => {
+      try {
+        const ref = JSON.parse(mediaRefJson);
+        console.log('[bob] mediaRef parsed:', {
+          attachmentId: ref.attachmentId,
+          contentKeyLen: ref.contentKey?.length,
+          nonceLen: ref.nonce?.length,
+          contentHashLen: ref.contentHash?.length,
+          contentType: ref.contentType
+        });
+
+        if (!ref.contentKey || !ref.nonce || !ref.contentHash) {
+          return { error: 'Missing contentKey, nonce, or contentHash', ref };
+        }
+
+        const decrypted = await window.__client.attachments.download({
+          attachmentId: ref.attachmentId,
+          contentKey: new Uint8Array(ref.contentKey),
+          nonce: new Uint8Array(ref.nonce),
+          contentHash: new Uint8Array(ref.contentHash),
+        });
+        return {
+          size: decrypted.byteLength,
+          // Check for JPEG header (FF D8 FF) or any valid image
+          header: Array.from(new Uint8Array(decrypted.slice(0, 4)))
+        };
+      } catch (e) {
+        return { error: e.message, stack: e.stack };
+      }
+    }, snapQuery.mediaRef);
+
+    expect(snapDownload.error).toBeUndefined();
+    expect(snapDownload.size).toBeGreaterThan(0);
+    // Fake camera produces valid image data
+    console.log('Bob decrypted attachment:', snapDownload.size, 'bytes ✓');
+
+    // --- 9.4: Multi-recipient snap (Alice → Bob + Carol) ---
+    console.log('\n--- 9.4: Multi-recipient snap ---');
+
+    // Set up listeners for both Bob and Carol BEFORE Alice sends
+    const bobSnap2Promise = bobPage.waitForEvent('console', {
+      predicate: msg => msg.text().includes('[Global] Model sync:') && msg.text().includes('snap'),
+      timeout: 30000,
+    });
+    const carolSnapPromise = carolPage.waitForEvent('console', {
+      predicate: msg => msg.text().includes('[Global] Model sync:') && msg.text().includes('snap'),
+      timeout: 30000,
+    });
+
+    // Alice navigates to snap camera
+    await page.goto('/snap/camera');
+    await delay(500);
+
+    // Wait for video stream
+    await page.waitForFunction(() => {
+      const video = document.querySelector('#camera-video');
+      return video && video.srcObject && video.readyState >= 2;
+    }, { timeout: 15000 });
+
+    // Capture photo
+    await page.click('#capture-btn');
+    await delay(500);
+    await page.waitForSelector('.snap-camera--preview', { timeout: 10000 });
+    console.log('Alice captured photo for multi-send ✓');
+
+    // Select BOTH Bob and Carol (multi-select)
+    await page.click(`.snap-camera__friend-item[data-username="${bobUsername}"]`);
+    await delay(200);
+    await page.click(`.snap-camera__friend-item[data-username="${carolUsername}"]`);
+    await delay(200);
+
+    // Verify both are selected (header should show count)
+    const headerText = await page.$eval('.snap-camera__friend-picker h3', el => el.textContent);
+    expect(headerText).toContain('(2)');
+    console.log('Alice selected Bob and Carol ✓');
+
+    // Click send
+    await page.click('#send-btn');
+
+    // Should navigate to /chats since multiple recipients
+    await page.waitForURL('**/chats', { timeout: 30000 });
+    console.log('Alice sent multi-recipient snap ✓');
+
+    // Wait for both to receive
+    await Promise.all([bobSnap2Promise, carolSnapPromise]);
+    console.log('Bob and Carol both received snap ✓');
+
+    // Verify Carol can query her snap
+    const carolSnapQuery = await carolPage.evaluate(async (aliceUser) => {
+      const allSnaps = await window.__client.snap.all();
+      const unviewed = allSnaps.filter(s =>
+        s.data.recipientUsername === window.__client.username &&
+        !s.data.viewedAt &&
+        !s.data._deleted
+      );
+      const snap = unviewed.find(s => s.data.senderUsername === aliceUser);
+      return snap ? { found: true, mediaRef: snap.data.mediaRef } : { found: false };
+    }, username);
+
+    expect(carolSnapQuery.found).toBe(true);
+    console.log('Carol queried her snap ✓');
+
+    // Verify Carol can decrypt
+    const carolDecrypt = await carolPage.evaluate(async (mediaRefJson) => {
+      try {
+        const ref = JSON.parse(mediaRefJson);
+        const decrypted = await window.__client.attachments.download({
+          attachmentId: ref.attachmentId,
+          contentKey: new Uint8Array(ref.contentKey),
+          nonce: new Uint8Array(ref.nonce),
+          contentHash: new Uint8Array(ref.contentHash),
+        });
+        return { size: decrypted.byteLength };
+      } catch (e) {
+        return { error: e.message };
+      }
+    }, carolSnapQuery.mediaRef);
+
+    expect(carolDecrypt.error).toBeUndefined();
+    expect(carolDecrypt.size).toBeGreaterThan(0);
+    console.log('Carol decrypted attachment:', carolDecrypt.size, 'bytes ✓');
+
+    // --- 9.5: Offline delivery (Bob logged out, receives snap on login) ---
+    console.log('\n--- 9.5: Offline snap delivery ---');
+
+    // Bob logs out
+    await bobPage.goto('/settings');
+    await bobPage.click('button[modal="logout-modal"]');
+    await delay(300);
+    await bobPage.click('#confirm-logout');
+    await bobPage.waitForURL('**/login');
+    console.log('Bob logged out');
+
+    // Alice sends snap while Bob is offline
+    await page.goto('/snap/camera');
+    await delay(500);
+    await page.waitForFunction(() => {
+      const video = document.querySelector('#camera-video');
+      return video && video.srcObject && video.readyState >= 2;
+    }, { timeout: 15000 });
+
+    await page.click('#capture-btn');
+    await delay(500);
+    await page.waitForSelector('.snap-camera--preview', { timeout: 10000 });
+    console.log('Alice captured snap while Bob offline');
+
+    // Select just Bob (single recipient)
+    await page.click(`.snap-camera__friend-item[data-username="${bobUsername}"]`);
+    await delay(200);
+    await page.click('#send-btn');
+
+    // Alice navigates to chat (single recipient)
+    await page.waitForURL(`**/messages/${bobUsername}`, { timeout: 30000 });
+    console.log('Alice sent snap to offline Bob ✓');
+
+    // Bob logs back in (same pattern as line 509-523)
+    await bobPage.fill('#username', bobUsername);
+    await bobPage.fill('#password', password);
+    await bobPage.click('button[type="submit"]');
+    await bobPage.waitForURL('**/stories');
+
+    // Wait for WebSocket to connect (poll like line 516-522)
+    let bobWsReady = false;
+    for (let i = 0; i < 10; i++) {
+      await delay(500);
+      bobWsReady = await bobPage.evaluate(() => window.__client?.ws?.readyState === 1);
+      if (bobWsReady) break;
+    }
+    expect(bobWsReady).toBe(true);
+    console.log('Bob logged back in, WebSocket connected');
+
+    // Wait a bit for queued messages to arrive
+    await delay(2000);
+
+    // Bob should now have the snap (queued delivery)
+    const offlineSnapQuery = await bobPage.evaluate(async (aliceUser) => {
+      const allSnaps = await window.__client.snap.all();
+      // Find the most recent unviewed snap from Alice
+      const unviewed = allSnaps.filter(s =>
+        s.data.senderUsername === aliceUser &&
+        s.data.recipientUsername === window.__client.username &&
+        !s.data.viewedAt &&
+        !s.data._deleted
+      );
+      // Sort by timestamp descending to get the newest
+      unviewed.sort((a, b) => b.timestamp - a.timestamp);
+      const snap = unviewed[0];
+      return snap ? { found: true, id: snap.id, mediaRef: snap.data.mediaRef } : { found: false, count: allSnaps.length };
+    }, username);
+
+    expect(offlineSnapQuery.found).toBe(true);
+    console.log('Bob received offline snap ✓');
+
+    // Verify Bob can decrypt
+    const offlineDecrypt = await bobPage.evaluate(async (mediaRefJson) => {
+      try {
+        const ref = JSON.parse(mediaRefJson);
+        const decrypted = await window.__client.attachments.download({
+          attachmentId: ref.attachmentId,
+          contentKey: new Uint8Array(ref.contentKey),
+          nonce: new Uint8Array(ref.nonce),
+          contentHash: new Uint8Array(ref.contentHash),
+        });
+        return { size: decrypted.byteLength };
+      } catch (e) {
+        return { error: e.message };
+      }
+    }, offlineSnapQuery.mediaRef);
+
+    expect(offlineDecrypt.error).toBeUndefined();
+    expect(offlineDecrypt.size).toBeGreaterThan(0);
+    console.log('Bob decrypted offline snap:', offlineDecrypt.size, 'bytes ✓');
+
+    console.log('\n=== SCENARIO 9 COMPLETE ===\n');
+
+    // Cleanup scenario contexts
     await alice3Context.close();
     await carolContext.close();
-
-    // Cleanup
     await bob3Context.close();
     await bob2Context.close();
 

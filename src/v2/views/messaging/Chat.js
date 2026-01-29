@@ -12,13 +12,16 @@ import { navigate } from '../index.js';
 let cleanup = null;
 let messages = [];
 
-export function render({ username = '', displayName = '', messages = [], sending = false } = {}) {
+export function render({ username = '', displayName = '', messages = [], sending = false, streakCount = 0 } = {}) {
   const title = displayName || username;
   return `
     <div class="view chat">
       <header>
         <a href="/messages" data-navigo class="back"><ry-icon name="chevron-left"></ry-icon> Back</a>
-        <h1>${title}</h1>
+        <cluster gap="xs" style="flex: 1; justify-content: center;">
+          <h1>${title}</h1>
+          ${streakCount > 0 ? `<span class="streak-badge">🔥 ${streakCount}</span>` : ''}
+        </cluster>
         <a href="/profile/${username}" data-navigo><button variant="ghost" size="sm"><ry-icon name="user"></ry-icon></button></a>
       </header>
 
@@ -104,8 +107,21 @@ export async function mount(container, client, router, params) {
     }
   }
 
+  // Query streak for this friend
+  let streakCount = 0;
+  if (client.streak) {
+    try {
+      const streak = await client.streak
+        .where({ 'data.friendUsername': username })
+        .first();
+      streakCount = streak?.data?.count || 0;
+    } catch (err) {
+      console.warn('Failed to load streak:', err);
+    }
+  }
+
   // Show loading state first
-  container.innerHTML = render({ username, displayName, messages: [], sending: false });
+  container.innerHTML = render({ username, displayName, messages: [], sending: false, streakCount });
 
   // Load existing messages from IndexedDB (or in-memory fallback)
   try {
@@ -134,7 +150,7 @@ export async function mount(container, client, router, params) {
       .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
   }
 
-  container.innerHTML = render({ username, displayName, messages });
+  container.innerHTML = render({ username, displayName, messages, streakCount });
 
   // Get messagesContainer and define scrollToBottom BEFORE downloadAttachments
   const getMessagesContainer = () => container.querySelector('#messages');
@@ -149,7 +165,7 @@ export async function mount(container, client, router, params) {
       const m = messages[i];
       if (m.contentReference && !m.imageDataUrl && !m.downloading) {
         m.downloading = true;
-        container.innerHTML = render({ username, displayName, messages });
+        container.innerHTML = render({ username, displayName, messages, streakCount });
         try {
           const decrypted = await client.attachments.download(m.contentReference);
           const blob = new Blob([decrypted], { type: 'image/jpeg' });
@@ -161,7 +177,7 @@ export async function mount(container, client, router, params) {
           m.downloading = false;
           m.imageDataUrl = dataUrl;
           m.downloaded = true;
-          container.innerHTML = render({ username, displayName, messages });
+          container.innerHTML = render({ username, displayName, messages, streakCount });
           attachListeners();
           // Wait for image to render then scroll
           requestAnimationFrame(() => {
@@ -171,7 +187,7 @@ export async function mount(container, client, router, params) {
           console.error('Failed to download attachment:', err);
           m.downloading = false;
           m.attachmentPreview = '[Failed to load]';
-          container.innerHTML = render({ username, displayName, messages });
+          container.innerHTML = render({ username, displayName, messages, streakCount });
           attachListeners();
         }
       }
@@ -201,7 +217,7 @@ export async function mount(container, client, router, params) {
       fromMe: true,
       timestamp: Date.now()
     });
-    container.innerHTML = render({ username, displayName, messages });
+    container.innerHTML = render({ username, displayName, messages, streakCount });
     scrollToBottom();
 
     try {
@@ -246,7 +262,7 @@ export async function mount(container, client, router, params) {
         fromMe: true,
         timestamp
       });
-      container.innerHTML = render({ username, displayName, messages });
+      container.innerHTML = render({ username, displayName, messages, streakCount });
       scrollToBottom();
       attachListeners();
 
@@ -280,7 +296,7 @@ export async function mount(container, client, router, params) {
         fromMe: false,
         timestamp: msg.timestamp || Date.now()
       });
-      container.innerHTML = render({ username, displayName, messages });
+      container.innerHTML = render({ username, displayName, messages, streakCount });
       scrollToBottom();
       attachListeners();
     }
@@ -300,7 +316,7 @@ export async function mount(container, client, router, params) {
         fromMe: false,
         timestamp: Date.now()
       });
-      container.innerHTML = render({ username, displayName, messages });
+      container.innerHTML = render({ username, displayName, messages, streakCount });
       scrollToBottom();
       attachListeners();
 
@@ -318,7 +334,7 @@ export async function mount(container, client, router, params) {
         messages[msgIndex].imageDataUrl = dataUrl;
         messages[msgIndex].downloaded = true;
         messages[msgIndex].contentReference = att.contentReference;
-        container.innerHTML = render({ username, displayName, messages });
+        container.innerHTML = render({ username, displayName, messages, streakCount });
         attachListeners();
         // Scroll after render
         scrollToBottom();
@@ -349,7 +365,7 @@ export async function mount(container, client, router, params) {
         console.error('Failed to download attachment:', err);
         messages[msgIndex].downloading = false;
         messages[msgIndex].attachmentPreview = '[Failed to load]';
-        container.innerHTML = render({ username, displayName, messages });
+        container.innerHTML = render({ username, displayName, messages, streakCount });
         attachListeners();
       }
     }
@@ -373,7 +389,7 @@ export async function mount(container, client, router, params) {
         attachment: sync.contentReference,
         downloaded: false,
       });
-      container.innerHTML = render({ username, displayName, messages });
+      container.innerHTML = render({ username, displayName, messages, streakCount });
       scrollToBottom();
       attachListeners();
     }
@@ -401,7 +417,7 @@ export async function mount(container, client, router, params) {
             msg.downloaded = true;
             msg.attachmentPreview = `[${data.length} bytes]`;
           }
-          container.innerHTML = render({ username, displayName, messages });
+          container.innerHTML = render({ username, displayName, messages, streakCount });
           attachListeners();
         } catch (err) {
           btn.textContent = 'Failed';

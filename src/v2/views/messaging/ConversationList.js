@@ -2,20 +2,25 @@
  * ConversationList View
  * - List friends as conversations
  * - Show last message preview (if available)
- * - Tap → Chat
+ * - Show snap indicators for unviewed snaps
+ * - Tap → SnapViewer (if snaps) or Chat
  */
 import { navigate, clearClient } from '../index.js';
 import { renderNav, initNav } from '../components/Nav.js';
 import { ObscuraClient } from '../../lib/ObscuraClient.js';
+import { renderSnapIndicator } from '../components/SnapIndicator.js';
 
 let cleanup = null;
 
-export function render({ conversations = [], pendingRequests = 0 } = {}) {
+export function render({ conversations = [], pendingRequests = 0, snapsByFriend = new Map() } = {}) {
   return `
     <div class="view conversation-list">
       <header>
         <h1>Chats</h1>
-        <a href="/friends/add" data-navigo><button variant="ghost" size="sm"><ry-icon name="plus"></ry-icon></button></a>
+        <cluster gap="xs">
+          <a href="/snap/camera" data-navigo><button variant="ghost" size="sm" style="font-size: 18px;">📷</button></a>
+          <a href="/friends/add" data-navigo><button variant="ghost" size="sm"><ry-icon name="plus"></ry-icon></button></a>
+        </cluster>
       </header>
 
       ${pendingRequests > 0 ? `
@@ -37,13 +42,18 @@ export function render({ conversations = [], pendingRequests = 0 } = {}) {
         </div>
       ` : `
         <stack gap="sm" class="conversation-items">
-          ${conversations.map(c => `
-            <card class="conversation-item" data-username="${c.username}" data-type="${c.type || 'dm'}" data-group-id="${c.groupId || ''}">
+          ${conversations.map(c => {
+            const snaps = snapsByFriend.get(c.username) || [];
+            const hasSnaps = snaps.length > 0 && c.type !== 'group';
+            return `
+            <card class="conversation-item" data-username="${c.username}" data-type="${c.type || 'dm'}" data-group-id="${c.groupId || ''}" data-has-snaps="${hasSnaps}">
               <cluster>
-                <ry-icon name="${c.type === 'group' ? 'star' : 'user'}"></ry-icon>
+                ${hasSnaps ? renderSnapIndicator({ count: snaps.length }) : `<ry-icon name="${c.type === 'group' ? 'star' : 'user'}"></ry-icon>`}
                 <stack gap="none" style="flex: 1">
                   <strong>${c.displayName || c.username}</strong>
-                  ${c.lastMessage ? `
+                  ${hasSnaps ? `
+                    <span style="color: var(--ry-color-red-500); font-size: var(--ry-text-sm)">New Snap${snaps.length > 1 ? 's' : ''}</span>
+                  ` : c.lastMessage ? `
                     <span style="color: var(--ry-color-text-muted); font-size: var(--ry-text-sm)">${c.lastMessage}</span>
                   ` : `
                     <span style="color: var(--ry-color-text-muted); font-size: var(--ry-text-sm); font-style: italic">No messages yet</span>
@@ -53,7 +63,7 @@ export function render({ conversations = [], pendingRequests = 0 } = {}) {
                 <ry-icon name="chevron-right"></ry-icon>
               </cluster>
             </card>
-          `).join('')}
+          `}).join('')}
         </stack>
       `}
 
@@ -65,6 +75,33 @@ export function render({ conversations = [], pendingRequests = 0 } = {}) {
 export async function mount(container, client, router) {
   const conversations = [];
   let pendingRequests = 0;
+  const snapsByFriend = new Map();
+
+  // Query unviewed snaps
+  if (client.snap) {
+    try {
+      const unviewedSnaps = await client.snap
+        .where({
+          'data.recipientUsername': client.username,
+          'data.viewedAt': null,
+          'data._deleted': { ne: true }
+        })
+        .exec();
+
+      // Group by sender
+      for (const snap of unviewedSnaps) {
+        const sender = snap.data?.senderUsername;
+        if (sender) {
+          if (!snapsByFriend.has(sender)) {
+            snapsByFriend.set(sender, []);
+          }
+          snapsByFriend.get(sender).push(snap);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load snaps:', err);
+    }
+  }
 
   // Load profiles to get displayNames
   const profileMap = new Map();
@@ -171,21 +208,35 @@ export async function mount(container, client, router) {
   }
 
   // Sort all conversations by most recent activity
-  conversations.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  // Friends with snaps go to the top
+  conversations.sort((a, b) => {
+    const aHasSnaps = snapsByFriend.has(a.username);
+    const bHasSnaps = snapsByFriend.has(b.username);
+    if (aHasSnaps && !bHasSnaps) return -1;
+    if (!aHasSnaps && bHasSnaps) return 1;
+    return (b.timestamp || 0) - (a.timestamp || 0);
+  });
 
-  container.innerHTML = render({ conversations, pendingRequests });
+  container.innerHTML = render({ conversations, pendingRequests, snapsByFriend });
 
   // Click handlers
   const items = container.querySelectorAll('.conversation-item');
   items.forEach(item => {
     item.addEventListener('click', () => {
       const type = item.dataset.type;
+      const hasSnaps = item.dataset.hasSnaps === 'true';
+
       if (type === 'group') {
         const groupId = item.dataset.groupId;
         navigate(`/groups/${groupId}`);
       } else {
         const username = item.dataset.username;
-        navigate(`/messages/${username}`);
+        // If friend has unviewed snaps, go to snap viewer first
+        if (hasSnaps) {
+          navigate(`/snap/view/${username}`);
+        } else {
+          navigate(`/messages/${username}`);
+        }
       }
     });
   });

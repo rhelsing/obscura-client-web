@@ -1,83 +1,45 @@
 /**
  * Full ORM Schema Definition
- * Used by all clients after login/register
+ * Generated from model classes for consistency
  */
 
-export const fullSchema = {
-  // EPHEMERAL MODELS (24h TTL)
-  story: {
-    fields: { content: 'string', mediaUrl: 'string?', authorUsername: 'string?' },
-    has_many: ['comment', 'reaction'],
-    sync: 'g-set',
-    ephemeral: true,
-    ttl: '24h',
-  },
-  comment: {
-    fields: { text: 'string' },
-    belongs_to: ['story', 'comment'],
-    has_many: ['comment', 'reaction'],
-    sync: 'g-set',
-    ephemeral: true,
-    ttl: '24h',
-  },
-  reaction: {
-    fields: { emoji: 'string' },
-    belongs_to: ['story', 'comment'],
-    sync: 'lww',
-    ephemeral: true,
-    ttl: '24h',
-  },
+import { Story } from '../models/Story.js';
+import { Comment } from '../models/Comment.js';
+import { Reaction } from '../models/Reaction.js';
+import { Snap } from '../models/Snap.js';
+import { Streak } from '../models/Streak.js';
+import { Profile } from '../models/Profile.js';
+import { Settings } from '../models/Settings.js';
+import { Group } from '../models/Group.js';
+import { GroupMessage } from '../models/GroupMessage.js';
 
-  // SNAP MODELS
-  snap: {
-    fields: {
-      recipientUsername: 'string',
-      senderUsername: 'string',
-      mediaRef: 'string',        // JSON ContentReference
-      caption: 'string?',
-      displayDuration: 'number', // 1-10 seconds
-      viewedAt: 'timestamp?',    // null = unviewed
-    },
-    sync: 'g-set',      // Immutable (no edits after send)
-    collectable: true,  // Persists until viewed+deleted
-  },
-
-  // COLLECTABLE MODELS (permanent)
-  streak: {
-    fields: {
-      friendUsername: 'string',
-      count: 'number',
-      lastSentAt: 'timestamp',
-      lastReceivedAt: 'timestamp',
-      expiresAt: 'timestamp',
-    },
-    sync: 'lww',
-    collectable: true,
-  },
-  profile: {
-    fields: { displayName: 'string', avatarUrl: 'string?', bio: 'string?' },
-    sync: 'lww',
-    collectable: true,
-  },
-  settings: {
-    fields: { theme: 'string', notificationsEnabled: 'boolean' },
-    sync: 'lww',
-    collectable: true,
-    private: true,  // Only syncs to own devices
-  },
-
-  // GROUP MODELS
-  group: {
-    fields: { name: 'string', members: 'string' },  // members = JSON array of usernames
-    has_many: ['groupMessage'],
-    sync: 'g-set',
-    collectable: true,
-  },
-  groupMessage: {
-    fields: { text: 'string' },
-    belongs_to: 'group',
-    sync: 'g-set',
-    ephemeral: true,
-    ttl: '7d',
-  },
+/**
+ * All model classes
+ */
+export const modelClasses = {
+  story: Story,
+  comment: Comment,
+  reaction: Reaction,
+  snap: Snap,
+  streak: Streak,
+  profile: Profile,
+  settings: Settings,
+  group: Group,
+  groupMessage: GroupMessage,
 };
+
+/**
+ * Build schema from model classes
+ */
+export function buildSchema() {
+  const schema = {};
+  for (const [name, ModelClass] of Object.entries(modelClasses)) {
+    schema[name] = ModelClass.toConfig();
+  }
+  return schema;
+}
+
+/**
+ * Full schema (generated from models)
+ */
+export const fullSchema = buildSchema();

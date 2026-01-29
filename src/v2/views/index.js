@@ -31,6 +31,9 @@ import * as VerifyCode from './friends/VerifyCode.js';
 import * as ConversationList from './messaging/ConversationList.js';
 import * as Chat from './messaging/Chat.js';
 
+import * as SnapCamera from './snaps/SnapCamera.js';
+import * as SnapViewer from './snaps/SnapViewer.js';
+
 import * as StoryFeed from './stories/StoryFeed.js';
 import * as CreateStory from './stories/CreateStory.js';
 import * as StoryDetail from './stories/StoryDetail.js';
@@ -87,6 +90,10 @@ export function init(appContainer, obscuraClient = null) {
   router.on('/chats', () => requireAuth(() => mountView(ConversationList)));
   router.on('/messages', () => requireAuth(() => mountView(ConversationList))); // Alias for backwards compat
   router.on('/messages/:username', ({ data }) => requireAuth(() => mountView(Chat, data)));
+
+  // Snap routes
+  router.on('/snap/camera', () => requireAuth(() => mountView(SnapCamera)));
+  router.on('/snap/view/:username', ({ data }) => requireAuth(() => mountView(SnapViewer, data)));
 
   // Stories routes
   router.on('/stories', () => requireAuth(() => mountView(StoryFeed)));

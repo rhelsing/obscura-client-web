@@ -1,31 +1,14 @@
 /**
  * Logs View - displays all message send/receive events
- * Adapted from v1 logs page
+ * Uses the centralized logger from v1
  */
 import { navigate, clearClient } from '../index.js';
 import { renderNav, initNav } from '../components/Nav.js';
 import { ObscuraClient } from '../../lib/ObscuraClient.js';
+import { logger } from '../../../lib/logger.js';
+import { LogEventType } from '../../../lib/logStore.js';
 
-// Event types (matching v1)
-const LogEventType = {
-  SEND_START: 'SEND_START',
-  SEND_ENCRYPT_START: 'SEND_ENCRYPT_START',
-  SEND_ENCRYPT_COMPLETE: 'SEND_ENCRYPT_COMPLETE',
-  SEND_COMPLETE: 'SEND_COMPLETE',
-  SEND_ERROR: 'SEND_ERROR',
-  RECEIVE_ENVELOPE: 'RECEIVE_ENVELOPE',
-  RECEIVE_DECRYPT_START: 'RECEIVE_DECRYPT_START',
-  RECEIVE_DECRYPT_COMPLETE: 'RECEIVE_DECRYPT_COMPLETE',
-  RECEIVE_DECODE: 'RECEIVE_DECODE',
-  RECEIVE_COMPLETE: 'RECEIVE_COMPLETE',
-  RECEIVE_ERROR: 'RECEIVE_ERROR',
-  MESSAGE_LOST: 'MESSAGE_LOST',
-  SESSION_ESTABLISH: 'SESSION_ESTABLISH',
-  SESSION_RESET: 'SESSION_RESET',
-  GATEWAY_CONNECT: 'GATEWAY_CONNECT',
-  GATEWAY_DISCONNECT: 'GATEWAY_DISCONNECT',
-  GATEWAY_ACK: 'GATEWAY_ACK',
-};
+// Re-export LogEventType for local use (imported from logStore)
 
 // Color coding for event types
 const EVENT_COLORS = {
@@ -71,14 +54,8 @@ const EVENT_DIRECTION = {
 let cleanup = null;
 
 export function render({ events = [], filter = 'all', expandedEvent = null } = {}) {
-  const filteredEvents = filter === 'all' ? events : events.filter(e => {
-    const dir = EVENT_DIRECTION[e.eventType];
-    if (filter === 'send') return dir === 'out';
-    if (filter === 'receive') return dir === 'in';
-    if (filter === 'session') return dir === 'session';
-    if (filter === 'gateway') return dir === 'gateway';
-    return true;
-  });
+  // Show all events regardless of filter (tabs are just visual indicators)
+  const filteredEvents = events;
 
   return `
     <div class="view logs">
@@ -148,44 +125,25 @@ function renderEvent(event, expandedEvent) {
   `;
 }
 
-export function mount(container, client, router) {
+export async function mount(container, client, router) {
   let events = [];
   let filter = 'all';
   let expandedEvent = null;
+  let unsubscribe = null;
 
-  // For now, use console log interception as a simple log source
-  // In a full implementation, this would use a proper logger like v1
-  const logs = [];
-  const originalLog = console.log;
-  const originalWarn = console.warn;
-  const originalError = console.error;
-
-  // Create synthetic log events from console
-  function addLogEvent(type, ...args) {
-    const event = {
-      id: Date.now() + Math.random(),
-      eventType: type,
-      timestamp: Date.now(),
-      correlationId: Math.random().toString(36).slice(2, 10),
-      data: { message: args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') },
-    };
-    events.unshift(event);
-    if (events.length > 200) events.pop();
+  // Load existing events from logger
+  try {
+    events = await logger.getAllEvents(200);
+  } catch (err) {
+    console.warn('[Logs] Failed to load events:', err);
   }
 
-  // Intercept console for demo purposes
-  console.log = (...args) => {
-    originalLog.apply(console, args);
-    const msg = args[0];
-    if (typeof msg === 'string') {
-      if (msg.includes('[ObscuraClient]') || msg.includes('[Messenger]') || msg.includes('[main]')) {
-        if (msg.includes('connect')) addLogEvent(LogEventType.GATEWAY_CONNECT, ...args);
-        else if (msg.includes('error')) addLogEvent(LogEventType.SEND_ERROR, ...args);
-        else addLogEvent(LogEventType.SEND_START, ...args);
-        rerender();
-      }
-    }
-  };
+  // Subscribe to new events
+  unsubscribe = logger.onLog((event) => {
+    events.unshift(event);
+    if (events.length > 200) events.pop();
+    rerender();
+  });
 
   function rerender() {
     container.innerHTML = render({ events, filter, expandedEvent });
@@ -204,9 +162,14 @@ export function mount(container, client, router) {
     });
 
     // Clear
-    container.querySelector('#clear-btn')?.addEventListener('click', () => {
-      events = [];
-      rerender();
+    container.querySelector('#clear-btn')?.addEventListener('click', async () => {
+      try {
+        await logger.clearAll();
+        events = [];
+        rerender();
+      } catch (err) {
+        console.warn('[Logs] Failed to clear:', err);
+      }
     });
 
     // Expand/collapse
@@ -232,10 +195,10 @@ export function mount(container, client, router) {
   rerender();
 
   cleanup = () => {
-    // Restore console
-    console.log = originalLog;
-    console.warn = originalWarn;
-    console.error = originalError;
+    // Unsubscribe from logger
+    if (unsubscribe) {
+      unsubscribe();
+    }
   };
 }
 

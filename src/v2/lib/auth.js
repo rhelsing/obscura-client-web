@@ -138,6 +138,9 @@ export async function login(username, password, opts = {}) {
     // (In single-account mode, shell login IS the device login)
     const userId = parseUserId(shellToken);
 
+    // Load identity key from store to populate deviceInfo
+    const identityKeyPair = await store.getIdentityKeyPair();
+
     return {
       status: 'ok',
       client: {
@@ -148,6 +151,12 @@ export async function login(username, password, opts = {}) {
         username,
         deviceUsername: storedIdentity.deviceUsername,
         deviceUUID: storedIdentity.deviceUUID,
+        deviceInfo: {
+          deviceUUID: storedIdentity.deviceUUID,
+          serverUserId: userId,
+          deviceName: detectDeviceName(),
+          signalIdentityKey: identityKeyPair ? new Uint8Array(identityKeyPair.pubKey) : null,
+        },
       },
     };
   }

@@ -97,11 +97,27 @@ function formatTime(ts) {
 }
 
 /**
- * Resolve authorDeviceId to a username
+ * Resolve author to a username - checks stored authorUsername first
+ * @param {object|string} storyOrDeviceId - Story object or authorDeviceId string
+ * @param {object} client - ObscuraClient instance
  */
-function resolveAuthorName(authorDeviceId, client) {
+function resolveAuthorName(storyOrDeviceId, client, profileMap = new Map()) {
+  // Support both old (deviceId string) and new (story object) calling conventions
+  const authorDeviceId = typeof storyOrDeviceId === 'string' ? storyOrDeviceId : storyOrDeviceId.authorDeviceId;
+  const authorUsername = typeof storyOrDeviceId === 'object' ? storyOrDeviceId.data?.authorUsername : null;
+
   if (authorDeviceId === client.deviceUUID) {
     return 'You';
+  }
+
+  // Check profile displayName first (from pre-loaded profiles)
+  if (profileMap.has(authorDeviceId)) {
+    return profileMap.get(authorDeviceId);
+  }
+
+  // First check if authorUsername is stored
+  if (authorUsername) {
+    return authorUsername;
   }
 
   if (client.friends && client.friends.friends) {
@@ -188,13 +204,20 @@ function renderComments(comments, depth = 0) {
     : comments;
 
   return topLevel.map(c => `
-    <card style="margin-left: ${depth * 20}px">
+    <card style="margin-left: ${depth * 2}rem" data-comment-id="${c.id}">
       <cluster>
         <strong>${c.authorName || 'Unknown'}</strong>
         <span style="color: var(--ry-color-text-muted); font-size: var(--ry-text-sm)">${formatTime(c.timestamp)}</span>
       </cluster>
       <p style="margin: var(--ry-space-2) 0">${escapeHtml(c.data?.text)}</p>
       <button variant="ghost" size="sm" class="reply-btn" data-comment-id="${c.id}">Reply</button>
+      <div class="reply-form hidden" data-for="${c.id}">
+        <cluster style="margin-top: 8px">
+          <input type="text" class="reply-input" placeholder="Write a reply..." style="flex: 1" />
+          <button class="submit-reply-btn" size="sm">Send</button>
+          <button class="cancel-reply-btn" variant="ghost" size="sm">✕</button>
+        </cluster>
+      </div>
       ${c.replies ? renderComments(c.replies, depth + 1) : ''}
     </card>
   `).join('');
@@ -217,16 +240,39 @@ export async function mount(container, client, router, params) {
       return;
     }
 
+    // Load profiles to get displayNames
+    const profileMap = new Map();
+    if (client.profile) {
+      const profiles = await client.profile.where({}).exec();
+      for (const p of profiles) {
+        if (p.authorDeviceId && p.data?.displayName) {
+          profileMap.set(p.authorDeviceId, p.data.displayName);
+        }
+      }
+    }
+
     // Load comments and reactions
     if (client.comment) {
       const comments = await client.comment.where({
         'data.storyId': storyId
       }).exec();
-      // Resolve comment author names
-      story.comments = comments.map(c => ({
+      // Resolve comment author names and build tree structure
+      const commentsWithNames = comments.map(c => ({
         ...c,
-        authorName: resolveAuthorName(c.authorDeviceId, client),
+        authorName: resolveAuthorName(c.authorDeviceId, client, profileMap),
+        replies: [],
       }));
+      // Build tree: assign replies to their parent comments
+      const commentMap = new Map(commentsWithNames.map(c => [c.id, c]));
+      const topLevel = [];
+      for (const c of commentsWithNames) {
+        if (c.data?.commentId && commentMap.has(c.data.commentId)) {
+          commentMap.get(c.data.commentId).replies.push(c);
+        } else if (!c.data?.commentId) {
+          topLevel.push(c);
+        }
+      }
+      story.comments = topLevel;
     }
 
     if (client.reaction) {
@@ -237,7 +283,7 @@ export async function mount(container, client, router, params) {
     }
 
     // Resolve story author name and check for media
-    story.authorName = resolveAuthorName(story.authorDeviceId, client);
+    story.authorName = resolveAuthorName(story, client, profileMap);
     story.hasMedia = !!parseMediaUrl(story.data?.mediaUrl);
     story.mediaBlobUrl = null;
 
@@ -288,16 +334,40 @@ export async function mount(container, client, router, params) {
         });
       });
 
-      // Reply buttons
+      // Reply buttons - show inline form
       container.querySelectorAll('.reply-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const commentId = btn.dataset.commentId;
-          const text = prompt('Enter reply:');
+          const replyForm = container.querySelector(`.reply-form[data-for="${commentId}"]`);
+
+          // Hide all other reply forms
+          container.querySelectorAll('.reply-form').forEach(f => f.classList.add('hidden'));
+
+          // Show this one
+          replyForm.classList.remove('hidden');
+          replyForm.querySelector('.reply-input').focus();
+        });
+      });
+
+      // Submit reply buttons
+      container.querySelectorAll('.submit-reply-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const form = btn.closest('.reply-form');
+          const commentId = form.dataset.for;
+          const input = form.querySelector('.reply-input');
+          const text = input.value.trim();
+
           if (text) {
-            client.comment.create({ commentId, text }).then(() => {
-              mount(container, client, router, params);
-            });
+            await client.comment.create({ storyId, commentId, text });
+            mount(container, client, router, params);
           }
+        });
+      });
+
+      // Cancel reply buttons
+      container.querySelectorAll('.cancel-reply-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          btn.closest('.reply-form').classList.add('hidden');
         });
       });
 

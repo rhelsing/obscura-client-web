@@ -347,6 +347,43 @@ ul {
   margin-bottom: 16px;
 }
 
+/* Phrase Entry Grid (for revocation) */
+.phrase-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.phrase-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+}
+
+.phrase-number {
+  font-size: 11px;
+  color: var(--text-secondary);
+  min-width: 16px;
+}
+
+.phrase-word {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 8px 4px;
+  font-family: monospace;
+  font-size: 14px;
+  width: 100%;
+}
+
+.phrase-word:focus {
+  outline: none;
+}
+
 /* Link Code */
 .link-code-section {
   text-align: center;
@@ -418,6 +455,26 @@ ul {
 
 .verification-result button {
   flex: 1;
+}
+
+/* Mismatch Warning */
+.mismatch-warning {
+  background: #ffebee;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.mismatch-warning h3 {
+  color: var(--danger);
+  margin-bottom: 8px;
+}
+
+.warning-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
 }
 
 /* Chat */
@@ -621,6 +678,15 @@ ul {
 
 .comment-input input {
   flex: 1;
+}
+
+/* Inline Reply Form */
+.reply-form {
+  margin-left: 2rem;
+}
+
+.reply-form.hidden {
+  display: none;
 }
 
 /* Profile */

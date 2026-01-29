@@ -5,6 +5,7 @@
  * - Parse → befriend
  */
 import { navigate } from '../index.js';
+import QRCode from 'qrcode';
 
 let cleanup = null;
 
@@ -28,9 +29,7 @@ export function render({ myLink = '', error = null, success = false, loading = f
       <stack gap="lg">
         <card>
           <h2>Share Your Link</h2>
-          <div class="qr-placeholder" id="my-qr" style="background: var(--ry-color-bg-secondary); padding: var(--ry-space-4); border-radius: var(--ry-radius-md); text-align: center; margin: var(--ry-space-3) 0">
-            <span style="font-family: monospace; font-size: var(--ry-text-sm); word-break: break-all">${myLink}</span>
-          </div>
+          <div class="qr-container" id="my-qr" style="background: #fff; padding: var(--ry-space-4); border-radius: var(--ry-radius-md); text-align: center; margin: var(--ry-space-3) 0; display: flex; justify-content: center;"></div>
           <cluster>
             <input type="text" readonly value="${myLink}" id="my-link-input" style="flex: 1" />
             <button variant="secondary" id="copy-btn"><ry-icon name="copy"></ry-icon> Copy</button>
@@ -89,6 +88,18 @@ export function mount(container, client, router) {
   const myLink = `obscura://add?userId=${client.userId}&username=${client.username}`;
 
   container.innerHTML = render({ myLink });
+
+  // Generate QR code
+  const qrContainer = container.querySelector('#my-qr');
+  QRCode.toCanvas(myLink, {
+    width: 200,
+    margin: 2,
+    color: { dark: '#000000', light: '#ffffff' }
+  }, (err, canvas) => {
+    if (!err && qrContainer) {
+      qrContainer.appendChild(canvas);
+    }
+  });
 
   const form = container.querySelector('#add-form');
   const copyBtn = container.querySelector('#copy-btn');

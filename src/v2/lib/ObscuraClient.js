@@ -9,6 +9,8 @@ import { Messenger, MessageType } from './messenger.js';
 import { AttachmentManager } from './attachments.js';
 import { createStore } from './store.js';
 import { createMessageStore } from '../store/messageStore.js';
+import { createFriendStore } from '../store/friendStore.js';
+import { createDeviceStore } from '../store/deviceStore.js';
 import { compress, decompress } from '../crypto/compress.js';
 import {
   signWithRecoveryPhrase,
@@ -19,6 +21,7 @@ import {
 } from '../crypto/signatures.js';
 import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
 import { createSchema } from '../orm/index.js';
+import { logger } from '../../lib/logger.js';
 
 // Default reconnect settings
 const RECONNECT_DELAY_MS = 1000;
@@ -48,12 +51,21 @@ export class ObscuraClient {
     // Link code for new device linking
     this.linkCode = opts.linkCode || null;
 
+    // Initialize logger for this device
+    if (this.userId) {
+      logger.init(this.userId);
+    }
+
     // Track used link codes (one-use enforcement)
     this._usedLinkCodes = new Set();
 
-    // Managers
-    this.friends = new FriendManager();
-    this.devices = new DeviceManager(this.userId);
+    // Persistence stores
+    this._friendStore = this.userId ? createFriendStore(this.userId) : null;
+    this._deviceStore = this.username ? createDeviceStore(this.username) : null;
+
+    // Managers (with persistence)
+    this.friends = new FriendManager(this._friendStore);
+    this.devices = new DeviceManager(this.userId, this._deviceStore);
     this.messenger = new Messenger({
       apiUrl: this.apiUrl,
       store: this.store,
@@ -122,6 +134,13 @@ export class ObscuraClient {
       username: this.username,
       deviceUsername: this.deviceUsername,
       deviceUUID: this.deviceUUID,
+      // Store deviceInfo for verify codes (signalIdentityKey as array for JSON)
+      deviceInfo: this.deviceInfo ? {
+        deviceUUID: this.deviceInfo.deviceUUID,
+        serverUserId: this.deviceInfo.serverUserId,
+        deviceName: this.deviceInfo.deviceName,
+        signalIdentityKey: this.deviceInfo.signalIdentityKey ? Array.from(this.deviceInfo.signalIdentityKey) : null,
+      } : null,
     };
     localStorage.setItem('obscura_session', JSON.stringify(session));
   }
@@ -152,6 +171,14 @@ export class ObscuraClient {
       // Recreate store from IndexedDB using username
       const store = createStore(session.username);
 
+      // Restore deviceInfo with signalIdentityKey as Uint8Array
+      const deviceInfo = session.deviceInfo ? {
+        deviceUUID: session.deviceInfo.deviceUUID,
+        serverUserId: session.deviceInfo.serverUserId,
+        deviceName: session.deviceInfo.deviceName,
+        signalIdentityKey: session.deviceInfo.signalIdentityKey ? new Uint8Array(session.deviceInfo.signalIdentityKey) : null,
+      } : null;
+
       return new ObscuraClient({
         apiUrl: session.apiUrl,
         store,
@@ -161,6 +188,7 @@ export class ObscuraClient {
         username: session.username,
         deviceUsername: session.deviceUsername,
         deviceUUID: session.deviceUUID,
+        deviceInfo,
       });
     } catch (e) {
       console.warn('Failed to restore session:', e);
@@ -290,6 +318,10 @@ export class ObscuraClient {
    * Connect to WebSocket gateway (auto-reconnect enabled)
    */
   async connect() {
+    // Load persisted state from IndexedDB before connecting
+    await this.friends.loadFromStore();
+    await this.devices.loadFromStore();
+
     await this.messenger.loadProto();
     this._shouldReconnect = true;
 
@@ -310,6 +342,7 @@ export class ObscuraClient {
       const onOpen = () => {
         console.log('[ObscuraClient] WebSocket connected!');
         this._reconnectAttempts = 0;
+        logger.logGatewayConnect();
         resolve();
       };
 
@@ -321,7 +354,8 @@ export class ObscuraClient {
         this._emit('error', err);
       };
 
-      const onClose = () => {
+      const onClose = (event) => {
+        logger.logGatewayDisconnect(event?.code, event?.reason);
         this._emit('disconnect');
         if (this._shouldReconnect) {
           this._scheduleReconnect();
@@ -416,8 +450,16 @@ export class ObscuraClient {
       }
 
       const frame = this.messenger.WebSocketFrame.decode(bytes);
+      console.log('[ws] Frame received:', frame.envelope ? 'envelope' : frame.ack ? 'ack' : 'unknown', frame.envelope?.id?.slice(-8) || '');
 
       if (frame.envelope) {
+        const correlationId = logger.generateCorrelationId();
+        await logger.logReceiveEnvelope(
+          frame.envelope.id,
+          frame.envelope.sourceUserId,
+          frame.envelope.message.type,
+          correlationId
+        );
 
         const decrypted = await this.messenger.decrypt(
           frame.envelope.sourceUserId,
@@ -429,8 +471,12 @@ export class ObscuraClient {
         msg.sourceUserId = frame.envelope.sourceUserId;
         msg.envelopeId = frame.envelope.id;
 
+        await logger.logReceiveDecode(frame.envelope.sourceUserId, msg.type, correlationId);
+
         this._routeMessage(msg);
         this._acknowledge(frame.envelope.id);
+
+        await logger.logReceiveComplete(frame.envelope.id, frame.envelope.sourceUserId, msg.type, correlationId);
 
         // Check and replenish prekeys (non-blocking)
         this._checkAndReplenishPrekeys().catch(() => {});
@@ -446,8 +492,13 @@ export class ObscuraClient {
 
   /**
    * Route message to appropriate handler
+   * This is the CENTRAL place where all incoming messages flow.
+   * Persistence happens here (or in called methods) BEFORE ACK.
    */
   _routeMessage(msg) {
+    // Log every incoming message
+    console.log('[ws] Message:', msg.type, 'from:', msg.sourceUserId?.slice(-8) || 'unknown');
+
     switch (msg.type) {
       case 'FRIEND_REQUEST':
         const request = this.friends.processRequest(msg, (userId, username, accepted) => {
@@ -482,6 +533,14 @@ export class ObscuraClient {
         break;
 
       case 'CONTENT_REFERENCE':
+        // Persist attachment reference as a special message type
+        this._persistMessage(msg.sourceUserId, {
+          from: msg.sourceUserId,
+          type: 'ATTACHMENT',
+          contentReference: msg.contentReference,
+          timestamp: msg.timestamp,
+          isSent: false,
+        });
         this._emit('attachment', {
           from: msg.sourceUserId,
           contentReference: msg.contentReference,
@@ -504,16 +563,17 @@ export class ObscuraClient {
       case 'TEXT':
       case 'IMAGE':
       default:
-        // Persist received message - use sourceUserId as conversationId
-        // (we'll need to map this to username when displaying)
-        this._persistMessage(msg.sourceUserId, {
+        // Look up username from serverUserId for correct conversationId
+        const conversationId = this.friends.getUsernameFromServerId(msg.sourceUserId) || msg.sourceUserId;
+        this._persistMessage(conversationId, {
           from: msg.sourceUserId,
+          conversationId,
           type: msg.type,
           text: msg.text,
           timestamp: msg.timestamp,
           isSent: false,
         });
-        this._emit('message', msg);
+        this._emit('message', { ...msg, conversationId });
         break;
     }
   }
@@ -587,6 +647,7 @@ export class ObscuraClient {
     const targets = this.friends.getFanOutTargets(friendUsername);
     const messageId = this.messenger.generateMessageId();
     const timestamp = Date.now();
+    const correlationId = logger.generateCorrelationId();
 
     // Build message
     const msgOpts = {
@@ -596,10 +657,16 @@ export class ObscuraClient {
       ...opts,
     };
 
+    // Log send start
+    await logger.logSendStart(friendUsername, msgOpts.type, correlationId);
+
     // Fan-out to all friend devices
     for (const targetUserId of targets) {
       await this.messenger.sendMessage(targetUserId, msgOpts);
     }
+
+    // Log send complete
+    await logger.logSendComplete(friendUsername, targets.length, correlationId);
 
     // Store locally and persist to IndexedDB
     await this._persistMessage(friendUsername, {
@@ -729,7 +796,7 @@ export class ObscuraClient {
     // Send SYNC_BLOB with full state
     const syncData = {
       friends: this._serializeFriends(),
-      messages: this.messages,
+      messages: this.messageStore ? await this.messageStore.exportAll() : this.messages,
       settings: {},
     };
     const compressedData = await compress(syncData);
@@ -774,6 +841,11 @@ export class ObscuraClient {
 
       // Restore messages
       if (data.messages) {
+        // Persist to IndexedDB
+        if (this.messageStore) {
+          await this.messageStore.importMessages(data.messages);
+        }
+        // Also update in-memory cache
         this.messages = [...this.messages, ...data.messages];
       }
 

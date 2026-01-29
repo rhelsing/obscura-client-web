@@ -1,13 +1,49 @@
 /**
  * Own Device Management Module
  * Tracks user's own devices for self-sync messaging
+ * Now with IndexedDB persistence via deviceStore
  */
 
 export class DeviceManager {
-  constructor(currentUserId) {
+  constructor(currentUserId, store = null) {
     this.currentUserId = currentUserId;
+    this._store = store;  // deviceStore instance for IndexedDB persistence
     // Array of { serverUserId, deviceUUID, deviceName, signalIdentityKey }
     this.ownDevices = [];
+  }
+
+  /**
+   * Load own devices from IndexedDB into memory
+   * Call this on startup to restore persisted state
+   */
+  async loadFromStore() {
+    if (!this._store) return;
+    try {
+      const devices = await this._store.getOwnDevices();
+      this.ownDevices = devices
+        .filter(d => d.serverUserId !== this.currentUserId)
+        .map(d => ({
+          serverUserId: d.serverUserId,
+          deviceUUID: d.deviceUUID,
+          deviceName: d.deviceName || 'Unknown Device',
+          signalIdentityKey: d.signalIdentityKey,
+        }));
+      console.log(`[DeviceManager] Loaded ${this.ownDevices.length} own devices from IndexedDB`);
+    } catch (e) {
+      console.warn('[DeviceManager] Failed to load from store:', e.message);
+    }
+  }
+
+  /**
+   * Persist all own devices to IndexedDB
+   */
+  async _persistDevices() {
+    if (!this._store) return;
+    try {
+      await this._store.setOwnDevices(this.ownDevices);
+    } catch (e) {
+      console.warn('[DeviceManager] Failed to persist devices:', e.message);
+    }
   }
 
   /**
@@ -37,6 +73,8 @@ export class DeviceManager {
         deviceName: device.deviceName || 'Unknown Device',
         signalIdentityKey: device.signalIdentityKey,
       });
+      // Persist to IndexedDB
+      this._persistDevices();
     }
   }
 
@@ -53,6 +91,8 @@ export class DeviceManager {
         deviceName: d.deviceName || 'Unknown Device',
         signalIdentityKey: d.signalIdentityKey,
       }));
+    // Persist to IndexedDB
+    this._persistDevices();
   }
 
   /**
@@ -79,6 +119,8 @@ export class DeviceManager {
     this.ownDevices = this.ownDevices.filter(d =>
       d.serverUserId !== idOrUUID && d.deviceUUID !== idOrUUID
     );
+    // Persist to IndexedDB
+    this._persistDevices();
   }
 
   /**

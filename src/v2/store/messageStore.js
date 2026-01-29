@@ -90,6 +90,7 @@ export function createMessageStore(userId) {
         conversationId,
         timestamp: message.timestamp || Date.now(),
         content: message.content,
+        contentReference: message.contentReference, // For attachments
         isSent: message.isSent || false, // true = sent by me, false = received
         authorDeviceId: message.authorDeviceId,
         storedAt: Date.now(),

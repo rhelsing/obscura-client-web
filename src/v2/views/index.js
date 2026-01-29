@@ -61,7 +61,13 @@ let client = null;
  */
 export function init(appContainer, obscuraClient = null) {
   container = appContainer;
-  client = obscuraClient;
+
+  // Use setClient to properly set client and expose on window
+  if (obscuraClient) {
+    setClient(obscuraClient);
+  } else {
+    client = null;
+  }
 
   router = new Navigo('/');
 
@@ -77,8 +83,9 @@ export function init(appContainer, obscuraClient = null) {
   router.on('/friends/requests', () => requireAuth(() => mountView(FriendRequests)));
   router.on('/friends/verify/:username', ({ data }) => requireAuth(() => mountView(VerifyCode, data)));
 
-  // Messaging routes
-  router.on('/messages', () => requireAuth(() => mountView(ConversationList)));
+  // Chats routes (main conversation view)
+  router.on('/chats', () => requireAuth(() => mountView(ConversationList)));
+  router.on('/messages', () => requireAuth(() => mountView(ConversationList))); // Alias for backwards compat
   router.on('/messages/:username', ({ data }) => requireAuth(() => mountView(Chat, data)));
 
   // Stories routes
@@ -88,8 +95,8 @@ export function init(appContainer, obscuraClient = null) {
 
   // Profile routes
   router.on('/profile', () => requireAuth(() => mountView(ViewProfile)));
-  router.on('/profile/:username', ({ data }) => requireAuth(() => mountView(ViewProfile, data)));
   router.on('/profile/edit', () => requireAuth(() => mountView(EditProfile)));
+  router.on('/profile/:username', ({ data }) => requireAuth(() => mountView(ViewProfile, data)));
 
   // Settings route
   router.on('/settings', () => requireAuth(() => mountView(Settings)));
@@ -133,6 +140,10 @@ export function init(appContainer, obscuraClient = null) {
  */
 export function setClient(obscuraClient) {
   client = obscuraClient;
+  // Expose for testing in dev mode
+  if (typeof window !== 'undefined') {
+    window.__client = obscuraClient;
+  }
   setupGlobalEventHandlers();
 }
 

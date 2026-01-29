@@ -117,6 +117,7 @@ export function mount(container, client, router) {
       await client.story.create({
         content,
         mediaUrl,
+        authorUsername: client.username,
       });
 
       navigate('/stories');

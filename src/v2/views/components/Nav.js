@@ -1,27 +1,19 @@
 /**
  * Bottom Navigation Component
- * 5-item nav: Feed | Messages | Friends | Groups | More
- * "More" opens a ry-ui drawer
+ * 3-item nav: Chats | Stories | More
+ * Signal-style: conversations are the main view
  */
 
-export function renderNav(active = 'feed') {
+export function renderNav(active = 'chats') {
   return `
     <nav class="bottom-nav">
-      <a href="/stories" data-navigo class="${active === 'feed' ? 'active' : ''}">
-        <ry-icon name="heart"></ry-icon>
-        <span class="label">Feed</span>
-      </a>
-      <a href="/messages" data-navigo class="${active === 'messages' ? 'active' : ''}">
+      <a href="/chats" data-navigo class="${active === 'chats' ? 'active' : ''}">
         <ry-icon name="edit"></ry-icon>
-        <span class="label">Messages</span>
+        <span class="label">Chats</span>
       </a>
-      <a href="/friends" data-navigo class="${active === 'friends' ? 'active' : ''}">
-        <ry-icon name="user"></ry-icon>
-        <span class="label">Friends</span>
-      </a>
-      <a href="/groups" data-navigo class="${active === 'groups' ? 'active' : ''}">
-        <ry-icon name="star"></ry-icon>
-        <span class="label">Groups</span>
+      <a href="/stories" data-navigo class="${active === 'stories' ? 'active' : ''}">
+        <ry-icon name="heart"></ry-icon>
+        <span class="label">Stories</span>
       </a>
       <button drawer="more-drawer" class="${active === 'more' ? 'active' : ''}">
         <ry-icon name="menu"></ry-icon>
@@ -35,6 +27,12 @@ export function renderNav(active = 'feed') {
         <divider></divider>
         <a href="/profile" data-navigo class="drawer-link">
           <ry-icon name="user"></ry-icon> Profile
+        </a>
+        <a href="/friends" data-navigo class="drawer-link">
+          <ry-icon name="user"></ry-icon> Friends
+        </a>
+        <a href="/groups" data-navigo class="drawer-link">
+          <ry-icon name="star"></ry-icon> Groups
         </a>
         <a href="/devices" data-navigo class="drawer-link">
           <ry-icon name="settings"></ry-icon> Devices

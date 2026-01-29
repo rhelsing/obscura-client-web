@@ -6,7 +6,7 @@
 export const fullSchema = {
   // EPHEMERAL MODELS (24h TTL)
   story: {
-    fields: { content: 'string', mediaUrl: 'string?' },
+    fields: { content: 'string', mediaUrl: 'string?', authorUsername: 'string?' },
     has_many: ['comment', 'reaction'],
     sync: 'g-set',
     ephemeral: true,
@@ -28,9 +28,29 @@ export const fullSchema = {
     ttl: '24h',
   },
 
+  // SNAP MODELS
+  snap: {
+    fields: {
+      recipientUsername: 'string',
+      senderUsername: 'string',
+      mediaRef: 'string',        // JSON ContentReference
+      caption: 'string?',
+      displayDuration: 'number', // 1-10 seconds
+      viewedAt: 'timestamp?',    // null = unviewed
+    },
+    sync: 'g-set',      // Immutable (no edits after send)
+    collectable: true,  // Persists until viewed+deleted
+  },
+
   // COLLECTABLE MODELS (permanent)
   streak: {
-    fields: { count: 'number', lastActivity: 'timestamp' },
+    fields: {
+      friendUsername: 'string',
+      count: 'number',
+      lastSentAt: 'timestamp',
+      lastReceivedAt: 'timestamp',
+      expiresAt: 'timestamp',
+    },
     sync: 'lww',
     collectable: true,
   },

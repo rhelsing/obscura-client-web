@@ -23,7 +23,7 @@ export function render({ group = null, messages = [], loading = false, sending =
   return `
     <div class="view group-chat">
       <header>
-        <a href="/groups" data-navigo class="back">← Back</a>
+        <a href="/chats" data-navigo class="back">← Back</a>
         <div class="group-header">
           <h1>${escapeHtml(groupName)}</h1>
           <span class="member-count">${members.length} members</span>
@@ -87,10 +87,15 @@ function parseMembers(membersJson) {
  * @param {object} client - ObscuraClient instance
  * @returns {string} - Username or truncated ID
  */
-function resolveAuthorName(authorDeviceId, client) {
+function resolveAuthorName(authorDeviceId, client, profileMap = new Map()) {
   // Check if it's our own message
   if (authorDeviceId === client.deviceUUID) {
     return 'You';
+  }
+
+  // Check profile displayName first (from pre-loaded profiles)
+  if (profileMap.has(authorDeviceId)) {
+    return profileMap.get(authorDeviceId);
   }
 
   // Search through friends to find matching device
@@ -128,6 +133,17 @@ export async function mount(container, client, router, params) {
       return;
     }
 
+    // Load profiles to get displayNames
+    const profileMap = new Map();
+    if (client.profile) {
+      const profiles = await client.profile.where({}).exec();
+      for (const p of profiles) {
+        if (p.authorDeviceId && p.data?.displayName) {
+          profileMap.set(p.authorDeviceId, p.data.displayName);
+        }
+      }
+    }
+
     // Load messages
     messages = [];
     if (client.groupMessage) {
@@ -139,7 +155,7 @@ export async function mount(container, client, router, params) {
       messages = messages.map(m => ({
         ...m,
         fromMe: m.authorDeviceId === client.deviceUUID,
-        author: resolveAuthorName(m.authorDeviceId, client),
+        author: resolveAuthorName(m.authorDeviceId, client, profileMap),
       }));
     }
 

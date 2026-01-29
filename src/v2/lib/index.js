@@ -65,6 +65,7 @@ export const Obscura = {
           username: result.client.username || username,
           deviceUsername: result.client.deviceUsername,
           deviceUUID: result.client.deviceUUID,
+          deviceInfo: result.client.deviceInfo,
         }),
       };
     }

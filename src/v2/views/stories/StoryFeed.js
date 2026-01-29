@@ -58,7 +58,7 @@ export function render({ stories = [], loading = false } = {}) {
 
       <a href="/stories/new" data-navigo class="fab">+</a>
 
-      ${renderNav('feed')}
+      ${renderNav('stories')}
     </div>
   `;
 }
@@ -154,14 +154,26 @@ async function loadMediaForStory(story, client) {
 
 /**
  * Resolve authorDeviceId to a username
- * @param {string} authorDeviceId - Device UUID of the author
+ * @param {object} story - Story object with authorDeviceId and optional data.authorUsername
  * @param {object} client - ObscuraClient instance
  * @returns {string} - Username or truncated ID
  */
-function resolveAuthorName(authorDeviceId, client) {
+function resolveAuthorName(story, client, profileMap = new Map()) {
+  const authorDeviceId = story.authorDeviceId;
+
   // Check if it's our own story
   if (authorDeviceId === client.deviceUUID) {
     return 'You';
+  }
+
+  // Check profile displayName first (from pre-loaded profiles)
+  if (profileMap.has(authorDeviceId)) {
+    return profileMap.get(authorDeviceId);
+  }
+
+  // First check if authorUsername is stored
+  if (story.data?.authorUsername) {
+    return story.data.authorUsername;
   }
 
   // Search through friends to find matching device
@@ -192,10 +204,25 @@ export async function mount(container, client, router) {
       return;
     }
 
-    // Query stories
-    const stories = await client.story.where({})
+    // Get all known device IDs (self + friends)
+    const knownDeviceIds = new Set([client.deviceUUID]);
+    if (client.friends && client.friends.friends) {
+      for (const [, data] of client.friends.friends) {
+        if (data.devices) {
+          data.devices.forEach(d => {
+            if (d.deviceUUID) knownDeviceIds.add(d.deviceUUID);
+            if (d.serverUserId) knownDeviceIds.add(d.serverUserId);
+          });
+        }
+      }
+    }
+
+    // Query all stories then filter to known devices
+    const allStories = await client.story.where({})
       .orderBy('timestamp', 'desc')
       .exec();
+
+    const stories = allStories.filter(s => knownDeviceIds.has(s.authorDeviceId));
 
     // Batch load comments and reactions
     if (client.comment) {
@@ -205,10 +232,21 @@ export async function mount(container, client, router) {
       await client.reaction.loadInto(stories, 'storyId');
     }
 
+    // Load profiles to get displayNames
+    const profileMap = new Map();
+    if (client.profile) {
+      const profiles = await client.profile.where({}).exec();
+      for (const p of profiles) {
+        if (p.authorDeviceId && p.data?.displayName) {
+          profileMap.set(p.authorDeviceId, p.data.displayName);
+        }
+      }
+    }
+
     // Resolve author names and check for media
     const storiesWithNames = stories.map(s => ({
       ...s,
-      authorName: resolveAuthorName(s.authorDeviceId, client),
+      authorName: resolveAuthorName(s, client, profileMap),
       hasMedia: !!parseMediaUrl(s.data?.mediaUrl),
       mediaBlobUrl: null,
       mediaLoading: false,

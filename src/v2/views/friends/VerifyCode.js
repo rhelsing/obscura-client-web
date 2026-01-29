@@ -7,7 +7,7 @@ import { navigate } from '../index.js';
 
 let cleanup = null;
 
-export function render({ myCode = '----', theirCode = '----', username = 'friend', loading = false } = {}) {
+export function render({ myCode = '----', theirCode = '----', username = 'friend', loading = false, showWarning = false } = {}) {
   return `
     <div class="view verify-code">
       <header>
@@ -35,10 +35,22 @@ export function render({ myCode = '----', theirCode = '----', username = 'friend
           </div>
         </div>
 
-        <div class="verification-result">
-          <button id="match-btn" class="success">Codes Match ✓</button>
-          <button id="no-match-btn" class="danger">Codes Don't Match ✗</button>
-        </div>
+        ${showWarning ? `
+          <div class="mismatch-warning">
+            <h3>Security Warning</h3>
+            <p>Code mismatch may indicate someone is impersonating ${username}.
+               This could be a man-in-the-middle attack.</p>
+            <div class="warning-actions">
+              <button id="remove-friend-btn" class="danger">Remove Friend</button>
+              <button id="go-back-btn" class="secondary">Go Back</button>
+            </div>
+          </div>
+        ` : `
+          <div class="verification-result">
+            <button id="match-btn" class="success">Codes Match ✓</button>
+            <button id="no-match-btn" class="danger">Codes Don't Match ✗</button>
+          </div>
+        `}
       `}
     </div>
   `;
@@ -65,12 +77,25 @@ export function mount(container, client, router, params) {
         navigate('/friends');
       });
 
-      // No match button
+      // No match button - show warning instead of alert
       container.querySelector('#no-match-btn').addEventListener('click', () => {
-        // Warning: potential MITM
-        alert('Warning: Code mismatch may indicate a security issue. Consider rejecting this friend request.');
-        delete window.__verifyRequest;
-        navigate('/friends/requests');
+        container.innerHTML = render({ myCode, theirCode, username, showWarning: true });
+
+        container.querySelector('#remove-friend-btn').addEventListener('click', async () => {
+          // Remove friend
+          if (client.friends && client.friends.remove) {
+            client.friends.remove(username);
+          }
+          delete window.__verifyRequest;
+          navigate('/friends');
+        });
+
+        container.querySelector('#go-back-btn').addEventListener('click', () => {
+          delete window.__verifyRequest;
+          navigate('/friends');
+        });
+
+        router.updatePageLinks();
       });
 
       router.updatePageLinks();

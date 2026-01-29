@@ -6,7 +6,7 @@ import { navigate } from '../index.js';
 
 let cleanup = null;
 
-export function render({ profile = null, loading = false, saving = false, error = null } = {}) {
+export function render({ profile = null, loading = false, saving = false, error = null, username = '' } = {}) {
   if (loading) {
     return `<div class="view edit-profile"><div class="loading">Loading...</div></div>`;
   }
@@ -38,7 +38,7 @@ export function render({ profile = null, loading = false, saving = false, error 
             type="text"
             id="display-name"
             value="${profile?.data?.displayName || ''}"
-            placeholder="Your name"
+            placeholder="${username || 'Your name'}"
             ${saving ? 'disabled' : ''}
           />
         </label>
@@ -80,7 +80,7 @@ export async function mount(container, client, router) {
       }
     }
 
-    container.innerHTML = render({ profile });
+    container.innerHTML = render({ profile, username: client.username });
 
     const form = container.querySelector('#profile-form');
     const avatarBtn = container.querySelector('#change-avatar-btn');

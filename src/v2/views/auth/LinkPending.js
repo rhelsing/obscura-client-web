@@ -27,32 +27,35 @@ export function render({ linkCode = '', waiting = true, error = null } = {}) {
   return `
     <div class="view link-pending">
       <h1>Link This Device</h1>
-      <p>Open Obscura on another device and approve this link request.</p>
+      <p>Open Obscura on another device and enter this code to approve.</p>
 
-      <div class="link-code-section">
-        <div class="qr-placeholder" id="qr-code">
-          <!-- QR code would go here -->
-          <div class="qr-fallback">${linkCode}</div>
-        </div>
-
-        <div class="code-display">
-          <label>Or enter this code:</label>
-          <code class="link-code">${linkCode}</code>
-        </div>
+      <div class="link-code-section" style="margin: var(--ry-space-6) 0;">
+        <ry-field label="Link Code">
+          <div style="display: flex; gap: var(--ry-space-2);">
+            <input
+              type="text"
+              class="link-code"
+              value="${linkCode}"
+              readonly
+              style="font-family: monospace; font-size: 0.75rem;"
+            />
+            <button type="button" id="copy-btn" variant="secondary">Copy</button>
+          </div>
+        </ry-field>
       </div>
 
       ${waiting ? `
-        <div class="waiting">
+        <div class="waiting" style="text-align: center; margin: var(--ry-space-6) 0;">
           <div class="spinner"></div>
           <p>Waiting for approval...</p>
         </div>
       ` : `
-        <div class="approved">
+        <div class="approved" style="text-align: center;">
           <p>Approved! Syncing data...</p>
         </div>
       `}
 
-      <p class="link"><a href="/login" data-navigo>Cancel</a></p>
+      <p class="link" style="text-align: center;"><a href="/login" data-navigo>Cancel</a></p>
     </div>
   `;
 }
@@ -67,6 +70,21 @@ export async function mount(container, _client, router) {
   }
 
   container.innerHTML = render({ linkCode: pendingClient.linkCode });
+
+  // Copy button handler
+  const copyBtn = container.querySelector('#copy-btn');
+  const codeInput = container.querySelector('.link-code');
+  if (copyBtn && codeInput) {
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(codeInput.value);
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+      } catch (e) {
+        codeInput.select();
+      }
+    });
+  }
 
   let approvalHandler = null;
   let syncHandler = null;

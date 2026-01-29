@@ -1,14 +1,92 @@
 /**
  * Friend Management Module
  * Tracks friends and their devices for fan-out messaging
+ * Now with IndexedDB persistence via friendStore
  */
 
 import { generateVerifyCode } from '../crypto/signatures.js';
 
 export class FriendManager {
-  constructor() {
-    // Map of username -> { username, devices: [{ serverUserId, deviceName, signalIdentityKey }], status }
+  constructor(store = null) {
+    // Map of username -> { username, devices: [{ serverUserId, deviceUUID, deviceName, signalIdentityKey }], status }
     this.friends = new Map();
+    this._store = store;  // friendStore instance for IndexedDB persistence
+  }
+
+  /**
+   * Load friends from IndexedDB into memory
+   * Call this on startup to restore persisted state
+   */
+  async loadFromStore() {
+    if (!this._store) return;
+    try {
+      const friends = await this._store.getAllFriends();
+      for (const f of friends) {
+        // Map friendStore status names to FriendManager status names
+        let status = f.status;
+        if (status === 'pending_received') status = 'pending_incoming';
+        if (status === 'pending_sent') status = 'pending_outgoing';
+
+        this.friends.set(f.username, {
+          username: f.username,
+          devices: f.devices || [],
+          status,
+          addedAt: f.createdAt,
+        });
+      }
+      console.log(`[FriendManager] Loaded ${friends.length} friends from IndexedDB`);
+    } catch (e) {
+      console.warn('[FriendManager] Failed to load from store:', e.message);
+    }
+  }
+
+  /**
+   * Persist a friend to IndexedDB
+   */
+  async _persistFriend(username) {
+    if (!this._store) return;
+    const f = this.friends.get(username);
+    if (!f) return;
+
+    // Map FriendManager status to friendStore status
+    let storeStatus = f.status;
+    if (storeStatus === 'pending_incoming') storeStatus = 'pending_received';
+    if (storeStatus === 'pending_outgoing') storeStatus = 'pending_sent';
+
+    // Determine the userId key for IndexedDB
+    // First, check if there's an existing entry by scanning all friends
+    // to avoid creating duplicates with different keys
+    let userId = f.devices[0]?.serverUserId || username;
+
+    try {
+      // Check if a friend with this username already exists under a different key
+      const allFriends = await this._store.getAllFriends();
+      const existingByUsername = allFriends.find(ef => ef.username === username);
+
+      if (existingByUsername && existingByUsername.userId !== userId) {
+        // Friend exists under different key - delete old entry first
+        await this._store.removeFriend(existingByUsername.userId);
+      }
+
+      await this._store.addFriend(userId, f.username, storeStatus, { devices: f.devices });
+    } catch (e) {
+      console.warn('[FriendManager] Failed to persist friend:', e.message);
+    }
+  }
+
+  /**
+   * Remove a friend from IndexedDB
+   */
+  async _removeFriendFromStore(username) {
+    if (!this._store) return;
+    const f = this.friends.get(username);
+    if (!f) return;
+    const userId = f.devices[0]?.serverUserId || username;
+    try {
+      await this._store.removeFriend(userId);
+    } catch (e) {
+      console.warn('[FriendManager] Failed to remove friend from store:', e.message);
+    }
   }
 
   /**
@@ -18,16 +96,26 @@ export class FriendManager {
    * @param {string} status - 'pending_outgoing' | 'pending_incoming' | 'accepted'
    */
   store(username, devices, status = 'accepted') {
+    // Check if friend already exists - preserve devices if new ones are empty
+    const existing = this.friends.get(username);
+    const newDevices = devices.map(d => ({
+      serverUserId: d.serverUserId,
+      deviceUUID: d.deviceUUID || d.serverUserId, // For story/model filtering
+      deviceName: d.deviceName || d.serverUserId,
+      signalIdentityKey: d.signalIdentityKey,
+    }));
+
+    // Use new devices if provided, otherwise preserve existing
+    const finalDevices = newDevices.length > 0 ? newDevices : (existing?.devices || []);
+
     this.friends.set(username, {
       username,
-      devices: devices.map(d => ({
-        serverUserId: d.serverUserId,
-        deviceName: d.deviceName || d.serverUserId,
-        signalIdentityKey: d.signalIdentityKey,
-      })),
+      devices: finalDevices,
       status,
-      addedAt: Date.now(),
+      addedAt: existing?.addedAt || Date.now(),
     });
+    // Persist to IndexedDB (fire-and-forget but logged)
+    this._persistFriend(username);
   }
 
   /**
@@ -37,6 +125,20 @@ export class FriendManager {
    */
   get(username) {
     return this.friends.get(username);
+  }
+
+  /**
+   * Reverse lookup: find username from a device's serverUserId
+   * @param {string} serverUserId - Server user ID to look up
+   * @returns {string|null} Username or null if not found
+   */
+  getUsernameFromServerId(serverUserId) {
+    for (const [username, friend] of this.friends) {
+      if (friend.devices.some(d => d.serverUserId === serverUserId)) {
+        return username;
+      }
+    }
+    return null;
   }
 
   /**
@@ -84,9 +186,12 @@ export class FriendManager {
     if (!exists) {
       friend.devices.push({
         serverUserId: device.serverUserId,
+        deviceUUID: device.deviceUUID || device.serverUserId, // For story/model filtering
         deviceName: device.deviceName || device.serverUserId,
         signalIdentityKey: device.signalIdentityKey,
       });
+      // Persist updated device list
+      this._persistFriend(username);
     }
   }
 
@@ -102,9 +207,12 @@ export class FriendManager {
     }
     friend.devices = devices.map(d => ({
       serverUserId: d.serverUserId,
+      deviceUUID: d.deviceUUID || d.serverUserId, // For story/model filtering
       deviceName: d.deviceName || d.serverUserId,
       signalIdentityKey: d.signalIdentityKey,
     }));
+    // Persist updated device list
+    this._persistFriend(username);
   }
 
   /**
@@ -112,6 +220,7 @@ export class FriendManager {
    * @param {string} username
    */
   remove(username) {
+    this._removeFriendFromStore(username);
     this.friends.delete(username);
   }
 

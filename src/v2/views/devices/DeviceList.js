@@ -68,10 +68,9 @@ export async function mount(container, client, router) {
 
   // Get devices from DeviceManager (our own devices, excluding current)
   let devices = [];
-  if (client.devices && client.devices.devices) {
-    devices = client.devices.devices.filter(d =>
-      d.deviceUUID !== client.deviceUUID
-    );
+  if (client.devices) {
+    // DeviceManager stores in ownDevices, getAll() returns copy excluding current
+    devices = client.devices.getAll();
   }
 
   container.innerHTML = render({

@@ -37,16 +37,22 @@ export function render({ deviceId = '', error = null, loading = false, success =
       ${error ? `<div class="error">${error}</div>` : ''}
 
       <form id="revoke-form">
-        <label>
-          Recovery Phrase
-          <textarea
-            id="recovery-phrase"
-            rows="3"
-            placeholder="Enter your 12-word recovery phrase"
-            required
-            ${loading ? 'disabled' : ''}
-          ></textarea>
-        </label>
+        <label>Recovery Phrase</label>
+        <div class="phrase-grid">
+          ${[1,2,3,4,5,6,7,8,9,10,11,12].map(i => `
+            <div class="phrase-input-wrapper">
+              <span class="phrase-number">${i}</span>
+              <input
+                type="text"
+                class="phrase-word"
+                data-index="${i}"
+                autocomplete="off"
+                autocapitalize="none"
+                ${loading ? 'disabled' : ''}
+              />
+            </div>
+          `).join('')}
+        </div>
 
         <button type="submit" class="danger" ${loading ? 'disabled' : ''}>
           ${loading ? 'Revoking...' : 'Revoke Device'}
@@ -62,25 +68,59 @@ export function mount(container, client, router, params) {
   container.innerHTML = render({ deviceId });
 
   const form = container.querySelector('#revoke-form');
+  const inputs = container.querySelectorAll('.phrase-word');
+
+  // Handle paste of full phrase into any input
+  inputs.forEach((input, idx) => {
+    input.addEventListener('paste', (e) => {
+      const pasted = e.clipboardData.getData('text').trim();
+      const words = pasted.split(/\s+/);
+      if (words.length > 1) {
+        e.preventDefault();
+        // Distribute words across inputs starting from current
+        words.forEach((word, i) => {
+          if (inputs[idx + i]) {
+            inputs[idx + i].value = word.toLowerCase();
+          }
+        });
+        // Focus last filled or next empty
+        const lastIdx = Math.min(idx + words.length - 1, 11);
+        inputs[lastIdx].focus();
+      }
+    });
+
+    // Auto-advance on space or after word entry
+    input.addEventListener('keydown', (e) => {
+      if (e.key === ' ' || e.key === 'Tab') {
+        if (e.key === ' ') e.preventDefault();
+        if (idx < 11 && input.value.trim()) {
+          inputs[idx + 1].focus();
+        }
+      } else if (e.key === 'Backspace' && !input.value && idx > 0) {
+        inputs[idx - 1].focus();
+      }
+    });
+
+    // Clean input on change
+    input.addEventListener('input', () => {
+      input.value = input.value.toLowerCase().replace(/[^a-z]/g, '');
+    });
+  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    const phrase = container.querySelector('#recovery-phrase').value.trim();
+    // Collect words from all 12 inputs
+    const words = Array.from(inputs).map(i => i.value.trim().toLowerCase());
+    const filledWords = words.filter(w => w);
 
-    if (!phrase) {
-      container.innerHTML = render({ deviceId, error: 'Please enter your recovery phrase' });
+    if (filledWords.length !== 12) {
+      container.innerHTML = render({ deviceId, error: 'Please enter all 12 words' });
       mount(container, client, router, params);
       return;
     }
 
-    // Validate phrase format (12 words)
-    const words = phrase.split(/\s+/);
-    if (words.length !== 12) {
-      container.innerHTML = render({ deviceId, error: 'Recovery phrase must be 12 words' });
-      mount(container, client, router, params);
-      return;
-    }
+    const phrase = words.join(' ');
 
     container.innerHTML = render({ deviceId, loading: true });
 

@@ -53,7 +53,7 @@ export function render({ username = '', displayName = '', messages = [], sending
       </div>
 
       <form id="message-form" class="message-input">
-        <cluster>
+        <ry-cluster>
           <button type="button" variant="ghost" id="attach-btn" ${sending ? 'disabled' : ''}><ry-icon name="upload"></ry-icon></button>
           <input
             type="text"
@@ -64,7 +64,7 @@ export function render({ username = '', displayName = '', messages = [], sending
             ${sending ? 'disabled' : ''}
           />
           <button type="submit" ${sending ? 'disabled' : ''}>${sending ? '...' : 'Send'}</button>
-        </cluster>
+        </ry-cluster>
       </form>
 
       <input type="file" id="file-input" hidden />
@@ -224,7 +224,9 @@ export async function mount(container, client, router, params) {
       await client.send(username, { text });
     } catch (err) {
       console.error('Failed to send:', err);
-      // Could mark message as failed
+      if (typeof RyToast !== 'undefined') {
+        RyToast.error(err.message || 'Failed to send message');
+      }
     }
   };
 

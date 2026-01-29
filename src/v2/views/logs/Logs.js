@@ -53,37 +53,77 @@ const EVENT_DIRECTION = {
 
 let cleanup = null;
 
-export function render({ events = [], filter = 'all', expandedEvent = null } = {}) {
-  // Show all events regardless of filter (tabs are just visual indicators)
-  const filteredEvents = events;
+// Plain text formatting for clipboard copy
+function formatTimestamp(ts) {
+  const date = new Date(ts);
+  return date.toLocaleTimeString('en-US', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }) + '.' + String(date.getMilliseconds()).padStart(3, '0');
+}
 
+function formatDataPlain(data, indent = 0) {
+  if (data === null || data === undefined) return 'null';
+  if (typeof data !== 'object') return String(data);
+
+  const prefix = '  '.repeat(indent);
+  const lines = [];
+
+  for (const [key, value] of Object.entries(data)) {
+    if (typeof value === 'object' && value !== null) {
+      if (value.type === 'Uint8Array' || value.type === 'ArrayBuffer') {
+        lines.push(`${prefix}${key}: [${value.type}] ${value.length} bytes${value.truncated ? ' (truncated)' : ''}`);
+        lines.push(`${prefix}  ${value.preview}`);
+      } else {
+        lines.push(`${prefix}${key}:`);
+        lines.push(formatDataPlain(value, indent + 1));
+      }
+    } else {
+      lines.push(`${prefix}${key}: ${value}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function formatEventPlain(event) {
+  const direction = EVENT_DIRECTION[event.eventType] || '';
+  const dirArrow = direction === 'out' ? '↑' : direction === 'in' ? '↓' : direction === 'session' ? '⇄' : '↔';
+  const time = formatTimestamp(event.timestamp);
+  const type = event.eventType.replace(/_/g, ' ').toLowerCase();
+
+  let text = `[${time}] ${dirArrow} ${type} (${(event.correlationId || '').slice(-6)})`;
+  if (event.data && Object.keys(event.data).length > 0) {
+    text += '\n' + formatDataPlain(event.data, 1);
+  }
+  return text;
+}
+
+export function render({ events = [], expandedEvent = null } = {}) {
   return `
     <div class="view logs">
       <header>
         <h1>Logs</h1>
-        <button variant="secondary" id="clear-btn"><ry-icon name="trash"></ry-icon> Clear</button>
+        <ry-cluster>
+          <button variant="secondary" id="copy-btn"><ry-icon name="copy"></ry-icon> Copy</button>
+          <button variant="secondary" id="clear-btn"><ry-icon name="trash"></ry-icon> Clear</button>
+        </ry-cluster>
       </header>
 
-      <ry-tabs id="log-tabs">
-        <ry-tab title="All" data-filter="all" ${filter === 'all' ? 'active' : ''}></ry-tab>
-        <ry-tab title="Send" data-filter="send" ${filter === 'send' ? 'active' : ''}></ry-tab>
-        <ry-tab title="Receive" data-filter="receive" ${filter === 'receive' ? 'active' : ''}></ry-tab>
-        <ry-tab title="Session" data-filter="session" ${filter === 'session' ? 'active' : ''}></ry-tab>
-        <ry-tab title="Gateway" data-filter="gateway" ${filter === 'gateway' ? 'active' : ''}></ry-tab>
-      </ry-tabs>
-
-      <cluster style="margin: var(--ry-space-2) 0">
-        <badge variant="primary">${filteredEvents.length} events</badge>
+      <ry-cluster style="margin: var(--ry-space-2) 0">
+        <badge variant="primary">${events.length} events</badge>
         <span class="live-dot"></span>
-      </cluster>
+      </ry-cluster>
 
       <stack gap="xs" class="logs-list">
-        ${filteredEvents.length === 0 ? `
+        ${events.length === 0 ? `
           <div class="empty">
             <p>No events logged yet</p>
             <ry-alert type="info">Send or receive messages to see logs here</ry-alert>
           </div>
-        ` : filteredEvents.map(event => renderEvent(event, expandedEvent)).join('')}
+        ` : events.map(event => renderEvent(event, expandedEvent)).join('')}
       </stack>
 
       ${renderNav('more')}
@@ -127,7 +167,6 @@ function renderEvent(event, expandedEvent) {
 
 export async function mount(container, client, router) {
   let events = [];
-  let filter = 'all';
   let expandedEvent = null;
   let unsubscribe = null;
 
@@ -146,18 +185,24 @@ export async function mount(container, client, router) {
   });
 
   function rerender() {
-    container.innerHTML = render({ events, filter, expandedEvent });
+    container.innerHTML = render({ events, expandedEvent });
     attachListeners();
   }
 
   function attachListeners() {
-    // Filter via tabs - listen for ry:change on tabs component
-    const tabs = container.querySelector('#log-tabs');
-    tabs?.addEventListener('ry:change', (e) => {
-      const activeTab = e.detail.tab;
-      if (activeTab) {
-        filter = activeTab.dataset.filter || 'all';
-        rerender();
+    // Copy
+    container.querySelector('#copy-btn')?.addEventListener('click', async () => {
+      const text = events.map(formatEventPlain).join('\n\n');
+      try {
+        await navigator.clipboard.writeText(text);
+        const btn = container.querySelector('#copy-btn');
+        if (btn) {
+          const original = btn.innerHTML;
+          btn.innerHTML = '<ry-icon name="check"></ry-icon> Copied!';
+          setTimeout(() => { btn.innerHTML = original; }, 1500);
+        }
+      } catch (err) {
+        console.warn('[Logs] Failed to copy:', err);
       }
     });
 

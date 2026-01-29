@@ -16,7 +16,6 @@ export function render({ settings = null, loading = false, saving = false } = {}
     return `<div class="view settings"><div class="loading">Loading...</div></div>`;
   }
 
-  const theme = settings?.data?.theme || 'light';
   const notifications = settings?.data?.notificationsEnabled ?? true;
 
   return `
@@ -26,16 +25,6 @@ export function render({ settings = null, loading = false, saving = false } = {}
       </header>
 
       <stack gap="lg">
-        <section class="settings-group">
-          <h2>Appearance</h2>
-          <card>
-            <cluster>
-              <span>Theme</span>
-              <ry-theme-toggle id="theme-toggle" themes="light,dark"></ry-theme-toggle>
-            </cluster>
-          </card>
-        </section>
-
         <section class="settings-group">
           <h2>Notifications</h2>
           <card>
@@ -124,45 +113,12 @@ export async function mount(container, client, router) {
 
     container.innerHTML = render({ settings });
 
-    // Theme toggle - ry-theme-toggle auto-handles the toggle
-    // Listen for theme change to save to ORM
-    const themeToggle = container.querySelector('#theme-toggle');
-    if (themeToggle) {
-      // ry-theme-toggle emits ry:change when theme changes
-      themeToggle.addEventListener('ry:change', async (e) => {
-        const newTheme = e.detail?.theme || document.documentElement.getAttribute('data-ry-theme') || 'light';
-        localStorage.setItem('ry-theme', newTheme);
-
-        // Save to ORM
-        if (client.settings) {
-          try {
-            const notifToggle = container.querySelector('#notifications-toggle');
-            const data = {
-              theme: newTheme,
-              notificationsEnabled: notifToggle?.checked ?? true
-            };
-
-            if (settingsId) {
-              await client.settings.upsert(settingsId, data);
-            } else {
-              const created = await client.settings.create(data);
-              settingsId = created.id;
-            }
-          } catch (err) {
-            console.error('Failed to save settings:', err);
-          }
-        }
-      });
-    }
-
     // Notifications toggle - listen for ry:change event from switch
     const notifToggle = container.querySelector('#notifications-toggle');
     notifToggle.addEventListener('ry:change', async (e) => {
       if (client.settings) {
         try {
-          const currentTheme = document.documentElement.getAttribute('data-ry-theme') || 'light';
           const data = {
-            theme: currentTheme,
             notificationsEnabled: e.detail.checked
           };
 

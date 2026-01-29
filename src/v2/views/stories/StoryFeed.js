@@ -28,10 +28,10 @@ export function render({ stories = [], loading = false } = {}) {
           ${stories.map(s => `
             <card class="story-card" data-id="${s.id}">
               <cluster>
-                <strong>${s.authorName || 'Unknown'}</strong>
-                <span style="color: var(--ry-color-text-muted)">${formatTimeAgo(s.timestamp)}</span>
+                <strong style="color: var(--text)">${s.authorName || 'Unknown'}</strong>
+                <span style="color: var(--text-secondary)">${formatTimeAgo(s.timestamp)}</span>
               </cluster>
-              <p style="margin: var(--ry-space-3) 0">${escapeHtml(s.data.content)}</p>
+              <p style="margin: var(--ry-space-3) 0; color: var(--text)">${escapeHtml(s.data.content)}</p>
               ${s.mediaBlobUrl ? `
                 <div class="story-media">
                   <img src="${s.mediaBlobUrl}" alt="" style="width: 100%; border-radius: var(--ry-radius-md)" />
@@ -44,12 +44,12 @@ export function render({ stories = [], loading = false } = {}) {
                 </div>
               ` : s.mediaLoading ? `
                 <div class="story-media">
-                  <span style="color: var(--ry-color-text-muted)">Loading media...</span>
+                  <span style="color: var(--text-secondary)">Loading media...</span>
                 </div>
               ` : ''}
               <actions>
-                <button variant="ghost" size="sm">${formatReactions(s.reactions || []) || '❤️ 0'}</button>
-                <button variant="ghost" size="sm">💬 ${(s.comments || []).length}</button>
+                <button variant="ghost" size="sm" class="story-action-btn" data-story-id="${s.id}">${formatReactions(s.reactions || []) || '❤️ 0'}</button>
+                <button variant="ghost" size="sm" class="story-action-btn" data-story-id="${s.id}">💬 ${(s.comments || []).length}</button>
               </actions>
             </card>
           `).join('')}
@@ -267,6 +267,14 @@ export async function mount(container, client, router) {
           // Don't navigate if clicking a button
           if (e.target.closest('.load-media-btn') || e.target.closest('button')) return;
           navigate(`/stories/${card.dataset.id}`);
+        });
+      });
+
+      // Reaction/comment button handlers - navigate to story detail
+      container.querySelectorAll('.story-action-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          navigate(`/stories/${btn.dataset.storyId}`);
         });
       });
 

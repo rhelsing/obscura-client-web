@@ -38,19 +38,19 @@ export function render({ mode = 'camera', capturedPreview = null, friends = [], 
 
         <div class="snap-camera__friend-picker" id="friend-picker">
           <h3>Send to${selectedFriends.length > 0 ? ` (${selectedFriends.length})` : ''}</h3>
-          <stack gap="sm">
+          <ry-stack gap="sm">
             ${friends.length === 0 ? `
               <p style="color: var(--ry-color-text-muted)">No friends yet</p>
             ` : friends.map(f => `
-              <card class="snap-camera__friend-item ${selectedFriends.includes(f.username) ? 'selected' : ''}" data-username="${f.username}">
-                <cluster>
+              <ry-card class="snap-camera__friend-item ${selectedFriends.includes(f.username) ? 'selected' : ''}" data-username="${f.username}">
+                <ry-cluster>
                   <ry-icon name="user"></ry-icon>
                   <span>${f.displayName || f.username}</span>
                   ${selectedFriends.includes(f.username) ? '<ry-icon name="check"></ry-icon>' : ''}
-                </cluster>
-              </card>
+                </ry-cluster>
+              </ry-card>
             `).join('')}
-          </stack>
+          </ry-stack>
         </div>
       </div>
     `;

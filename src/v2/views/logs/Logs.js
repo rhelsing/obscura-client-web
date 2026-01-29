@@ -1,12 +1,11 @@
 /**
  * Logs View - displays all message send/receive events
- * Uses the centralized logger from v1
  */
 import { navigate, clearClient } from '../index.js';
 import { renderNav, initNav } from '../components/Nav.js';
 import { ObscuraClient } from '../../lib/ObscuraClient.js';
-import { logger } from '../../../lib/logger.js';
-import { LogEventType } from '../../../lib/logStore.js';
+import { logger } from '../../lib/logger.js';
+import { LogEventType } from '../../lib/logStore.js';
 
 // Re-export LogEventType for local use (imported from logStore)
 

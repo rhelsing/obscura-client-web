@@ -21,7 +21,7 @@ import {
 } from '../crypto/signatures.js';
 import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
 import { createSchema } from '../orm/index.js';
-import { logger } from '../../lib/logger.js';
+import { logger } from './logger.js';
 
 // Default reconnect settings
 const RECONNECT_DELAY_MS = 1000;

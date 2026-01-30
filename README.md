@@ -1,5 +1,10 @@
 # Obscura Web Client
 
+
+NEXT:
+* Rails model ORM inspiration.. MVC?
+* Schema versioning! - pushing out updates to schema.. does it wait and say youve got messages waiting sent from people on newer versions, update now? or auto update?
+
 Web client for the [Obscura encrypted messaging server](https://github.com/barrelmaker97/obscura-server/).
 
 Uses the [obscura-proto](https://github.com/barrelmaker97/obscura-proto) definitions as a git submodule.

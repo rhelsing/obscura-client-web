@@ -1,6 +1,6 @@
 import { BaseModel } from './BaseModel.js';
 
-export class Snap extends BaseModel {
+export class Pix extends BaseModel {
   static fields = {
     recipientUsername: 'string',
     senderUsername: 'string',

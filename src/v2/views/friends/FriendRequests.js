@@ -67,7 +67,7 @@ export function render({ requests = [] } = {}) {
             <card class="request-item" data-index="${i}">
               <cluster>
                 <ry-icon name="user"></ry-icon>
-                <strong style="flex: 1">${req.username || 'Unknown'}</strong>
+                <strong style="flex: 1">${req.displayName || req.username || 'Unknown'}</strong>
               </cluster>
               <actions>
                 <button size="sm" class="accept-btn" data-index="${i}">Accept</button>
@@ -82,12 +82,17 @@ export function render({ requests = [] } = {}) {
   `;
 }
 
-export function mount(container, client, router) {
+export async function mount(container, client, router) {
   currentClient = client;
 
   // Load existing pending requests from FriendManager
   const existingPending = client.friends.getPendingIncoming();
   pendingRequests = existingPending.map(f => reconstructRequest(f, client));
+
+  // Look up display names for all requests
+  for (const req of pendingRequests) {
+    req.displayName = await client.getDisplayName(req.username);
+  }
 
   container.innerHTML = render({ requests: pendingRequests });
 

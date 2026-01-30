@@ -33,7 +33,7 @@ export function render({ friends = [], pendingCount = 0 } = {}) {
               <cluster>
                 <ry-icon name="user"></ry-icon>
                 <stack gap="none">
-                  <strong>${f.username}</strong>
+                  <strong>${f.displayName || f.username}</strong>
                   <badge variant="warning">wants to be friends</badge>
                 </stack>
               </cluster>
@@ -47,7 +47,7 @@ export function render({ friends = [], pendingCount = 0 } = {}) {
               <cluster>
                 <ry-icon name="user"></ry-icon>
                 <stack gap="none">
-                  <strong>${f.username}</strong>
+                  <strong>${f.displayName || f.username}</strong>
                   ${f.status === 'pending_outgoing' ? `<badge variant="warning">pending</badge>` : ''}
                 </stack>
                 ${f.status === 'accepted' ? `<button variant="ghost" size="sm" class="verify-btn" data-username="${f.username}">Verify</button>` : ''}
@@ -65,7 +65,7 @@ export function render({ friends = [], pendingCount = 0 } = {}) {
   `;
 }
 
-export function mount(container, client, router) {
+export async function mount(container, client, router) {
   const friends = [];
   let pendingCount = 0;
 
@@ -76,6 +76,11 @@ export function mount(container, client, router) {
         pendingCount++;
       }
     }
+  }
+
+  // Look up display names for all friends
+  for (const f of friends) {
+    f.displayName = await client.getDisplayName(f.username);
   }
 
   container.innerHTML = render({ friends, pendingCount });

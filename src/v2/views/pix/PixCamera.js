@@ -1,6 +1,6 @@
 /**
- * SnapCamera View
- * Camera capture for sending snaps to friends
+ * PixCamera View
+ * Camera capture for sending pix to friends
  */
 import { navigate } from '../index.js';
 
@@ -9,40 +9,40 @@ let cleanup = null;
 export function render({ mode = 'camera', capturedPreview = null, friends = [], duration = 5, selectedFriends = [], sending = false } = {}) {
   if (mode === 'preview' && capturedPreview) {
     return `
-      <div class="view snap-camera snap-camera--preview">
-        <div class="snap-camera__preview-container">
-          <img src="${capturedPreview}" alt="Captured" class="snap-camera__preview-image" />
+      <div class="view pix-camera pix-camera--preview">
+        <div class="pix-camera__preview-container">
+          <img src="${capturedPreview}" alt="Captured" class="pix-camera__preview-image" />
           <input
             type="text"
-            class="snap-camera__caption"
+            class="pix-camera__caption"
             id="caption-input"
             placeholder="Add a caption..."
             maxlength="100"
           />
         </div>
 
-        <div class="snap-camera__controls">
-          <button class="snap-camera__btn" id="cancel-btn">
+        <div class="pix-camera__controls">
+          <button class="pix-camera__btn" id="cancel-btn">
             <ry-icon name="close"></ry-icon>
           </button>
 
-          <div class="snap-camera__duration">
+          <div class="pix-camera__duration">
             <input type="range" id="duration-slider" min="1" max="10" value="${duration}" />
             <span id="duration-value">${duration}s</span>
           </div>
 
-          <button class="snap-camera__btn snap-camera__btn--send" id="send-btn" ${sending ? 'disabled' : ''}>
+          <button class="pix-camera__btn pix-camera__btn--send" id="send-btn" ${sending ? 'disabled' : ''}>
             <ry-icon name="chevron-right"></ry-icon>
           </button>
         </div>
 
-        <div class="snap-camera__friend-picker" id="friend-picker">
+        <div class="pix-camera__friend-picker" id="friend-picker">
           <h3>Send to${selectedFriends.length > 0 ? ` (${selectedFriends.length})` : ''}</h3>
           <ry-stack gap="sm">
             ${friends.length === 0 ? `
               <p style="color: var(--ry-color-text-muted)">No friends yet</p>
             ` : friends.map(f => `
-              <ry-card class="snap-camera__friend-item ${selectedFriends.includes(f.username) ? 'selected' : ''}" data-username="${f.username}">
+              <ry-card class="pix-camera__friend-item ${selectedFriends.includes(f.username) ? 'selected' : ''}" data-username="${f.username}">
                 <ry-cluster>
                   <ry-icon name="user"></ry-icon>
                   <span>${f.displayName || f.username}</span>
@@ -57,8 +57,8 @@ export function render({ mode = 'camera', capturedPreview = null, friends = [], 
   }
 
   return `
-    <div class="view snap-camera">
-      <header class="snap-camera__header">
+    <div class="view pix-camera">
+      <header class="pix-camera__header">
         <a href="/chats" data-navigo>
           <button variant="ghost" size="sm"><ry-icon name="close"></ry-icon></button>
         </a>
@@ -66,14 +66,14 @@ export function render({ mode = 'camera', capturedPreview = null, friends = [], 
         <button variant="ghost" size="sm" id="flip-btn">🔄</button>
       </header>
 
-      <div class="snap-camera__viewfinder">
+      <div class="pix-camera__viewfinder">
         <video id="camera-video" autoplay playsinline muted></video>
         <canvas id="capture-canvas" style="display: none;"></canvas>
       </div>
 
-      <div class="snap-camera__capture-area">
-        <button class="snap-camera__capture-btn" id="capture-btn">
-          <span class="snap-camera__capture-btn-inner"></span>
+      <div class="pix-camera__capture-area">
+        <button class="pix-camera__capture-btn" id="capture-btn">
+          <span class="pix-camera__capture-btn-inner"></span>
         </button>
       </div>
     </div>
@@ -214,7 +214,7 @@ export async function mount(container, client, router) {
     const sendBtn = container.querySelector('#send-btn');
     const durationSlider = container.querySelector('#duration-slider');
     const durationValue = container.querySelector('#duration-value');
-    const friendItems = container.querySelectorAll('.snap-camera__friend-item');
+    const friendItems = container.querySelectorAll('.pix-camera__friend-item');
 
     if (cancelBtn) {
       cancelBtn.addEventListener('click', () => {
@@ -265,7 +265,7 @@ export async function mount(container, client, router) {
           const captionInput = container.querySelector('#caption-input');
           const caption = captionInput?.value || '';
 
-          // Create snap for EACH selected recipient
+          // Create pix for EACH selected recipient
           const mediaRef = JSON.stringify({
             attachmentId: ref.attachmentId,
             contentKey: Array.from(ref.contentKey),
@@ -275,7 +275,7 @@ export async function mount(container, client, router) {
           });
 
           for (const recipientUsername of selectedFriends) {
-            await client.snap.create({
+            await client.pix.create({
               recipientUsername,
               senderUsername: client.username,
               mediaRef,
@@ -284,17 +284,13 @@ export async function mount(container, client, router) {
             });
           }
 
-          // Success - go to chats (since multiple recipients)
-          if (selectedFriends.length === 1) {
-            navigate(`/messages/${selectedFriends[0]}`);
-          } else {
-            navigate('/chats');
-          }
+          // Success - go back to pix list
+          navigate('/pix');
         } catch (err) {
-          console.error('Failed to send snap:', err);
+          console.error('Failed to send pix:', err);
           sending = false;
           renderPreviewMode();
-          alert('Failed to send snap. Please try again.');
+          alert('Failed to send pix. Please try again.');
         }
       });
     }

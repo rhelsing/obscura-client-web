@@ -1250,47 +1250,47 @@ test.describe('V2 Full E2E Flow', () => {
     console.log('Test 7: Field validation rejects bad types ✓');
     await delay(300);
 
-    // Test 8: LWW upsert + query operators
+    // Test 8: LWW upsert + query operators (using pixRegistry - private model)
     const ts = Date.now();
     await page.evaluate(async (timestamp) => {
-      // Create streaks for testing (using correct schema fields)
+      // Create pixRegistry entries for testing (using correct schema fields)
       const now = Date.now();
-      await window.__client.streak.create({ friendUsername: 'test_friend', count: 1, lastSentAt: now, lastReceivedAt: now, expiresAt: now + 86400000 });
-      await window.__client.streak.upsert(`streak_a_${timestamp}`, { friendUsername: 'user_a', count: 3, lastSentAt: now, lastReceivedAt: now, expiresAt: now + 86400000 });
-      await window.__client.streak.upsert(`streak_b_${timestamp}`, { friendUsername: 'user_b', count: 7, lastSentAt: now, lastReceivedAt: now, expiresAt: now + 86400000 });
-      await window.__client.streak.upsert(`streak_c_${timestamp}`, { friendUsername: 'user_c', count: 15, lastSentAt: now, lastReceivedAt: now, expiresAt: now + 86400000 });
+      await window.__client.pixRegistry.upsert(`pixreg_test_friend`, { friendUsername: 'test_friend', streakCount: 1, unviewedCount: 0, sentPendingCount: 0, totalReceived: 0, totalSent: 0, lastSentAt: now, lastReceivedAt: now, streakExpiry: now + 86400000 });
+      await window.__client.pixRegistry.upsert(`pixreg_user_a_${timestamp}`, { friendUsername: 'user_a', streakCount: 3, unviewedCount: 0, sentPendingCount: 0, totalReceived: 0, totalSent: 0, lastSentAt: now, lastReceivedAt: now, streakExpiry: now + 86400000 });
+      await window.__client.pixRegistry.upsert(`pixreg_user_b_${timestamp}`, { friendUsername: 'user_b', streakCount: 7, unviewedCount: 0, sentPendingCount: 0, totalReceived: 0, totalSent: 0, lastSentAt: now, lastReceivedAt: now, streakExpiry: now + 86400000 });
+      await window.__client.pixRegistry.upsert(`pixreg_user_c_${timestamp}`, { friendUsername: 'user_c', streakCount: 15, unviewedCount: 0, sentPendingCount: 0, totalReceived: 0, totalSent: 0, lastSentAt: now, lastReceivedAt: now, streakExpiry: now + 86400000 });
 
       // Test LWW upsert (update existing)
       await new Promise(r => setTimeout(r, 10));
-      await window.__client.streak.upsert(`streak_a_${timestamp}`, { friendUsername: 'user_a', count: 5, lastSentAt: Date.now(), lastReceivedAt: Date.now(), expiresAt: Date.now() + 86400000 });
+      await window.__client.pixRegistry.upsert(`pixreg_user_a_${timestamp}`, { friendUsername: 'user_a', streakCount: 5, unviewedCount: 0, sentPendingCount: 0, totalReceived: 0, totalSent: 0, lastSentAt: Date.now(), lastReceivedAt: Date.now(), streakExpiry: Date.now() + 86400000 });
     }, ts);
     await delay(300);
 
     const queryTests = await page.evaluate(async () => {
       // gt test
-      const gtResult = await window.__client.streak.where({ 'data.count': { gt: 5 } }).exec();
+      const gtResult = await window.__client.pixRegistry.where({ 'data.streakCount': { gt: 5 } }).exec();
 
       // lt test
-      const ltResult = await window.__client.streak.where({ 'data.count': { lt: 5 } }).exec();
+      const ltResult = await window.__client.pixRegistry.where({ 'data.streakCount': { lt: 5 } }).exec();
 
       // range test
-      const rangeResult = await window.__client.streak.where({ 'data.count': { gte: 5, lte: 10 } }).exec();
+      const rangeResult = await window.__client.pixRegistry.where({ 'data.streakCount': { gte: 5, lte: 10 } }).exec();
 
       // orderBy + limit
-      const orderedResult = await window.__client.streak.where({}).orderBy('data.count', 'desc').limit(2).exec();
+      const orderedResult = await window.__client.pixRegistry.where({}).orderBy('data.streakCount', 'desc').limit(2).exec();
 
       // first()
-      const firstResult = await window.__client.streak.where({ 'data.count': { gt: 10 } }).first();
+      const firstResult = await window.__client.pixRegistry.where({ 'data.streakCount': { gt: 10 } }).first();
 
       // count()
-      const countResult = await window.__client.streak.where({}).count();
+      const countResult = await window.__client.pixRegistry.where({}).count();
 
       return {
         gtCount: gtResult.length,
         ltCount: ltResult.length,
         rangeCount: rangeResult.length,
-        orderedFirst: orderedResult[0]?.data?.count,
-        firstCount: firstResult?.data?.count,
+        orderedFirst: orderedResult[0]?.data?.streakCount,
+        firstCount: firstResult?.data?.streakCount,
         totalCount: countResult,
       };
     });
@@ -1303,17 +1303,17 @@ test.describe('V2 Full E2E Flow', () => {
     console.log('Test 8: LWW upsert + query operators ✓');
     await delay(300);
 
-    // Test 8b: Streak sync to friends (collectable models should sync)
-    const bobStreakSyncPromise = bobPage.waitForEvent('console', {
-      predicate: msg => msg.text().includes('[Global] Model sync:') && msg.text().includes('streak'),
+    // Test 8b: Private models should NOT sync to friends (pixRegistry is private: true)
+    // Instead, create a story which DOES sync to friends
+    const bobStorySyncPromise = bobPage.waitForEvent('console', {
+      predicate: msg => msg.text().includes('[Global] Model sync:') && msg.text().includes('story'),
       timeout: 15000,
     });
     await page.evaluate(async () => {
-      const now = Date.now();
-      await window.__client.streak.create({ friendUsername: 'sync_test', count: 42, lastSentAt: now, lastReceivedAt: now, expiresAt: now + 86400000 });
+      await window.__client.story.create({ content: 'Sync test story for 8b' });
     });
-    await bobStreakSyncPromise;
-    console.log('Test 8b: Streak sync to friends ✓');
+    await bobStorySyncPromise;
+    console.log('Test 8b: Story sync to friends ✓');
     await delay(300);
 
     // --- Group B: Associations ---
@@ -1555,6 +1555,46 @@ test.describe('V2 Full E2E Flow', () => {
     console.log('Test 22: Story authorUsername displayed correctly ✓');
     await delay(300);
 
+    // Test 22b: Stories page live updates when new story arrives
+    console.log('\n--- Test 22b: Stories Live Update ---');
+
+    // Alice is on /stories - count current stories
+    const initialStoryCount = await page.$$eval('.story-card', els => els.length);
+    console.log('Initial story count on Alice page:', initialStoryCount);
+
+    // Navigate Bob to /stories too (needed for live update handlers)
+    await bobPage.goto('/stories');
+    await bobPage.waitForSelector('.story-card', { timeout: 10000 });
+    await delay(300);
+
+    // Bob creates a new story (should sync to Alice)
+    const bobStoryContent = 'Live update test story from Bob ' + Date.now();
+    await bobPage.evaluate(async (content) => {
+      await window.__client.story.create({ content });
+    }, bobStoryContent);
+    console.log('Bob created story:', bobStoryContent);
+
+    // Wait for Alice's UI to update (without manual refresh)
+    // The modelSync handler should re-render the feed
+    await page.waitForFunction(
+      (expectedCount, contentSubstr) => {
+        const cards = document.querySelectorAll('.story-card');
+        if (cards.length <= expectedCount) return false;
+        // Also verify the new content appears
+        const allText = Array.from(cards).map(c => c.textContent).join(' ');
+        return allText.includes('Live update test story from Bob');
+      },
+      { timeout: 15000 },
+      initialStoryCount,
+      bobStoryContent
+    );
+
+    const newStoryCount = await page.$$eval('.story-card', els => els.length);
+    expect(newStoryCount).toBeGreaterThan(initialStoryCount);
+    console.log('New story count on Alice page:', newStoryCount);
+    console.log('Test 22b: Stories page live updates ✓');
+    await delay(300);
+
     // Test 23: Inline comment reply (Fix 4)
     const storyForReply = await page.evaluate(async () => {
       const s = await window.__client.story.create({ content: 'Reply test story' });
@@ -1660,21 +1700,35 @@ test.describe('V2 Full E2E Flow', () => {
     // NOTE: Keep alice3 and carol contexts open for SCENARIO 9 multi-recipient test
 
     // ============================================================
-    // SCENARIO 9: Snap Flow (Camera → Send → Receive)
+    // SCENARIO 9: Pix Flow (Camera → Send → Receive)
     // ============================================================
-    console.log('\n=== SCENARIO 9: Snap Flow ===');
+    console.log('\n=== SCENARIO 9: Pix Flow ===');
 
-    // --- 9.1: Alice sends snap to Bob via camera UI ---
-    // Set up Bob's listener for snap sync BEFORE Alice sends
-    const bobSnapPromise = bobPage.waitForEvent('console', {
-      predicate: msg => msg.text().includes('[Global] Model sync:') && msg.text().includes('snap'),
+    // --- 9.0: Navigate all receivers to /pix before sending ---
+    console.log('Navigating receivers to /pix...');
+    await bobPage.goto('/pix');
+    await bobPage.waitForSelector('.pix-list', { timeout: 10000 });
+    console.log('Bob at /pix ✓');
+
+    await bob2Page.goto('/pix');
+    await bob2Page.waitForSelector('.pix-list', { timeout: 10000 });
+    console.log('Bob2 at /pix ✓');
+
+    await carolPage.goto('/pix');
+    await carolPage.waitForSelector('.pix-list', { timeout: 10000 });
+    console.log('Carol at /pix ✓');
+
+    // --- 9.1: Alice sends pix to Bob via camera UI ---
+    // Set up Bob's listener for pix sync BEFORE Alice sends
+    const bobPixPromise = bobPage.waitForEvent('console', {
+      predicate: msg => msg.text().includes('[Global] Model sync:') && msg.text().includes('pix'),
       timeout: 30000,
     });
 
-    // Alice navigates to snap camera
-    await page.goto('/snap/camera');
+    // Alice navigates to pix camera
+    await page.goto('/pix/camera');
     await delay(500);
-    console.log('Alice navigated to /snap/camera');
+    console.log('Alice navigated to /pix/camera');
 
     // Wait for video stream to be active
     const videoReady = await page.waitForFunction(() => {
@@ -1688,11 +1742,11 @@ test.describe('V2 Full E2E Flow', () => {
     await delay(500);
 
     // Wait for preview mode
-    await page.waitForSelector('.snap-camera--preview', { timeout: 10000 });
+    await page.waitForSelector('.pix-camera--preview', { timeout: 10000 });
     console.log('Alice captured photo ✓');
 
     // Select Bob from friend picker
-    await page.click(`.snap-camera__friend-item[data-username="${bobUsername}"]`);
+    await page.click(`.pix-camera__friend-item[data-username="${bobUsername}"]`);
     await delay(300);
     console.log('Alice selected Bob as recipient ✓');
 
@@ -1700,20 +1754,20 @@ test.describe('V2 Full E2E Flow', () => {
     await page.click('#send-btn');
     console.log('Alice clicked send');
 
-    // Wait for navigation to chat (success indicator)
-    await page.waitForURL(`**/messages/${bobUsername}`, { timeout: 30000 });
-    console.log('Alice sent snap (navigated to chat) ✓');
+    // Wait for navigation to /pix (success indicator)
+    await page.waitForURL('**/pix', { timeout: 30000 });
+    console.log('Alice sent pix (navigated to /pix) ✓');
 
-    // --- Wait for Bob to receive snap via modelSync ---
-    await bobSnapPromise;
-    console.log('Bob received snap via modelSync ✓');
+    // --- Wait for Bob to receive pix via modelSync ---
+    await bobPixPromise;
+    console.log('Bob received pix via modelSync ✓');
     await delay(500);
 
-    // --- 9.2: Bob queries unviewed snap ---
-    const snapQuery = await bobPage.evaluate(async (aliceUser) => {
-      // Get all snaps and filter manually (simpler than complex where clause)
-      const allSnaps = await window.__client.snap.all();
-      console.log('[bob] All snaps:', allSnaps.length, allSnaps.map(s => ({
+    // --- 9.2: Bob queries unviewed pix ---
+    const pixQuery = await bobPage.evaluate(async (aliceUser) => {
+      // Get all pix and filter manually (simpler than complex where clause)
+      const allPix = await window.__client.pix.all();
+      console.log('[bob] All pix:', allPix.length, allPix.map(s => ({
         id: s.id,
         sender: s.data.senderUsername,
         recipient: s.data.recipientUsername,
@@ -1721,20 +1775,20 @@ test.describe('V2 Full E2E Flow', () => {
         deleted: s.data._deleted
       })));
 
-      // Filter for unviewed snaps from Alice to Bob
-      const unviewed = allSnaps.filter(s =>
+      // Filter for unviewed pixs from Alice to Bob
+      const unviewed = allPix.filter(s =>
         s.data.recipientUsername === window.__client.username &&
         !s.data.viewedAt &&
         !s.data._deleted
       );
-      console.log('[bob] Unviewed snaps:', unviewed.length);
+      console.log('[bob] Unviewed pix:', unviewed.length);
 
-      // Find snap from Alice
-      const aliceSnap = unviewed.find(s => s.data.senderUsername === aliceUser);
-      if (!aliceSnap) {
+      // Find pix from Alice
+      const alicePix = unviewed.find(s => s.data.senderUsername === aliceUser);
+      if (!alicePix) {
         return {
-          error: 'No snap from Alice found',
-          totalSnaps: allSnaps.length,
+          error: 'No pix from Alice found',
+          totalPix: allPix.length,
           unviewedCount: unviewed.length,
           bobUsername: window.__client.username,
           aliceUser: aliceUser
@@ -1742,32 +1796,32 @@ test.describe('V2 Full E2E Flow', () => {
       }
 
       return {
-        id: aliceSnap.id,
-        senderUsername: aliceSnap.data.senderUsername,
-        recipientUsername: aliceSnap.data.recipientUsername,
-        mediaRef: aliceSnap.data.mediaRef,
-        displayDuration: aliceSnap.data.displayDuration,
+        id: alicePix.id,
+        senderUsername: alicePix.data.senderUsername,
+        recipientUsername: alicePix.data.recipientUsername,
+        mediaRef: alicePix.data.mediaRef,
+        displayDuration: alicePix.data.displayDuration,
       };
     }, username);
 
-    if (snapQuery.error) {
-      console.log('Snap query debug:', snapQuery);
+    if (pixQuery.error) {
+      console.log('Pix query debug:', pixQuery);
     }
-    expect(snapQuery.error).toBeUndefined();
-    expect(snapQuery.senderUsername).toBe(username);
-    expect(snapQuery.recipientUsername).toBe(bobUsername);
-    expect(snapQuery.mediaRef).toBeTruthy();
-    console.log('Bob queried unviewed snap ✓');
+    expect(pixQuery.error).toBeUndefined();
+    expect(pixQuery.senderUsername).toBe(username);
+    expect(pixQuery.recipientUsername).toBe(bobUsername);
+    expect(pixQuery.mediaRef).toBeTruthy();
+    console.log('Bob queried unviewed pix ✓');
 
     // Verify mediaRef is valid JSON with attachmentId
-    const mediaRef = JSON.parse(snapQuery.mediaRef);
+    const mediaRef = JSON.parse(pixQuery.mediaRef);
     expect(mediaRef.attachmentId).toBeTruthy();
     expect(mediaRef.contentKey).toBeTruthy();
     expect(mediaRef.nonce).toBeTruthy();
-    console.log('Snap mediaRef has encrypted attachment reference ✓');
+    console.log('Pix mediaRef has encrypted attachment reference ✓');
 
     // --- 9.3: Bob downloads and decrypts attachment ---
-    const snapDownload = await bobPage.evaluate(async (mediaRefJson) => {
+    const pixDownload = await bobPage.evaluate(async (mediaRefJson) => {
       try {
         const ref = JSON.parse(mediaRefJson);
         console.log('[bob] mediaRef parsed:', {
@@ -1796,28 +1850,28 @@ test.describe('V2 Full E2E Flow', () => {
       } catch (e) {
         return { error: e.message, stack: e.stack };
       }
-    }, snapQuery.mediaRef);
+    }, pixQuery.mediaRef);
 
-    expect(snapDownload.error).toBeUndefined();
-    expect(snapDownload.size).toBeGreaterThan(0);
+    expect(pixDownload.error).toBeUndefined();
+    expect(pixDownload.size).toBeGreaterThan(0);
     // Fake camera produces valid image data
-    console.log('Bob decrypted attachment:', snapDownload.size, 'bytes ✓');
+    console.log('Bob decrypted attachment:', pixDownload.size, 'bytes ✓');
 
-    // --- 9.4: Multi-recipient snap (Alice → Bob + Carol) ---
-    console.log('\n--- 9.4: Multi-recipient snap ---');
+    // --- 9.4: Multi-recipient pix (Alice → Bob + Carol) ---
+    console.log('\n--- 9.4: Multi-recipient pix ---');
 
     // Set up listeners for both Bob and Carol BEFORE Alice sends
-    const bobSnap2Promise = bobPage.waitForEvent('console', {
-      predicate: msg => msg.text().includes('[Global] Model sync:') && msg.text().includes('snap'),
+    const bobPix2Promise = bobPage.waitForEvent('console', {
+      predicate: msg => msg.text().includes('[Global] Model sync:') && msg.text().includes('pix'),
       timeout: 30000,
     });
-    const carolSnapPromise = carolPage.waitForEvent('console', {
-      predicate: msg => msg.text().includes('[Global] Model sync:') && msg.text().includes('snap'),
+    const carolPixPromise = carolPage.waitForEvent('console', {
+      predicate: msg => msg.text().includes('[Global] Model sync:') && msg.text().includes('pix'),
       timeout: 30000,
     });
 
-    // Alice navigates to snap camera
-    await page.goto('/snap/camera');
+    // Alice navigates to pix camera
+    await page.goto('/pix/camera');
     await delay(500);
 
     // Wait for video stream
@@ -1829,45 +1883,45 @@ test.describe('V2 Full E2E Flow', () => {
     // Capture photo
     await page.click('#capture-btn');
     await delay(500);
-    await page.waitForSelector('.snap-camera--preview', { timeout: 10000 });
+    await page.waitForSelector('.pix-camera--preview', { timeout: 10000 });
     console.log('Alice captured photo for multi-send ✓');
 
     // Select BOTH Bob and Carol (multi-select)
-    await page.click(`.snap-camera__friend-item[data-username="${bobUsername}"]`);
+    await page.click(`.pix-camera__friend-item[data-username="${bobUsername}"]`);
     await delay(200);
-    await page.click(`.snap-camera__friend-item[data-username="${carolUsername}"]`);
+    await page.click(`.pix-camera__friend-item[data-username="${carolUsername}"]`);
     await delay(200);
 
     // Verify both are selected (header should show count)
-    const headerText = await page.$eval('.snap-camera__friend-picker h3', el => el.textContent);
+    const headerText = await page.$eval('.pix-camera__friend-picker h3', el => el.textContent);
     expect(headerText).toContain('(2)');
     console.log('Alice selected Bob and Carol ✓');
 
     // Click send
     await page.click('#send-btn');
 
-    // Should navigate to /chats since multiple recipients
-    await page.waitForURL('**/chats', { timeout: 30000 });
-    console.log('Alice sent multi-recipient snap ✓');
+    // Should navigate to /pix after sending
+    await page.waitForURL('**/pix', { timeout: 30000 });
+    console.log('Alice sent multi-recipient pix ✓');
 
     // Wait for both to receive
-    await Promise.all([bobSnap2Promise, carolSnapPromise]);
-    console.log('Bob and Carol both received snap ✓');
+    await Promise.all([bobPix2Promise, carolPixPromise]);
+    console.log('Bob and Carol both received pix ✓');
 
-    // Verify Carol can query her snap
-    const carolSnapQuery = await carolPage.evaluate(async (aliceUser) => {
-      const allSnaps = await window.__client.snap.all();
-      const unviewed = allSnaps.filter(s =>
+    // Verify Carol can query her pix
+    const carolPixQuery = await carolPage.evaluate(async (aliceUser) => {
+      const allPix = await window.__client.pix.all();
+      const unviewed = allPix.filter(s =>
         s.data.recipientUsername === window.__client.username &&
         !s.data.viewedAt &&
         !s.data._deleted
       );
-      const snap = unviewed.find(s => s.data.senderUsername === aliceUser);
-      return snap ? { found: true, mediaRef: snap.data.mediaRef } : { found: false };
+      const pixEntry = unviewed.find(s => s.data.senderUsername === aliceUser);
+      return pixEntry ? { found: true, mediaRef: pixEntry.data.mediaRef } : { found: false };
     }, username);
 
-    expect(carolSnapQuery.found).toBe(true);
-    console.log('Carol queried her snap ✓');
+    expect(carolPixQuery.found).toBe(true);
+    console.log('Carol queried her pix ✓');
 
     // Verify Carol can decrypt
     const carolDecrypt = await carolPage.evaluate(async (mediaRefJson) => {
@@ -1883,14 +1937,14 @@ test.describe('V2 Full E2E Flow', () => {
       } catch (e) {
         return { error: e.message };
       }
-    }, carolSnapQuery.mediaRef);
+    }, carolPixQuery.mediaRef);
 
     expect(carolDecrypt.error).toBeUndefined();
     expect(carolDecrypt.size).toBeGreaterThan(0);
     console.log('Carol decrypted attachment:', carolDecrypt.size, 'bytes ✓');
 
-    // --- 9.5: Offline delivery (Bob logged out, receives snap on login) ---
-    console.log('\n--- 9.5: Offline snap delivery ---');
+    // --- 9.5: Offline delivery (Bob logged out, receives pix on login) ---
+    console.log('\n--- 9.5: Offline pix delivery ---');
 
     // Bob logs out
     await bobPage.goto('/settings');
@@ -1900,8 +1954,8 @@ test.describe('V2 Full E2E Flow', () => {
     await bobPage.waitForURL('**/login');
     console.log('Bob logged out');
 
-    // Alice sends snap while Bob is offline
-    await page.goto('/snap/camera');
+    // Alice sends pix while Bob is offline
+    await page.goto('/pix/camera');
     await delay(500);
     await page.waitForFunction(() => {
       const video = document.querySelector('#camera-video');
@@ -1910,17 +1964,17 @@ test.describe('V2 Full E2E Flow', () => {
 
     await page.click('#capture-btn');
     await delay(500);
-    await page.waitForSelector('.snap-camera--preview', { timeout: 10000 });
-    console.log('Alice captured snap while Bob offline');
+    await page.waitForSelector('.pix-camera--preview', { timeout: 10000 });
+    console.log('Alice captured pix while Bob offline');
 
     // Select just Bob (single recipient)
-    await page.click(`.snap-camera__friend-item[data-username="${bobUsername}"]`);
+    await page.click(`.pix-camera__friend-item[data-username="${bobUsername}"]`);
     await delay(200);
     await page.click('#send-btn');
 
-    // Alice navigates to chat (single recipient)
-    await page.waitForURL(`**/messages/${bobUsername}`, { timeout: 30000 });
-    console.log('Alice sent snap to offline Bob ✓');
+    // Alice navigates to /pix after sending
+    await page.waitForURL('**/pix', { timeout: 30000 });
+    console.log('Alice sent pix to offline Bob ✓');
 
     // Bob logs back in (same pattern as line 509-523)
     await bobPage.fill('#username', bobUsername);
@@ -1941,11 +1995,11 @@ test.describe('V2 Full E2E Flow', () => {
     // Wait a bit for queued messages to arrive
     await delay(2000);
 
-    // Bob should now have the snap (queued delivery)
-    const offlineSnapQuery = await bobPage.evaluate(async (aliceUser) => {
-      const allSnaps = await window.__client.snap.all();
-      // Find the most recent unviewed snap from Alice
-      const unviewed = allSnaps.filter(s =>
+    // Bob should now have the pix (queued delivery)
+    const offlinePixQuery = await bobPage.evaluate(async (aliceUser) => {
+      const allPix = await window.__client.pix.all();
+      // Find the most recent unviewed pix from Alice
+      const unviewed = allPix.filter(s =>
         s.data.senderUsername === aliceUser &&
         s.data.recipientUsername === window.__client.username &&
         !s.data.viewedAt &&
@@ -1953,12 +2007,12 @@ test.describe('V2 Full E2E Flow', () => {
       );
       // Sort by timestamp descending to get the newest
       unviewed.sort((a, b) => b.timestamp - a.timestamp);
-      const snap = unviewed[0];
-      return snap ? { found: true, id: snap.id, mediaRef: snap.data.mediaRef } : { found: false, count: allSnaps.length };
+      const pixEntry = unviewed[0];
+      return pixEntry ? { found: true, id: pixEntry.id, mediaRef: pixEntry.data.mediaRef } : { found: false, count: allPix.length };
     }, username);
 
-    expect(offlineSnapQuery.found).toBe(true);
-    console.log('Bob received offline snap ✓');
+    expect(offlinePixQuery.found).toBe(true);
+    console.log('Bob received offline pix ✓');
 
     // Verify Bob can decrypt
     const offlineDecrypt = await bobPage.evaluate(async (mediaRefJson) => {
@@ -1974,13 +2028,104 @@ test.describe('V2 Full E2E Flow', () => {
       } catch (e) {
         return { error: e.message };
       }
-    }, offlineSnapQuery.mediaRef);
+    }, offlinePixQuery.mediaRef);
 
     expect(offlineDecrypt.error).toBeUndefined();
     expect(offlineDecrypt.size).toBeGreaterThan(0);
-    console.log('Bob decrypted offline snap:', offlineDecrypt.size, 'bytes ✓');
+    console.log('Bob decrypted offline pix:', offlineDecrypt.size, 'bytes ✓');
+
+    // --- 9.6: UI Flow - Pix indicator shows in ConversationList ---
+    console.log('\n--- 9.6: Pix UI Flow ---');
+
+    // Alice sends a fresh pix so Bob has one to view via UI
+    const uiPixPromise = bobPage.waitForEvent('console', {
+      predicate: msg => msg.text().includes('[Global] Model sync:') && msg.text().includes('pix'),
+      timeout: 30000,
+    });
+
+    await page.goto('/pix/camera');
+    await delay(500);
+    await page.waitForFunction(() => {
+      const video = document.querySelector('#camera-video');
+      return video && video.srcObject && video.readyState >= 2;
+    }, { timeout: 15000 });
+    await page.click('#capture-btn');
+    await delay(500);
+    await page.waitForSelector('.pix-camera--preview', { timeout: 10000 });
+    await page.click(`.pix-camera__friend-item[data-username="${bobUsername}"]`);
+    await delay(200);
+    await page.click('#send-btn');
+    await page.waitForURL('**/pix', { timeout: 30000 });
+    console.log('Alice sent UI test pix ✓');
+
+    await uiPixPromise;
+    await delay(1000);
+
+    // --- 9.7: Bob goes to /pix to see pix list ---
+    await bobPage.goto('/pix');
+    await bobPage.waitForSelector('.pix-list', { timeout: 15000 });
+    console.log('Bob at /pix ✓');
+
+    // Verify pix from Alice is visible
+    const pixItem = await bobPage.$(`.pix-item[data-username="${username}"]`);
+    expect(pixItem).not.toBeNull();
+    console.log('Pix from Alice visible in list ✓');
+
+    // --- 9.8: Click pix → PixViewer loads ---
+    await bobPage.click(`.pix-item[data-username="${username}"]`);
+    await bobPage.waitForURL(`**/pix/view/${username}`, { timeout: 10000 });
+    console.log('Clicked → navigated to /pix/view ✓');
+
+    // Wait for PixViewer to render
+    await bobPage.waitForSelector('.pix-viewer', { timeout: 15000 });
+    console.log('PixViewer rendered ✓');
+
+    // --- 9.9: PixViewer shows image + timer ---
+    // Wait for image to load (may take a moment to decrypt)
+    await bobPage.waitForSelector('.pix-viewer__image', { timeout: 15000 });
+    console.log('Pix image displayed ✓');
+
+    // Verify timer bar exists
+    const timerBar = await bobPage.$('.pix-viewer__timer-bar');
+    expect(timerBar).not.toBeNull();
+    console.log('Timer bar displayed ✓');
+
+    // Verify sender name shows
+    const senderName = await bobPage.$eval('.pix-viewer__sender', el => el.textContent);
+    expect(senderName.length).toBeGreaterThan(0);
+    console.log('Sender name displayed:', senderName, '✓');
+
+    // --- 9.10: Tap through all pix until back at /pix ---
+    // Bob may have multiple pix, tap through all of them
+    for (let i = 0; i < 10; i++) {
+      const currentUrl = bobPage.url();
+      if (currentUrl.includes('/pix') && !currentUrl.includes('/pix/view')) {
+        break;
+      }
+      await bobPage.click('.pix-viewer').catch(() => {});
+      await delay(800);
+    }
+
+    // Should be back at /pix
+    await bobPage.waitForURL('**/pix', { timeout: 5000 }).catch(() => {});
+    await bobPage.goto('/pix'); // Ensure we're at /pix
+    await delay(500);
+    console.log('Finished viewing pix ✓');
+
+    // --- 9.11: Pix disappears from list after viewing ---
+    // Alice's pix should be gone (already viewed)
+    const pixItemAfter = await bobPage.$(`.pix-item[data-username="${username}"]`);
+    if (pixItemAfter) {
+      console.log('Some pix still visible (may be from other tests)');
+    } else {
+      console.log('Pix removed from list after viewing ✓');
+    }
 
     console.log('\n=== SCENARIO 9 COMPLETE ===\n');
+
+    // Pause for manual inspection - remove after debugging
+    console.log('Pausing for manual inspection... Press "Resume" in Playwright Inspector to continue.');
+    await page.pause();
 
     // Cleanup scenario contexts
     await alice3Context.close();

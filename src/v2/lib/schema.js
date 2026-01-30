@@ -6,8 +6,8 @@
 import { Story } from '../models/Story.js';
 import { Comment } from '../models/Comment.js';
 import { Reaction } from '../models/Reaction.js';
-import { Snap } from '../models/Snap.js';
-import { Streak } from '../models/Streak.js';
+import { Pix } from '../models/Pix.js';
+import { PixRegistry } from '../models/PixRegistry.js';
 import { Profile } from '../models/Profile.js';
 import { Settings } from '../models/Settings.js';
 import { Group } from '../models/Group.js';
@@ -20,8 +20,8 @@ export const modelClasses = {
   story: Story,
   comment: Comment,
   reaction: Reaction,
-  snap: Snap,
-  streak: Streak,
+  pix: Pix,
+  pixRegistry: PixRegistry,
   profile: Profile,
   settings: Settings,
   group: Group,

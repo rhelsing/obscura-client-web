@@ -254,6 +254,37 @@ export class ObscuraClient {
   }
 
   /**
+   * Get display name for a friend, falls back to username
+   * Looks up synced Profile by matching friend's deviceUUID to profile's authorDeviceId
+   * @param {string} username - Friend's username
+   * @returns {Promise<string>} Display name or username as fallback
+   */
+  async getDisplayName(username) {
+    // Get friend's devices
+    const friend = this.friends?.friends?.get(username);
+    if (!friend?.devices?.length) return username;
+
+    // Find profile matching any of friend's deviceUUIDs
+    if (this.profile) {
+      try {
+        const profiles = await this.profile.all();
+        for (const device of friend.devices) {
+          if (device.deviceUUID) {
+            const profile = profiles.find(p => p.authorDeviceId === device.deviceUUID);
+            if (profile?.data?.displayName) {
+              return profile.data.displayName;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to look up display name:', err);
+      }
+    }
+
+    return username;
+  }
+
+  /**
    * Persist a message to IndexedDB (and in-memory cache)
    * @private
    */
@@ -549,15 +580,23 @@ export class ObscuraClient {
         break;
 
       case 'MODEL_SYNC':
-        // Route to ORM sync manager if available (non-blocking)
+        // Route to ORM sync manager - wait for persistence before emitting event
         if (this._ormSyncManager) {
           this._ormSyncManager.handleIncoming(msg.modelSync, msg.sourceUserId)
+            .then(() => {
+              this._emit('modelSync', {
+                ...msg.modelSync,
+                sourceUserId: msg.sourceUserId,
+              });
+            })
             .catch(e => console.error('MODEL_SYNC handling failed:', e.message));
+        } else {
+          // No ORM, emit immediately
+          this._emit('modelSync', {
+            ...msg.modelSync,
+            sourceUserId: msg.sourceUserId,
+          });
         }
-        this._emit('modelSync', {
-          ...msg.modelSync,
-          sourceUserId: msg.sourceUserId,
-        });
         break;
 
       case 'TEXT':

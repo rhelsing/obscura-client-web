@@ -1,46 +1,46 @@
 /**
- * SnapViewer View
- * Full-screen viewer for received snaps with auto-countdown timer
+ * PixViewer View
+ * Full-screen viewer for received pix with auto-countdown timer
  */
 import { navigate } from '../index.js';
 
 let cleanup = null;
 
-export function render({ snap, imageUrl, progress, displayName } = {}) {
-  if (!snap) {
+export function render({ pix, imageUrl, progress, displayName } = {}) {
+  if (!pix) {
     return `
-      <div class="view snap-viewer snap-viewer--loading">
-        <div class="snap-viewer__loading">
-          <p>Loading snap...</p>
+      <div class="view pix-viewer pix-viewer--loading">
+        <div class="pix-viewer__loading">
+          <p>Loading pix...</p>
         </div>
       </div>
     `;
   }
 
   return `
-    <div class="view snap-viewer">
-      <header class="snap-viewer__header">
-        <button class="snap-viewer__close" id="close-btn">
+    <div class="view pix-viewer">
+      <header class="pix-viewer__header">
+        <button class="pix-viewer__close" id="close-btn">
           <ry-icon name="x"></ry-icon>
         </button>
-        <span class="snap-viewer__sender">${displayName || snap.data?.senderUsername || 'Unknown'}</span>
-        <div class="snap-viewer__timer">
-          <div class="snap-viewer__timer-bar" style="width: ${progress}%"></div>
+        <span class="pix-viewer__sender">${displayName || pix.data?.senderUsername || 'Unknown'}</span>
+        <div class="pix-viewer__timer">
+          <div class="pix-viewer__timer-bar" style="width: ${progress}%"></div>
         </div>
       </header>
 
-      <div class="snap-viewer__content">
+      <div class="pix-viewer__content">
         ${imageUrl ? `
-          <img src="${imageUrl}" alt="Snap" class="snap-viewer__image" />
+          <img src="${imageUrl}" alt="Pix" class="pix-viewer__image" />
         ` : `
-          <div class="snap-viewer__placeholder">
+          <div class="pix-viewer__placeholder">
             <ry-icon name="image"></ry-icon>
           </div>
         `}
 
-        ${snap.data?.caption ? `
-          <div class="snap-viewer__caption">
-            <p>${snap.data.caption}</p>
+        ${pix.data?.caption ? `
+          <div class="pix-viewer__caption">
+            <p>${pix.data.caption}</p>
           </div>
         ` : ''}
       </div>
@@ -59,27 +59,27 @@ export async function mount(container, client, router, params = {}) {
   // Show loading state
   container.innerHTML = render({});
 
-  // Load unviewed snaps from this friend
-  let snaps = [];
+  // Load unviewed pix from this friend
+  let pixList = [];
   try {
-    snaps = await client.snap
-      .where({
-        'data.recipientUsername': client.username,
-        'data.senderUsername': username,
-        'data.viewedAt': null,
-        'data._deleted': { ne: true }
-      })
-      .orderBy('timestamp', 'asc')
-      .exec();
+    const allPix = await client.pix.all();
+    pixList = allPix
+      .filter(p =>
+        p.data?.recipientUsername === client.username &&
+        p.data?.senderUsername === username &&
+        !p.data?.viewedAt &&
+        !p.data?._deleted
+      )
+      .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
   } catch (err) {
-    console.error('Failed to load snaps:', err);
-    navigate(`/messages/${username}`);
+    console.error('Failed to load pix:', err);
+    navigate('/pix');
     return;
   }
 
-  if (snaps.length === 0) {
-    // No snaps, go to chat
-    navigate(`/messages/${username}`);
+  if (pixList.length === 0) {
+    // No pix, go back to pix list
+    navigate('/pix');
     return;
   }
 
@@ -109,8 +109,8 @@ export async function mount(container, client, router, params = {}) {
   let isCleanedUp = false;
 
   // Parse mediaRef and download image
-  async function loadSnapImage(snap) {
-    const mediaRef = snap.data?.mediaRef;
+  async function loadPixImage(pix) {
+    const mediaRef = pix.data?.mediaRef;
     if (!mediaRef) return null;
 
     try {
@@ -120,6 +120,7 @@ export async function mount(container, client, router, params = {}) {
           attachmentId: ref.attachmentId,
           contentKey: new Uint8Array(ref.contentKey),
           nonce: new Uint8Array(ref.nonce),
+          contentHash: ref.contentHash ? new Uint8Array(ref.contentHash) : undefined,
           contentType: ref.contentType || 'image/jpeg'
         };
         const bytes = await client.attachments.download(contentRef);
@@ -127,33 +128,33 @@ export async function mount(container, client, router, params = {}) {
         return URL.createObjectURL(blob);
       }
     } catch (err) {
-      console.error('Failed to load snap image:', err);
+      console.error('Failed to load pix image:', err);
     }
     return null;
   }
 
-  // Mark snap as viewed
-  async function markViewed(snap) {
+  // Mark pix as viewed
+  async function markViewed(pix) {
     try {
-      await client.snap.upsert(snap.id, {
-        ...snap.data,
+      await client.pix.upsert(pix.id, {
+        ...pix.data,
         viewedAt: Date.now()
       });
     } catch (err) {
-      console.error('Failed to mark snap as viewed:', err);
+      console.error('Failed to mark pix as viewed:', err);
     }
   }
 
-  // Display current snap
-  async function showSnap(index) {
-    if (isCleanedUp || index >= snaps.length) {
-      // All snaps viewed, go to chat
-      navigate(`/messages/${username}`);
+  // Display current pix
+  async function showPix(index) {
+    if (isCleanedUp || index >= pixList.length) {
+      // All pix viewed, go back to pix list
+      navigate('/pix');
       return;
     }
 
-    const snap = snaps[index];
-    const duration = (snap.data?.displayDuration || 5) * 1000;
+    const pix = pixList[index];
+    const duration = (pix.data?.displayDuration || 5) * 1000;
 
     // Clean up previous image URL
     if (currentImageUrl) {
@@ -162,15 +163,15 @@ export async function mount(container, client, router, params = {}) {
     }
 
     // Show loading while image loads
-    container.innerHTML = render({ snap, imageUrl: null, progress: 100, displayName });
+    container.innerHTML = render({ pix, imageUrl: null, progress: 100, displayName });
 
     // Load image
-    currentImageUrl = await loadSnapImage(snap);
+    currentImageUrl = await loadPixImage(pix);
 
     if (isCleanedUp) return;
 
     // Mark as viewed
-    await markViewed(snap);
+    await markViewed(pix);
 
     if (isCleanedUp) return;
 
@@ -183,28 +184,28 @@ export async function mount(container, client, router, params = {}) {
       const elapsed = Date.now() - startTime;
       const progress = Math.max(0, 100 - (elapsed / duration) * 100);
 
-      container.innerHTML = render({ snap, imageUrl: currentImageUrl, progress, displayName });
+      container.innerHTML = render({ pix, imageUrl: currentImageUrl, progress, displayName });
 
       // Re-attach close button handler
       const closeBtn = container.querySelector('#close-btn');
       if (closeBtn) {
         closeBtn.addEventListener('click', () => {
-          cleanupAndNavigate(`/messages/${username}`);
+          cleanupAndNavigate('/pix');
         });
       }
 
       // Tap anywhere to skip to next
-      const viewer = container.querySelector('.snap-viewer');
+      const viewer = container.querySelector('.pix-viewer');
       if (viewer) {
         viewer.addEventListener('click', (e) => {
           if (e.target.id !== 'close-btn' && !e.target.closest('#close-btn')) {
-            showNextSnap();
+            showNextPix();
           }
         });
       }
 
       if (elapsed >= duration) {
-        showNextSnap();
+        showNextPix();
       } else {
         animationFrame = requestAnimationFrame(updateProgress);
       }
@@ -213,13 +214,13 @@ export async function mount(container, client, router, params = {}) {
     updateProgress();
   }
 
-  function showNextSnap() {
+  function showNextPix() {
     if (animationFrame) {
       cancelAnimationFrame(animationFrame);
       animationFrame = null;
     }
     currentIndex++;
-    showSnap(currentIndex);
+    showPix(currentIndex);
   }
 
   function cleanupAndNavigate(path) {
@@ -236,7 +237,7 @@ export async function mount(container, client, router, params = {}) {
   }
 
   // Start viewing
-  showSnap(0);
+  showPix(0);
 
   // Cleanup function
   cleanup = () => {

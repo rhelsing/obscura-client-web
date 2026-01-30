@@ -107,16 +107,16 @@ export async function mount(container, client, router, params) {
     }
   }
 
-  // Query streak for this friend
+  // Query streak from PixRegistry for this friend
   let streakCount = 0;
-  if (client.streak) {
+  if (client.pixRegistry) {
     try {
-      const streak = await client.streak
+      const registry = await client.pixRegistry
         .where({ 'data.friendUsername': username })
         .first();
-      streakCount = streak?.data?.count || 0;
+      streakCount = registry?.data?.streakCount || 0;
     } catch (err) {
-      console.warn('Failed to load streak:', err);
+      console.warn('Failed to load pix registry:', err);
     }
   }
 

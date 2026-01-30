@@ -5,7 +5,7 @@
  */
 import '../../../test/helpers/setup.js'; // Polyfills for Node.js
 import { Obscura } from '../lib/index.js';
-import { Snap } from '../models/Snap.js';
+import { Pix } from '../models/Pix.js';
 
 const API = process.env.VITE_API_URL || process.env.OBSCURA_API_URL;
 if (!API) {
@@ -271,14 +271,25 @@ async function main() {
       ttl: '24h',
     },
 
-    // SNAP MODEL - pulled from actual model class
-    snap: Snap.toConfig(),
+    // PIX MODEL - pulled from actual model class
+    pix: Pix.toConfig(),
 
     // COLLECTABLE MODELS
-    streak: {
-      fields: { count: 'number', lastActivity: 'timestamp' },
+    pixRegistry: {
+      fields: {
+        friendUsername: 'string',
+        unviewedCount: 'number',
+        lastReceivedAt: 'timestamp?',
+        totalReceived: 'number',
+        sentPendingCount: 'number',
+        lastSentAt: 'timestamp?',
+        totalSent: 'number',
+        streakCount: 'number',
+        streakExpiry: 'timestamp?',
+      },
       sync: 'lww',
-      collectable: true,
+      collectable: false,
+      private: true,
     },
     profile: {
       fields: { displayName: 'string', avatarUrl: 'string?', bio: 'string?' },
@@ -580,38 +591,94 @@ async function main() {
   ok('Deletion (LWW tombstone)');
   await delay(300);
 
-  // --- Test 17b: Snap model ---
-  const bobSnapPromise = once(bob, 'modelSync');
-  const snap = await alice.snap.create({
+  // --- Test 17b: Pix model ---
+  const bobPixPromise = once(bob, 'modelSync');
+  const pix = await alice.pix.create({
     recipientUsername: bob.username,
     senderUsername: alice.username,
     mediaRef: '{"attachmentId":"abc123"}',
     caption: 'Hello!',
     displayDuration: 8,
   });
-  if (!snap.id.startsWith('snap_')) throw new Error('Snap ID wrong');
-  if (snap.data.displayDuration !== 8) throw new Error('displayDuration not stored');
-  ok('Snap create');
+  if (!pix.id.startsWith('pix_')) throw new Error('Pix ID wrong');
+  if (pix.data.displayDuration !== 8) throw new Error('displayDuration not stored');
+  ok('Pix create');
 
-  // Wait for bob to receive the snap
-  const bobSnap = await bobSnapPromise;
-  if (bobSnap.model !== 'snap') throw new Error('Bob did not receive snap sync');
-  ok('Snap syncs to recipient');
+  // Wait for bob to receive the pix
+  const bobPix = await bobPixPromise;
+  if (bobPix.model !== 'pix') throw new Error('Bob did not receive pix sync');
+  ok('Pix syncs to recipient');
   await delay(300);
 
-  // Query unviewed snaps on bob's client (viewedAt is undefined/null)
-  const allSnaps = await bob.snap.all();
-  const unviewed = allSnaps.filter(s => !s.data.viewedAt && !s.data._deleted);
-  if (unviewed.length !== 1) throw new Error(`Expected 1 unviewed snap, got ${unviewed.length}`);
-  ok('Snap query unviewed');
+  // Query unviewed pix on bob's client (viewedAt is undefined/null)
+  const allPix = await bob.pix.all();
+  const unviewed = allPix.filter(p => !p.data.viewedAt && !p.data._deleted);
+  if (unviewed.length !== 1) throw new Error(`Expected 1 unviewed pix, got ${unviewed.length}`);
+  ok('Pix query unviewed');
   await delay(300);
 
-  // Delete snap after viewing
-  await bob.snap.delete(snap.id);
+  // --- CONTENT VERIFICATION: Verify received pix has correct content ---
+  const receivedPix = await bob.pix.find(pix.id);
+  if (!receivedPix) throw new Error('Bob cannot find pix by ID');
+  if (receivedPix.data.senderUsername !== alice.username) {
+    throw new Error(`Wrong sender: expected ${alice.username}, got ${receivedPix.data.senderUsername}`);
+  }
+  if (receivedPix.data.recipientUsername !== bob.username) {
+    throw new Error(`Wrong recipient: expected ${bob.username}, got ${receivedPix.data.recipientUsername}`);
+  }
+  if (receivedPix.data.caption !== 'Hello!') {
+    throw new Error(`Wrong caption: expected 'Hello!', got '${receivedPix.data.caption}'`);
+  }
+  if (receivedPix.data.displayDuration !== 8) {
+    throw new Error(`Wrong duration: expected 8, got ${receivedPix.data.displayDuration}`);
+  }
+  if (receivedPix.data.mediaRef !== '{"attachmentId":"abc123"}') {
+    throw new Error(`Wrong mediaRef: expected '{"attachmentId":"abc123"}', got '${receivedPix.data.mediaRef}'`);
+  }
+  ok('Pix content verified (sender, recipient, caption, duration, mediaRef)');
   await delay(300);
-  const deletedSnap = await bob.snap.find(snap.id);
-  if (!deletedSnap || !deletedSnap.data._deleted) throw new Error('Snap deletion failed');
-  ok('Snap delete after viewing');
+
+  // Delete pix after viewing
+  await bob.pix.delete(pix.id);
+  await delay(300);
+  const deletedPix = await bob.pix.find(pix.id);
+  if (!deletedPix || !deletedPix.data._deleted) throw new Error('Pix deletion failed');
+  ok('Pix delete after viewing');
+  await delay(300);
+
+  // --- OFFLINE DELIVERY TEST: Bob disconnects, Alice sends, Bob reconnects ---
+  bob.disconnect();
+  await delay(500);
+
+  // Alice sends pix while Bob is offline
+  const offlinePix = await alice.pix.create({
+    recipientUsername: bob.username,
+    senderUsername: alice.username,
+    mediaRef: '{"attachmentId":"offline123"}',
+    caption: 'Offline test!',
+    displayDuration: 5,
+  });
+  ok('Pix sent while recipient offline');
+  await delay(500);
+
+  // Bob reconnects
+  const bobOfflinePixPromise = once(bob, 'modelSync', 30000);
+  await bob.connect();
+  await delay(500);
+
+  // Bob should receive the queued pix
+  const offlineReceived = await bobOfflinePixPromise;
+  if (offlineReceived.model !== 'pix') throw new Error('Offline pix not received');
+  ok('Offline pix received on reconnect');
+  await delay(300);
+
+  // Verify offline pix content
+  const offlinePixData = await bob.pix.find(offlinePix.id);
+  if (!offlinePixData) throw new Error('Cannot find offline pix');
+  if (offlinePixData.data.caption !== 'Offline test!') {
+    throw new Error(`Wrong offline pix caption: ${offlinePixData.data.caption}`);
+  }
+  ok('Offline pix content verified');
   await delay(300);
 
   // ==========================================================================

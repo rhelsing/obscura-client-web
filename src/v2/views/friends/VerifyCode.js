@@ -56,11 +56,12 @@ export function render({ myCode = '----', theirCode = '----', username = 'friend
   `;
 }
 
-export function mount(container, client, router, params) {
+export async function mount(container, client, router, params) {
   const username = params.username || 'friend';
+  const displayName = await client.getDisplayName(username);
   const req = window.__verifyRequest;
 
-  container.innerHTML = render({ username, loading: true });
+  container.innerHTML = render({ username: displayName, loading: true });
 
   // Get codes
   (async () => {
@@ -68,7 +69,7 @@ export function mount(container, client, router, params) {
       const myCode = await client.getMyVerifyCode();
       const theirCode = req ? await req.getVerifyCode() : '----';
 
-      container.innerHTML = render({ myCode, theirCode, username });
+      container.innerHTML = render({ myCode, theirCode, username: displayName });
 
       // Match button
       container.querySelector('#match-btn').addEventListener('click', () => {
@@ -79,7 +80,7 @@ export function mount(container, client, router, params) {
 
       // No match button - show warning instead of alert
       container.querySelector('#no-match-btn').addEventListener('click', () => {
-        container.innerHTML = render({ myCode, theirCode, username, showWarning: true });
+        container.innerHTML = render({ myCode, theirCode, username: displayName, showWarning: true });
 
         container.querySelector('#remove-friend-btn').addEventListener('click', async () => {
           // Remove friend

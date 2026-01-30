@@ -31,8 +31,9 @@ import * as VerifyCode from './friends/VerifyCode.js';
 import * as ConversationList from './messaging/ConversationList.js';
 import * as Chat from './messaging/Chat.js';
 
-import * as SnapCamera from './snaps/SnapCamera.js';
-import * as SnapViewer from './snaps/SnapViewer.js';
+import * as PixList from './pix/PixList.js';
+import * as PixCamera from './pix/PixCamera.js';
+import * as PixViewer from './pix/PixViewer.js';
 
 import * as StoryFeed from './stories/StoryFeed.js';
 import * as CreateStory from './stories/CreateStory.js';
@@ -91,9 +92,10 @@ export function init(appContainer, obscuraClient = null) {
   router.on('/messages', () => requireAuth(() => mountView(ConversationList))); // Alias for backwards compat
   router.on('/messages/:username', ({ data }) => requireAuth(() => mountView(Chat, data)));
 
-  // Snap routes
-  router.on('/snap/camera', () => requireAuth(() => mountView(SnapCamera)));
-  router.on('/snap/view/:username', ({ data }) => requireAuth(() => mountView(SnapViewer, data)));
+  // Pix routes
+  router.on('/pix', () => requireAuth(() => mountView(PixList)));
+  router.on('/pix/camera', () => requireAuth(() => mountView(PixCamera)));
+  router.on('/pix/view/:username', ({ data }) => requireAuth(() => mountView(PixViewer, data)));
 
   // Stories routes
   router.on('/stories', () => requireAuth(() => mountView(StoryFeed)));
@@ -120,10 +122,10 @@ export function init(appContainer, obscuraClient = null) {
   // Logs route
   router.on('/logs', () => requireAuth(() => mountView(Logs)));
 
-  // Default route - show login directly
+  // Default route - show pix if logged in, otherwise login
   router.on('/', () => {
     if (client) {
-      mountView(StoryFeed);
+      mountView(PixList);
     } else {
       mountView(Login);
     }

@@ -1,12 +1,15 @@
 /**
  * Bottom Navigation Component
- * 3-item nav: Chats | Stories | More
- * Signal-style: conversations are the main view
+ * 3-item nav: Pix | Chats | Stories + More drawer
  */
 
-export function renderNav(active = 'chats') {
+export function renderNav(active = 'pix') {
   return `
     <nav class="bottom-nav">
+      <a href="/pix" data-navigo class="${active === 'pix' ? 'active' : ''}">
+        <ry-icon name="star"></ry-icon>
+        <span class="label">Pix</span>
+      </a>
       <a href="/chats" data-navigo class="${active === 'chats' ? 'active' : ''}">
         <ry-icon name="edit"></ry-icon>
         <span class="label">Chats</span>

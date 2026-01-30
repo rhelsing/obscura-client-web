@@ -1072,15 +1072,15 @@ ry-drawer a[data-navigo]:hover,
   overflow-y: auto;
 }
 
-/* Snap Indicator */
-.snap-indicator {
+/* Pix Indicator */
+.pix-indicator {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--snap-color, var(--danger));
+  color: var(--pix-color, var(--danger));
 }
 
-.snap-indicator .snap-count {
+.pix-indicator .pix-count {
   font-size: 10px;
   font-weight: bold;
 }
@@ -1094,13 +1094,24 @@ ry-drawer a[data-navigo]:hover,
   color: #f97316;
 }
 
-/* Snap Camera */
-.snap-camera {
+/* Pix Item */
+.pix-item {
+  cursor: pointer;
+}
+
+.pix-item--disabled {
+  opacity: 0.6;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* Pix Camera */
+.pix-camera {
   padding: 0 !important;
   background: #000;
 }
 
-.snap-camera__header {
+.pix-camera__header {
   position: absolute;
   top: 0;
   left: 0;
@@ -1114,7 +1125,7 @@ ry-drawer a[data-navigo]:hover,
   color: white;
 }
 
-.snap-camera__viewfinder {
+.pix-camera__viewfinder {
   width: 100%;
   height: 100vh;
   display: flex;
@@ -1123,13 +1134,13 @@ ry-drawer a[data-navigo]:hover,
   overflow: hidden;
 }
 
-.snap-camera__viewfinder video {
+.pix-camera__viewfinder video {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.snap-camera__capture-area {
+.pix-camera__capture-area {
   position: absolute;
   bottom: 40px;
   left: 0;
@@ -1138,7 +1149,7 @@ ry-drawer a[data-navigo]:hover,
   justify-content: center;
 }
 
-.snap-camera__capture-btn {
+.pix-camera__capture-btn {
   width: 72px;
   height: 72px;
   border-radius: 50%;
@@ -1148,7 +1159,7 @@ ry-drawer a[data-navigo]:hover,
   cursor: pointer;
 }
 
-.snap-camera__capture-btn-inner {
+.pix-camera__capture-btn-inner {
   width: 100%;
   height: 100%;
   border-radius: 50%;
@@ -1156,28 +1167,28 @@ ry-drawer a[data-navigo]:hover,
   transition: transform 0.1s;
 }
 
-.snap-camera__capture-btn:active .snap-camera__capture-btn-inner {
+.pix-camera__capture-btn:active .pix-camera__capture-btn-inner {
   transform: scale(0.9);
 }
 
-/* Snap Camera Preview */
-.snap-camera--preview {
+/* Pix Camera Preview */
+.pix-camera--preview {
   background: #000;
 }
 
-.snap-camera__preview-container {
+.pix-camera__preview-container {
   position: relative;
   width: 100%;
   height: 60vh;
 }
 
-.snap-camera__preview-image {
+.pix-camera__preview-image {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.snap-camera__caption {
+.pix-camera__caption {
   position: absolute;
   bottom: 16px;
   left: 16px;
@@ -1190,11 +1201,11 @@ ry-drawer a[data-navigo]:hover,
   font-size: 16px;
 }
 
-.snap-camera__caption::placeholder {
+.pix-camera__caption::placeholder {
   color: rgba(255,255,255,0.6);
 }
 
-.snap-camera__controls {
+.pix-camera__controls {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1203,7 +1214,7 @@ ry-drawer a[data-navigo]:hover,
   border-top: 1px solid var(--border, #e0e0e0);
 }
 
-.snap-camera__btn {
+.pix-camera__btn {
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -1216,23 +1227,23 @@ ry-drawer a[data-navigo]:hover,
   justify-content: center;
 }
 
-.snap-camera__btn--send {
+.pix-camera__btn--send {
   background: var(--primary);
   color: white;
 }
 
-.snap-camera__duration {
+.pix-camera__duration {
   display: flex;
   align-items: center;
   gap: 8px;
   color: var(--text, #1a1a1a);
 }
 
-.snap-camera__duration input[type="range"] {
+.pix-camera__duration input[type="range"] {
   width: 100px;
 }
 
-.snap-camera__friend-picker {
+.pix-camera__friend-picker {
   padding: 16px;
   background: var(--bg, #fff);
   flex: 1;
@@ -1241,38 +1252,38 @@ ry-drawer a[data-navigo]:hover,
   margin-top: -20px;
 }
 
-.snap-camera__friend-picker h3 {
+.pix-camera__friend-picker h3 {
   color: var(--text, #1a1a1a);
   margin-bottom: 12px;
 }
 
-.snap-camera__friend-item {
+.pix-camera__friend-item {
   cursor: pointer;
   background: var(--bg-secondary, #f5f5f5);
   color: var(--text, #1a1a1a);
 }
 
-.snap-camera__friend-item.selected {
+.pix-camera__friend-item.selected {
   border: 2px solid var(--primary);
   background: var(--primary);
   color: white;
 }
 
-/* Snap Viewer */
-.snap-viewer {
+/* Pix Viewer */
+.pix-viewer {
   padding: 0 !important;
   background: #000;
   position: relative;
 }
 
-.snap-viewer--loading {
+.pix-viewer--loading {
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
 }
 
-.snap-viewer__header {
+.pix-viewer__header {
   position: absolute;
   top: 0;
   left: 0;
@@ -1282,7 +1293,7 @@ ry-drawer a[data-navigo]:hover,
   background: linear-gradient(to bottom, rgba(0,0,0,0.5), transparent);
 }
 
-.snap-viewer__close {
+.pix-viewer__close {
   position: absolute;
   top: 16px;
   right: 16px;
@@ -1298,13 +1309,13 @@ ry-drawer a[data-navigo]:hover,
   justify-content: center;
 }
 
-.snap-viewer__sender {
+.pix-viewer__sender {
   color: white;
   font-weight: 600;
   font-size: 16px;
 }
 
-.snap-viewer__timer {
+.pix-viewer__timer {
   position: absolute;
   top: 0;
   left: 0;
@@ -1313,13 +1324,13 @@ ry-drawer a[data-navigo]:hover,
   background: rgba(255,255,255,0.3);
 }
 
-.snap-viewer__timer-bar {
+.pix-viewer__timer-bar {
   height: 100%;
   background: white;
   transition: width 0.1s linear;
 }
 
-.snap-viewer__content {
+.pix-viewer__content {
   width: 100%;
   height: 100vh;
   display: flex;
@@ -1327,18 +1338,18 @@ ry-drawer a[data-navigo]:hover,
   justify-content: center;
 }
 
-.snap-viewer__image {
+.pix-viewer__image {
   width: 100%;
   height: 100%;
   object-fit: contain;
 }
 
-.snap-viewer__placeholder {
+.pix-viewer__placeholder {
   color: rgba(255,255,255,0.3);
   font-size: 64px;
 }
 
-.snap-viewer__caption {
+.pix-viewer__caption {
   position: absolute;
   bottom: 80px;
   left: 16px;

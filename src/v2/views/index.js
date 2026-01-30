@@ -140,6 +140,15 @@ export function init(appContainer, obscuraClient = null) {
     }
   });
 
+  // Handle GitHub Pages SPA redirect (404.html encodes path as ?p=)
+  const params = new URLSearchParams(window.location.search);
+  const redirectPath = params.get('p');
+  if (redirectPath) {
+    // Restore the original path and remove query param
+    const base = import.meta.env.BASE_URL || '/';
+    history.replaceState(null, '', base + redirectPath.replace(/^\//, ''));
+  }
+
   router.resolve();
 }
 

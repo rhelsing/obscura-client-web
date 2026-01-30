@@ -209,7 +209,7 @@ function renderComments(comments, depth = 0) {
         <strong>${c.authorName || 'Unknown'}</strong>
         <span style="color: var(--ry-color-text-muted); font-size: var(--ry-text-sm)">${formatTime(c.timestamp)}</span>
       </cluster>
-      <p style="margin: var(--ry-space-2) 0">${escapeHtml(c.data?.text)}</p>
+      <p style="margin: var(--ry-space-2) 0; margin-left: ${depth * 2}rem">${escapeHtml(c.data?.text)}</p>
       <button variant="ghost" size="sm" class="reply-btn" data-comment-id="${c.id}">Reply</button>
       <div class="reply-form hidden" data-for="${c.id}">
         <cluster style="margin-top: 8px">
@@ -218,8 +218,8 @@ function renderComments(comments, depth = 0) {
           <button class="cancel-reply-btn" variant="ghost" size="sm">✕</button>
         </cluster>
       </div>
-      ${c.replies ? renderComments(c.replies, depth + 1) : ''}
     </card>
+    ${c.replies?.length ? renderComments(c.replies, depth + 1) : ''}
   `).join('');
 }
 

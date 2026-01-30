@@ -17,6 +17,7 @@ export class PixRegistry extends BaseModel {
     // Streak
     streakCount: 'number',         // Current streak count
     streakExpiry: 'timestamp?',    // When streak expires if no activity
+    streakEarnedAt: 'timestamp?',  // When streak was last incremented
   };
 
   static sync = 'lww';

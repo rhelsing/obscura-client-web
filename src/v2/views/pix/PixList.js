@@ -194,27 +194,35 @@ export async function mount(container, client, router) {
       // Convert to sorted array and calculate streaks
       for (const [username, data] of friendPixData) {
         let streakCount = 0;
+        let streakEarnedAt = null;
 
         // Get existing registry data
         const existingReg = registryMap.get(username);
         const existingStreak = existingReg?.data?.streakCount || 0;
+        const existingEarnedAt = existingReg?.data?.streakEarnedAt || 0;
 
         // Streak logic:
-        // - Streak starts when both have sent 3+ pix to each other within 3 days
-        // - Streak continues as long as both keep sending within 3 days
-        // - Reset if 3 days pass without mutual exchange
-        const bothSent3 = data.sentIn3Days >= 3 && data.receivedIn3Days >= 3;
-        const bothActive = (now - data.lastSentAt) < THREE_DAYS_MS && (now - data.lastReceivedAt) < THREE_DAYS_MS;
+        // - +1 per day as long as both have activity within 3 days
+        // - Reset to 0 if 3 days pass without mutual exchange
+        const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+        const bothActive = data.lastSentAt && data.lastReceivedAt &&
+          (now - data.lastSentAt) < THREE_DAYS_MS && (now - data.lastReceivedAt) < THREE_DAYS_MS;
+        const daysSinceEarned = existingEarnedAt ? Math.floor((now - existingEarnedAt) / ONE_DAY_MS) : 0;
 
-        if (bothSent3 && bothActive) {
-          // Streak is active - increment from existing or start at 1
-          streakCount = existingStreak > 0 ? existingStreak + 1 : 1;
-        } else if (existingStreak > 0 && bothActive) {
-          // Had a streak and still active, maintain it
-          streakCount = existingStreak;
+        if (bothActive) {
+          if (existingStreak > 0) {
+            // Add days passed since last earned (but at least maintain current)
+            streakCount = existingStreak + daysSinceEarned;
+            streakEarnedAt = daysSinceEarned > 0 ? now : existingEarnedAt;
+          } else {
+            // Fresh streak start
+            streakCount = 1;
+            streakEarnedAt = now;
+          }
         } else {
-          // Streak broken or not started
+          // 3 days without mutual activity, streak broken
           streakCount = 0;
+          streakEarnedAt = null;
         }
 
         // Update PixRegistry if we have access
@@ -225,12 +233,13 @@ export async function mount(container, client, router) {
               friendUsername: username,
               unviewedCount: data.unviewedCount,
               lastReceivedAt: data.lastReceivedAt || null,
-              totalReceived: data.receivedIn3Days, // Simplified - could track lifetime
+              totalReceived: data.receivedIn3Days,
               sentPendingCount: data.sentCount - data.sentViewedCount,
               lastSentAt: data.lastSentAt || null,
-              totalSent: data.sentIn3Days, // Simplified - could track lifetime
+              totalSent: data.sentIn3Days,
               streakCount,
-              streakExpiry: streakCount > 0 ? now + THREE_DAYS_MS : null
+              streakExpiry: streakCount > 0 ? now + THREE_DAYS_MS : null,
+              streakEarnedAt
             });
           } catch (err) {
             console.warn('Failed to update pixRegistry:', err);

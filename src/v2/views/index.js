@@ -73,7 +73,7 @@ export function init(appContainer, obscuraClient = null) {
     client = null;
   }
 
-  router = new Navigo('/');
+  router = new Navigo(import.meta.env.BASE_URL || '/');
 
   // Auth routes (no client required)
   router.on('/register', () => mountView(Register));

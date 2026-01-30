@@ -48,10 +48,7 @@ export function mount(container, client, router) {
       // Note: Obscura.login() automatically uses IndexedDBStore which persists to IndexedDB.
       // It checks store.getDeviceIdentity() to detect if this is an existing device.
       // No need to manually load from localStorage.
-      const result = await Obscura.login(username, password, {
-        apiUrl,
-        protoBasePath: '/'
-      });
+      const result = await Obscura.login(username, password, { apiUrl });
 
       if (result.status === 'ok') {
         // Existing device, go to main app

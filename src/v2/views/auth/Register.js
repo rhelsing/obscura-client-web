@@ -78,7 +78,7 @@ export function mount(container, client, router) {
     }
 
     try {
-      const newClient = await Obscura.register(username, password, { apiUrl: getApiUrl(), protoBasePath: '/' });
+      const newClient = await Obscura.register(username, password, { apiUrl: getApiUrl() });
       const phrase = newClient.getRecoveryPhrase();
 
       // Show phrase confirmation step

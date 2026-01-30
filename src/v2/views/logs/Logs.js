@@ -175,10 +175,13 @@ export async function mount(container, client, router) {
   let expandedEvent = null;
   let unsubscribe = null;
 
-  // Event types to hide
+  // Event types to hide (low-level transport events)
   const hiddenTypes = new Set([
     LogEventType.GATEWAY_CONNECT,
     LogEventType.GATEWAY_DISCONNECT,
+    LogEventType.RECEIVE_ENVELOPE,      // Hide transport-level type (1=prekey, 2=encrypted)
+    LogEventType.RECEIVE_DECRYPT_START, // Hide crypto internals
+    LogEventType.RECEIVE_DECRYPT_COMPLETE,
   ]);
 
   // Load existing events from logger

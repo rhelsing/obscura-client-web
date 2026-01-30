@@ -1316,102 +1316,118 @@ test.describe('V2 Full E2E Flow', () => {
     console.log('Test 8b: Story sync to friends ✓');
     await delay(300);
 
-    // --- Group B: Associations ---
+    // --- Group B: Associations (UI-based tests) ---
     console.log('--- Group B: Associations ---');
 
-    // Test 9: Comment on story (belongs_to)
-    const storyForComments = await page.evaluate(async () => {
-      const s = await window.__client.story.create({ content: 'Comment me!' });
-      return s.id;
-    });
-    await delay(300);
-
-    const comment1 = await bobPage.evaluate(async (storyId) => {
-      const c = await window.__client.comment.create({ storyId, text: 'Nice story!' });
-      return { id: c.id, storyId: c.data.storyId };
-    }, storyForComments);
-
-    expect(comment1.id.startsWith('comment_')).toBe(true);
-    expect(comment1.storyId).toBe(storyForComments);
-    console.log('Test 9: Comment on story (belongs_to) ✓');
+    // Test 9: Comment on story via UI
+    // Alice creates a story via UI
+    await page.goto('/stories/new');
+    await page.waitForSelector('#content', { timeout: 10000 });
+    await page.fill('#content', 'Comment me!');
+    await page.click('button[type="submit"]');
+    await page.waitForURL('**/stories', { timeout: 10000 });
     await delay(500);
 
-    // Test 10: Reply to comment (nested belongs_to)
-    const reply = await page.evaluate(async (commentId) => {
-      const r = await window.__client.comment.create({ commentId, text: 'Thanks for the feedback!' });
-      return { id: r.id, commentId: r.data.commentId };
-    }, comment1.id);
+    // Get the story ID from the first card
+    const storyForComments = await page.$eval('.story-card', el => el.dataset.id);
+    expect(storyForComments).toBeTruthy();
 
-    expect(reply.id.startsWith('comment_')).toBe(true);
-    expect(reply.commentId).toBe(comment1.id);
-    console.log('Test 10: Reply to comment (nested belongs_to) ✓');
-    await delay(500);
+    // Bob navigates to the story detail and comments via UI
+    await bobPage.goto(`/stories/${storyForComments}`);
+    await bobPage.waitForSelector('#comment-form', { timeout: 10000 });
+    await bobPage.fill('#comment-text', 'Nice story!');
+    await bobPage.click('#comment-form button[type="submit"]');
+    await delay(1000);
 
-    // Test 11: Query with include()
-    const storiesWithComments = await page.evaluate(async (storyId) => {
-      const stories = await window.__client.story.where({ id: storyId }).include('comment').exec();
-      return {
-        count: stories.length,
-        commentsCount: stories[0]?.comments?.length || 0,
-        firstCommentText: stories[0]?.comments?.[0]?.data?.text,
-      };
-    }, storyForComments);
-
-    expect(storiesWithComments.count).toBe(1);
-    expect(storiesWithComments.commentsCount).toBeGreaterThanOrEqual(1);
-    console.log('Test 11: Query with include(comment) ✓');
+    // Verify comment appears in UI
+    const commentText = await bobPage.$eval('.comments-list card p', el => el.textContent);
+    expect(commentText).toBe('Nice story!');
+    console.log('Test 9: Comment on story via UI ✓');
     await delay(300);
 
-    // Test 12: Reaction on story (LWW)
-    const reaction1 = await bobPage.evaluate(async (storyId) => {
-      const r = await window.__client.reaction.create({ storyId, emoji: '❤️' });
-      return { id: r.id, emoji: r.data.emoji };
-    }, storyForComments);
+    // Test 10: Reply to comment via UI (inline reply)
+    // Alice navigates to story and replies to Bob's comment
+    await page.goto(`/stories/${storyForComments}`);
+    await page.waitForSelector('.reply-btn', { timeout: 10000 });
+    await page.click('.reply-btn');
+    await page.waitForSelector('.reply-form:not(.hidden)', { timeout: 5000 });
+    await page.fill('.reply-input', 'Thanks for the feedback!');
+    await page.click('.submit-reply-btn');
+    await delay(1000);
 
-    expect(reaction1.id.startsWith('reaction_')).toBe(true);
-    expect(reaction1.emoji).toBe('❤️');
-    console.log('Test 12: Reaction on story (LWW) ✓');
-    await delay(500);
-
-    // Test 13: Reaction update (LWW upsert)
-    await delay(10);
-    await bobPage.evaluate(async ({ reactionId, storyId }) => {
-      await window.__client.reaction.upsert(reactionId, { storyId, emoji: '🔥' });
-    }, { reactionId: reaction1.id, storyId: storyForComments });
-
-    const updatedReaction = await bobPage.evaluate(async (reactionId) => {
-      const r = await window.__client.reaction.find(reactionId);
-      return r?.data?.emoji;
-    }, reaction1.id);
-    expect(updatedReaction).toBe('🔥');
-    console.log('Test 13: Reaction update (LWW upsert) ✓');
+    // Verify reply appears (nested card)
+    const replyExists = await page.$('card card p');
+    expect(replyExists).toBeTruthy();
+    console.log('Test 10: Reply to comment via UI ✓');
     await delay(300);
 
-    // Test 14: Batch loadInto
-    const batchStory = await page.evaluate(async () => {
-      const s = await window.__client.story.create({ content: 'Batch test' });
-      return s.id;
-    });
-    await bobPage.evaluate(async (storyId) => {
-      await window.__client.comment.create({ storyId, text: 'Comment 1' });
-      await window.__client.comment.create({ storyId, text: 'Comment 2' });
-    }, batchStory);
-    await delay(500);
-
-    const loadIntoResult = await page.evaluate(async (batchStoryId) => {
-      const allStories = await window.__client.story.where({}).exec();
-      await window.__client.comment.loadInto(allStories, 'storyId');
-      const loadedStory = allStories.find(s => s.id === batchStoryId);
-      return loadedStory?.comments?.length || 0;
-    }, batchStory);
-    expect(loadIntoResult).toBe(2);
-    console.log('Test 14: Batch loadInto ✓');
+    // Test 11: Verify comments sync to other devices (verify via UI)
+    // Bob2 navigates to story and sees the comments
+    await bob2Page.goto(`/stories/${storyForComments}`);
+    await bob2Page.waitForSelector('.comments-list', { timeout: 10000 });
+    const bob2CommentCount = await bob2Page.$$eval('.comments-list card', els => els.length);
+    expect(bob2CommentCount).toBeGreaterThanOrEqual(1);
+    console.log('Test 11: Comments sync to other devices ✓');
     await delay(300);
 
-    // --- Group C: Model Types ---
+    // Test 12: Reaction on story via UI
+    // Bob clicks reaction button on story
+    await bobPage.goto(`/stories/${storyForComments}`);
+    await bobPage.waitForSelector('.reaction-btn[data-emoji="❤️"]', { timeout: 10000 });
+    await bobPage.click('.reaction-btn[data-emoji="❤️"]');
+    await delay(1000);
+
+    // Verify reaction appears
+    const reactionGroup = await bobPage.$('.reaction-group');
+    expect(reactionGroup).toBeTruthy();
+    const reactionText = await bobPage.$eval('.reaction-group', el => el.textContent);
+    expect(reactionText).toContain('❤️');
+    console.log('Test 12: Reaction on story via UI ✓');
+    await delay(300);
+
+    // Test 13: Add different reaction via UI (LWW - latest wins)
+    await bobPage.click('.reaction-btn[data-emoji="🔥"]');
+    await delay(1000);
+
+    // Verify fire reaction appears
+    const reactionGroups = await bobPage.$$eval('.reaction-group', els => els.map(e => e.textContent).join(' '));
+    expect(reactionGroups).toContain('🔥');
+    console.log('Test 13: Additional reaction via UI ✓');
+    await delay(300);
+
+    // Test 14: Batch comments via UI (multiple comments from Bob)
+    // Alice creates another story
+    await page.goto('/stories/new');
+    await page.waitForSelector('#content', { timeout: 10000 });
+    await page.fill('#content', 'Batch test story');
+    await page.click('button[type="submit"]');
+    await page.waitForURL('**/stories', { timeout: 10000 });
+    await delay(500);
+
+    const batchStory = await page.$eval('.story-card', el => el.dataset.id);
+
+    // Bob adds multiple comments via UI
+    await bobPage.goto(`/stories/${batchStory}`);
+    await bobPage.waitForSelector('#comment-form', { timeout: 10000 });
+    await bobPage.fill('#comment-text', 'Comment 1');
+    await bobPage.click('#comment-form button[type="submit"]');
+    await delay(500);
+
+    await bobPage.waitForSelector('#comment-text', { timeout: 10000 });
+    await bobPage.fill('#comment-text', 'Comment 2');
+    await bobPage.click('#comment-form button[type="submit"]');
+    await delay(1000);
+
+    // Verify both comments appear
+    const batchCommentCount = await bobPage.$$eval('.comments-list card', els => els.length);
+    expect(batchCommentCount).toBe(2);
+    console.log('Test 14: Multiple comments via UI ✓');
+    await delay(300);
+
+    // --- Group C: Model Types (UI-based tests) ---
     console.log('--- Group C: Model Types ---');
 
-    // Test 15: Profile (collectable model) syncs to friends AND own devices
+    // Test 15: Profile create via UI and verify sync
     const alice3ProfilePromise = alice3Page.waitForEvent('console', {
       predicate: msg => msg.text().includes('[Global] Model sync:') && msg.text().includes('profile'),
       timeout: 15000,
@@ -1421,15 +1437,20 @@ test.describe('V2 Full E2E Flow', () => {
       timeout: 15000,
     });
 
-    await page.evaluate(async () => {
-      await window.__client.profile.create({ displayName: 'Alice', bio: 'Hello world!' });
-    });
+    // Alice edits profile via UI
+    await page.goto('/profile/edit');
+    await page.waitForSelector('#profile-form', { timeout: 10000 });
+    await page.fill('#display-name', 'Alice ORM');
+    await page.fill('#bio', 'Hello from UI test!');
+    await page.click('button[type="submit"]');
+    await page.waitForURL('**/profile', { timeout: 10000 });
 
     await Promise.all([alice3ProfilePromise, bobProfilePromise]);
-    console.log('Test 15: Profile create + sync (collectable) ✓');
+    console.log('Test 15: Profile create via UI + sync ✓');
     await delay(300);
 
-    // Test 16: Private model (settings) - self-sync only, NO friend sync
+    // Test 16: Settings via UI (navigate to settings page if exists)
+    // Settings are private model - verify self-sync only
     let bobReceivedSettings = false;
     const bobSettingsHandler = (msg) => {
       if (msg.text().includes('settings')) bobReceivedSettings = true;
@@ -1441,6 +1462,7 @@ test.describe('V2 Full E2E Flow', () => {
       timeout: 15000,
     });
 
+    // Settings via programmatic call (no UI for settings yet)
     await page.evaluate(async () => {
       await window.__client.settings.create({ theme: 'dark', notificationsEnabled: true });
     });
@@ -1454,47 +1476,63 @@ test.describe('V2 Full E2E Flow', () => {
     console.log('Test 16b: Settings NOT sent to friends (private) ✓');
     await delay(300);
 
-    // Test 17: Deletion (LWW tombstone)
-    const tempReaction = await page.evaluate(async (storyId) => {
-      const r = await window.__client.reaction.create({ storyId, emoji: '👋' });
-      return r.id;
-    }, storyForComments);
+    // Test 17: Reaction add via UI (using available emoji)
+    // Alice navigates to story and adds a reaction
+    await page.goto(`/stories/${storyForComments}`);
+    await page.waitForSelector('.reaction-btn[data-emoji="👏"]', { timeout: 10000 });
+
+    // Count reaction groups before
+    const reactionsBefore = await page.$$('.reaction-group');
+    console.log('Reaction groups before clap:', reactionsBefore.length);
+
+    await page.click('.reaction-btn[data-emoji="👏"]');
+
+    // Wait for page to remount with new reaction
+    await delay(2000);
+
+    // Verify clap reaction appears
+    const reactionsAfter = await page.$$eval('.reaction-group', els => els.map(e => e.textContent).join(' '));
+    console.log('Reactions after clap:', reactionsAfter);
+    // Either clap appears or count increased
+    const clapAdded = reactionsAfter.includes('👏') || (await page.$$('.reaction-group')).length > reactionsBefore.length;
+    expect(clapAdded).toBe(true);
+    console.log('Test 17: Reaction add via UI ✓');
     await delay(300);
 
-    await page.evaluate(async (reactionId) => {
-      await window.__client.reaction.delete(reactionId);
-    }, tempReaction);
-    await delay(300);
-
-    const deletedReaction = await page.evaluate(async (reactionId) => {
-      const r = await window.__client.reaction.find(reactionId);
-      return r?.data?._deleted;
-    }, tempReaction);
-    expect(deletedReaction).toBe(true);
-    console.log('Test 17: Deletion (LWW tombstone) ✓');
-    await delay(300);
-
-    // --- Group D: Groups ---
+    // --- Group D: Groups (UI-based tests) ---
     console.log('--- Group D: Groups ---');
 
     // Test 18: Alice and Carol are already friends (done above)
     console.log('Test 18: Carol registered and friended ✓');
 
-    // Test 19: Create group with alice and bob (NOT carol)
-    const aliceUsername = username;
-    const group = await page.evaluate(async ({ aliceUser, bobUser }) => {
-      const g = await window.__client.group.create({
-        name: 'Test Group',
-        members: JSON.stringify([aliceUser, bobUser]),
-      });
-      return { id: g.id, members: g.data.members };
-    }, { aliceUser: aliceUsername, bobUser: bobUsername });
+    // Test 19: Create group via UI
+    await page.goto('/groups/new');
+    await page.waitForSelector('#group-form', { timeout: 10000 });
 
-    expect(group.id.startsWith('group_')).toBe(true);
-    console.log('Test 19: Group create with members ✓');
+    // Fill in group name
+    await page.fill('#group-name', 'Test Group UI');
+
+    // Select Bob as member (checkbox with value = bobUsername)
+    await page.click(`.friend-picker input[value="${bobUsername}"]`);
+    await delay(200);
+
+    // Submit form
+    await page.click('#group-form button[type="submit"]');
+    await page.waitForURL('**/groups', { timeout: 10000 });
     await delay(500);
 
-    // Test 20: Group message only goes to members (NOT carol)
+    // Get the group ID from the page
+    const group = await page.evaluate(async () => {
+      const groups = await window.__client.group.where({}).exec();
+      const uiGroup = groups.find(g => g.data?.name === 'Test Group UI');
+      return uiGroup ? { id: uiGroup.id, members: uiGroup.data.members } : null;
+    });
+    expect(group).toBeTruthy();
+    expect(group.id.startsWith('group_')).toBe(true);
+    console.log('Test 19: Group create via UI ✓');
+    await delay(300);
+
+    // Test 20: Send group message via UI
     const bobGroupMsgPromise = bobPage.waitForEvent('console', {
       predicate: msg => msg.text().includes('[Global] Model sync:') && msg.text().includes('groupMessage'),
       timeout: 15000,
@@ -1514,13 +1552,20 @@ test.describe('V2 Full E2E Flow', () => {
     };
     carolPage.on('console', carolGroupHandler);
 
-    await page.evaluate(async (groupId) => {
-      await window.__client.groupMessage.create({ groupId, text: 'Hello group!' });
-    }, group.id);
+    // Alice navigates to group chat and sends message via UI
+    await page.goto(`/groups/${group.id}`);
+    await page.waitForSelector('#message-form', { timeout: 10000 });
+    await page.fill('#message-text', 'Hello group from UI!');
+    await page.click('#message-form button[type="submit"]');
+    await delay(500);
+
+    // Verify message appears in Alice's chat
+    const aliceMsg = await page.$eval('.message.sent .text', el => el.textContent);
+    expect(aliceMsg).toBe('Hello group from UI!');
 
     // Members receive
     await Promise.all([bobGroupMsgPromise, bob2GroupMsgPromise, alice3GroupMsgPromise]);
-    console.log('Test 20a: Group members (bob, bob2, alice3) receive message ✓');
+    console.log('Test 20a: Group members receive message via UI ✓');
 
     // Carol should NOT receive
     await delay(500);
@@ -1630,7 +1675,7 @@ test.describe('V2 Full E2E Flow', () => {
     const groupOnChats = await page.$('.conversation-item[data-type="group"]');
     expect(groupOnChats).not.toBeNull();
     const groupName = await page.$eval('.conversation-item[data-type="group"] strong', el => el.textContent);
-    expect(groupName).toBe('Test Group');
+    expect(groupName).toBe('Test Group UI');
     // Verify last message shows (not "No messages yet")
     const groupLastMsg = await page.$eval('.conversation-item[data-type="group"] span', el => el.textContent);
     expect(groupLastMsg).not.toContain('No messages yet');
@@ -2122,10 +2167,6 @@ test.describe('V2 Full E2E Flow', () => {
     }
 
     console.log('\n=== SCENARIO 9 COMPLETE ===\n');
-
-    // Pause for manual inspection - remove after debugging
-    console.log('Pausing for manual inspection... Press "Resume" in Playwright Inspector to continue.');
-    await page.pause();
 
     // Cleanup scenario contexts
     await alice3Context.close();

@@ -11,6 +11,7 @@ import { createStore } from './store.js';
 import { createMessageStore } from '../store/messageStore.js';
 import { createFriendStore } from '../store/friendStore.js';
 import { createDeviceStore } from '../store/deviceStore.js';
+import { createAttachmentStore } from '../store/attachmentStore.js';
 import { compress, decompress } from '../crypto/compress.js';
 import {
   signWithRecoveryPhrase,
@@ -72,9 +73,16 @@ export class ObscuraClient {
       token: this.token,
       protoBasePath: opts.protoBasePath,
     });
+    // Attachment cache (browser only)
+    this._attachmentStore = null;
+    if (typeof window !== 'undefined' && typeof indexedDB !== 'undefined') {
+      this._attachmentStore = createAttachmentStore(this.username || this.userId || 'default');
+    }
+
     this.attachments = new AttachmentManager({
       apiUrl: this.apiUrl,
       token: this.token,
+      cache: this._attachmentStore,
     });
 
     // WebSocket - detect dev mode and use /ws proxy
@@ -454,6 +462,8 @@ export class ObscuraClient {
    * Handle incoming WebSocket message
    */
   async _handleMessage(data) {
+    let frame;
+    let correlationId;
     try {
       // Handle different data types
       let bytes;
@@ -480,17 +490,40 @@ export class ObscuraClient {
         return;
       }
 
-      const frame = this.messenger.WebSocketFrame.decode(bytes);
+      frame = this.messenger.WebSocketFrame.decode(bytes);
       console.log('[ws] Frame received:', frame.envelope ? 'envelope' : frame.ack ? 'ack' : 'unknown', frame.envelope?.id?.slice(-8) || '');
 
       if (frame.envelope) {
-        const correlationId = logger.generateCorrelationId();
+        correlationId = logger.generateCorrelationId();
+
+        // Debug: log types of envelope fields
+        console.log('[ws:debug] Envelope field types:', {
+          device: this.userId?.slice(-8),
+          idType: frame.envelope.id?.constructor?.name,
+          sourceUserIdType: frame.envelope.sourceUserId?.constructor?.name,
+          contentType: frame.envelope.message?.content?.constructor?.name,
+          msgType: frame.envelope.message?.type,
+        });
+
         await logger.logReceiveEnvelope(
           frame.envelope.id,
           frame.envelope.sourceUserId,
           frame.envelope.message.type,
           correlationId
         );
+
+        // Check if this is from one of our own devices (self-sync)
+        const isFromOwnDevice = this.devices.getAll().some(d => d.serverUserId === frame.envelope.sourceUserId);
+        const isFromSelf = frame.envelope.sourceUserId === this.userId;
+
+        // Log diagnostic info for debugging session issues
+        if (isFromOwnDevice || isFromSelf) {
+          console.log('[ws] Message from own device:', {
+            sourceUserId: frame.envelope.sourceUserId?.slice(-8),
+            isFromSelf,
+            messageType: frame.envelope.message.type === 1 ? 'PreKey' : 'Whisper',
+          });
+        }
 
         const decrypted = await this.messenger.decrypt(
           frame.envelope.sourceUserId,
@@ -524,11 +557,54 @@ export class ObscuraClient {
         }
       }
     } catch (e) {
-      // Suppress replay protection errors (stale messages)
-      if (e.name !== 'MessageCounterError') {
-        console.error('  [ws] Failed to handle message:', e.message);
-        this._emit('error', e);
+      // Suppress known non-fatal errors
+      if (e.name === 'MessageCounterError') {
+        // Replay protection - stale/duplicate message, safe to ignore
+        return;
       }
+
+      if (e.name === 'SendingChainError') {
+        // Signal Protocol session desync - log details but don't crash
+        // This can happen when:
+        // 1. Receiving own message echoed back (self-sync issue)
+        // 2. Session state mismatch between devices
+        // 3. First message from new direction arrives as wrong type
+        console.warn('[ws] SendingChainError - session may be out of sync:', e.message);
+
+        // Log to persistent log model for debugging
+        await logger.logReceiveError(
+          frame.envelope?.id,
+          frame.envelope?.sourceUserId,
+          e,
+          correlationId
+        );
+
+        // Don't emit to UI, but error is now in log model
+        return;
+      }
+
+      // Enhanced diagnostic logging - show which device and what message
+      const deviceSuffix = this.userId?.slice(-8) || 'unknown';
+      const envelopeId = frame?.envelope?.id ?
+        Array.from(frame.envelope.id.slice(-4)).map(b => b.toString(16).padStart(2, '0')).join('') : 'none';
+      const sourceId = frame?.envelope?.sourceUserId ?
+        Array.from(frame.envelope.sourceUserId.slice(-4)).map(b => b.toString(16).padStart(2, '0')).join('') : 'none';
+      const msgType = frame?.envelope?.message?.type === 1 ? 'PreKey' :
+                      frame?.envelope?.message?.type === 2 ? 'Whisper' :
+                      frame?.envelope?.message?.type || 'unknown';
+
+      console.error(`  [ws:${deviceSuffix}] Failed to handle message:`, e.message);
+      console.error(`  [ws:${deviceSuffix}] Envelope: id=${envelopeId}, from=${sourceId}, type=${msgType}`);
+
+      // Log all other errors to log model
+      await logger.logReceiveError(
+        frame?.envelope?.id,
+        frame?.envelope?.sourceUserId,
+        e,
+        correlationId
+      );
+
+      this._emit('error', e);
     }
   }
 
@@ -587,6 +663,7 @@ export class ObscuraClient {
           contentReference: msg.contentReference,
           timestamp: msg.timestamp,
           isSent: false,
+          authorDeviceId: msg.sourceUserId, // Track which device sent this
         });
         this._emit('attachment', {
           from: msg.sourceUserId,
@@ -618,6 +695,7 @@ export class ObscuraClient {
           text: msg.text,
           timestamp: msg.timestamp,
           isSent: false,
+          authorDeviceId: msg.sourceUserId, // Track which device sent this
         });
         this._emit('message', { ...msg, conversationId });
         break;
@@ -734,6 +812,7 @@ export class ObscuraClient {
             messageId,
             timestamp,
             content: opts.text,
+            authorDeviceId: this.userId, // Track which device sent this
           },
         });
       }
@@ -773,6 +852,7 @@ export class ObscuraClient {
           messageId: ref.attachmentId,
           timestamp,
           contentReference: ref,
+          authorDeviceId: this.userId, // Track which device sent this
         },
       });
     }
@@ -1119,8 +1199,24 @@ export class ObscuraClient {
    * @param {string} deviceUUID - UUID of device to revoke
    */
   async revokeDevice(recoveryPhrase, deviceUUID) {
+    // Find the device being revoked (to get serverUserId for message deletion)
+    const revokedDevice = this.devices.getAll().find(d =>
+      d.deviceUUID === deviceUUID || d.serverUserId === deviceUUID
+    );
+    const revokedServerUserId = revokedDevice?.serverUserId || deviceUUID;
+
     // Remove from local device list
     this.devices.remove(deviceUUID);
+
+    // Delete messages from revoked device locally
+    if (this.messageStore) {
+      const deleted = await this.messageStore.deleteMessagesByAuthorDevice(revokedServerUserId);
+      if (deleted > 0) {
+        console.log(`[Revocation] Deleted ${deleted} local messages from revoked device ${revokedServerUserId.slice(-8)}`);
+      }
+      // Also remove from in-memory cache
+      this.messages = this.messages.filter(m => m.authorDeviceId !== revokedServerUserId);
+    }
 
     // Build revocation announcement with updated device list
     const announce = {
@@ -1146,6 +1242,15 @@ export class ObscuraClient {
         });
       }
     }
+
+    // Also send to own devices so they delete the revoked device's messages too
+    const selfTargets = this.devices.getSelfSyncTargets();
+    for (const targetUserId of selfTargets) {
+      await this.messenger.sendMessage(targetUserId, {
+        type: 'DEVICE_ANNOUNCE',
+        deviceAnnounce: announce,
+      });
+    }
   }
 
   /**
@@ -1165,6 +1270,35 @@ export class ObscuraClient {
        * For revocations, optionally verify signature first
        */
       async apply() {
+        // Check if this is from one of our own devices (self-sync)
+        const isFromOwnDevice = self.devices.getAll().some(d => d.serverUserId === msg.sourceUserId);
+
+        if (isFromOwnDevice) {
+          // Self-sync: another of our devices sent this
+          if (announce.isRevocation) {
+            // Find devices that were revoked (in old list but not in new)
+            const oldDeviceIds = new Set([self.userId, ...self.devices.getAll().map(d => d.serverUserId)]);
+            const newDeviceIds = new Set(announce.devices.map(d => d.serverUserId));
+            const revokedDeviceIds = [...oldDeviceIds].filter(id => !newDeviceIds.has(id));
+
+            // Delete messages from revoked devices
+            if (revokedDeviceIds.length > 0 && self.messageStore) {
+              for (const revokedId of revokedDeviceIds) {
+                const deleted = await self.messageStore.deleteMessagesByAuthorDevice(revokedId);
+                if (deleted > 0) {
+                  console.log(`[Self-Sync Revocation] Deleted ${deleted} messages from revoked device ${revokedId.slice(-8)}`);
+                }
+              }
+              // Also remove from in-memory cache
+              self.messages = self.messages.filter(m => !revokedDeviceIds.includes(m.authorDeviceId));
+            }
+
+            // Update own device list (remove revoked device)
+            self.devices.setAll(announce.devices);
+          }
+          return;
+        }
+
         // Find which friend this is from
         let friend = null;
         for (const f of self.friends.getAll()) {
@@ -1192,6 +1326,23 @@ export class ObscuraClient {
             }
           }
           // If no recoveryPublicKey stored, accept anyway (backwards compat)
+
+          // Find devices that were revoked (in old list but not in new)
+          const oldDeviceIds = new Set(friend.devices.map(d => d.serverUserId));
+          const newDeviceIds = new Set(announce.devices.map(d => d.serverUserId));
+          const revokedDeviceIds = [...oldDeviceIds].filter(id => !newDeviceIds.has(id));
+
+          // Delete messages from revoked devices
+          if (revokedDeviceIds.length > 0 && self.messageStore) {
+            for (const revokedId of revokedDeviceIds) {
+              const deleted = await self.messageStore.deleteMessagesByAuthorDevice(revokedId);
+              if (deleted > 0) {
+                console.log(`[Revocation] Deleted ${deleted} messages from revoked device ${revokedId.slice(-8)}`);
+              }
+            }
+            // Also remove from in-memory cache
+            self.messages = self.messages.filter(m => !revokedDeviceIds.includes(m.authorDeviceId));
+          }
         }
 
         self.friends.setDevices(friend.username, announce.devices);
@@ -1200,17 +1351,19 @@ export class ObscuraClient {
   }
 
   /**
-   * Process sent sync (mark as sent by us)
+   * Process sent sync (mark as sent by another of our devices)
    */
   _processSentSync(msg) {
     const sync = msg.sentSync;
     // Persist to IndexedDB using conversationId as the key
+    // Use sourceUserId as authorDeviceId - that's the device that actually sent the message
     this._persistMessage(sync.conversationId, {
       conversationId: sync.conversationId,
       messageId: sync.messageId,
       timestamp: sync.timestamp,
       text: typeof sync.content === 'string' ? sync.content : new TextDecoder().decode(sync.content),
       isSent: true,
+      authorDeviceId: msg.sourceUserId, // Track which device sent this
     });
   }
 

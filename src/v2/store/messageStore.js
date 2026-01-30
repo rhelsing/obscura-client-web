@@ -206,6 +206,25 @@ export function createMessageStore(userId) {
       const store = await getStore(STORES.MESSAGES, 'readwrite');
       return promisify(store.clear());
     },
+
+    /**
+     * Delete all messages from a specific device (for revocation)
+     * @param {string} authorDeviceId - The device's serverUserId
+     * @returns {Promise<number>} Number of messages deleted
+     */
+    async deleteMessagesByAuthorDevice(authorDeviceId) {
+      const messages = await this.getAllMessages();
+      const toDelete = messages.filter(m => m.authorDeviceId === authorDeviceId);
+
+      if (toDelete.length === 0) return 0;
+
+      const store = await getStore(STORES.MESSAGES, 'readwrite');
+      for (const msg of toDelete) {
+        await promisify(store.delete(msg.messageId));
+      }
+
+      return toDelete.length;
+    },
   };
 }
 

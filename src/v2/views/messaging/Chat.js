@@ -233,19 +233,22 @@ export async function mount(container, client, router, params) {
 
   form.addEventListener('submit', handleSubmit);
 
-  // Attachment button
-  attachBtn.addEventListener('click', () => {
-    fileInput.click();
-  });
-
-  // File selected
-  fileInput.addEventListener('change', async () => {
-    const file = fileInput.files[0];
-    if (!file) return;
+  // File select handler (used by attachListeners)
+  async function handleFileSelect(e) {
+    const input = e.target;
+    console.log('[Upload] Step 4: File input change event fired');
+    const file = input.files[0];
+    console.log('[Upload] Step 5: Got file:', file ? `${file.name} (${file.size} bytes)` : 'NO FILE');
+    if (!file) {
+      console.log('[Upload] ABORT: No file selected');
+      return;
+    }
 
     try {
+      console.log('[Upload] Step 6: Reading file as ArrayBuffer');
       const buffer = await file.arrayBuffer();
       const bytes = new Uint8Array(buffer);
+      console.log('[Upload] Step 7: File read complete:', bytes.length, 'bytes');
 
       // Convert to data URL for immediate display
       const blob = new Blob([bytes], { type: file.type || 'image/jpeg' });
@@ -254,6 +257,7 @@ export async function mount(container, client, router, params) {
         reader.onload = () => resolve(reader.result);
         reader.readAsDataURL(blob);
       });
+      console.log('[Upload] Step 8: Data URL created');
 
       const timestamp = Date.now();
       const msgIndex = messages.length;
@@ -268,9 +272,12 @@ export async function mount(container, client, router, params) {
       container.innerHTML = render({ username, displayName, messages, streakCount });
       scrollToBottom();
       attachListeners();
+      console.log('[Upload] Step 9: UI updated with optimistic image');
 
       // Send and get the contentReference back
+      console.log('[Upload] Step 10: Calling sendAttachment to', username);
       const ref = await client.sendAttachment(username, bytes);
+      console.log('[Upload] Step 11: sendAttachment returned:', ref?.attachmentId || 'NO REF');
 
       // Store to IndexedDB with contentReference for persistence
       if (ref && ref.attachmentId) {
@@ -282,14 +289,27 @@ export async function mount(container, client, router, params) {
           isSent: true,
           timestamp,
         });
+        console.log('[Upload] Step 12: Persisted to IndexedDB');
       }
 
+      console.log('[Upload] COMPLETE: Attachment sent successfully');
+
     } catch (err) {
+      console.error('[Upload] ERROR at step:', err.message);
       console.error('Failed to send attachment:', err);
     }
 
-    fileInput.value = '';
+    input.value = '';
+  }
+
+  // Initial attachment listeners (will be re-attached by attachListeners on re-render)
+  attachBtn.addEventListener('click', () => {
+    console.log('[Upload] Step 1: Attach button clicked');
+    console.log('[Upload] Step 2: Calling fileInput.click()');
+    fileInput.click();
+    console.log('[Upload] Step 3: fileInput.click() called - file dialog should open');
   });
+  fileInput.addEventListener('change', handleFileSelect);
 
   // Incoming messages
   const handleMessage = (msg) => {
@@ -406,6 +426,23 @@ export async function mount(container, client, router, params) {
     // Re-attach form listener after re-render
     const newForm = container.querySelector('#message-form');
     newForm.addEventListener('submit', handleSubmit);
+
+    // Re-attach attachment button and file input listeners
+    const newAttachBtn = container.querySelector('#attach-btn');
+    const newFileInput = container.querySelector('#file-input');
+
+    if (newAttachBtn) {
+      newAttachBtn.addEventListener('click', () => {
+        console.log('[Upload] Step 1: Attach button clicked');
+        console.log('[Upload] Step 2: Calling fileInput.click()');
+        newFileInput.click();
+        console.log('[Upload] Step 3: fileInput.click() called - file dialog should open');
+      });
+    }
+
+    if (newFileInput) {
+      newFileInput.addEventListener('change', handleFileSelect);
+    }
 
     // Download buttons
     container.querySelectorAll('.download-btn').forEach(btn => {

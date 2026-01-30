@@ -182,6 +182,9 @@ export class Messenger {
     const address = new SignalProtocolAddress(sourceUserId, 1);
     const cipher = new SessionCipher(this.store, address);
 
+    // Check if session exists
+    const hasSession = await this.store.loadSession(address.toString());
+
     let contentBuffer;
     if (content instanceof ArrayBuffer) {
       contentBuffer = content;
@@ -192,10 +195,33 @@ export class Messenger {
     }
 
     let decrypted;
-    if (messageType === PROTO_PREKEY_MESSAGE) {
-      decrypted = await cipher.decryptPreKeyWhisperMessage(contentBuffer, 'binary');
-    } else {
-      decrypted = await cipher.decryptWhisperMessage(contentBuffer, 'binary');
+    try {
+      if (messageType === PROTO_PREKEY_MESSAGE) {
+        console.log('[Messenger] Decrypting PreKey:', {
+          sourceUserId: sourceUserId?.slice(-8),
+          contentSize: contentBuffer?.byteLength,
+          hasSession: !!hasSession,
+        });
+        decrypted = await cipher.decryptPreKeyWhisperMessage(contentBuffer, 'binary');
+      } else {
+        decrypted = await cipher.decryptWhisperMessage(contentBuffer, 'binary');
+      }
+    } catch (e) {
+      // Add diagnostic info for sending chain errors
+      if (e.message?.includes('sending chain')) {
+        console.warn('[Messenger] Decrypt error - sending chain issue:', {
+          sourceUserId: sourceUserId?.slice(-8),
+          messageType: messageType === PROTO_PREKEY_MESSAGE ? 'PreKey' : 'Whisper',
+          hasSession: !!hasSession,
+          error: e.message,
+        });
+        // Re-throw with more context
+        const err = new Error(`Sending chain error from ${sourceUserId?.slice(-8)} (type=${messageType}, session=${!!hasSession})`);
+        err.name = 'SendingChainError';
+        err.originalError = e;
+        throw err;
+      }
+      throw e;
     }
 
     let bytes;

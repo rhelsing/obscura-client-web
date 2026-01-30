@@ -133,7 +133,8 @@ class LogStore {
     for (const [key, value] of Object.entries(data)) {
       if (value instanceof Uint8Array) {
         // Convert to base64, truncate if large
-        const base64 = btoa(String.fromCharCode(...value.slice(0, 256)));
+        // Use Array.from() instead of spread to avoid triggering protobuf/crypto library side effects
+        const base64 = btoa(String.fromCharCode.apply(null, Array.from(value.slice(0, 256))));
         sanitized[key] = {
           type: 'Uint8Array',
           length: value.length,
@@ -142,7 +143,7 @@ class LogStore {
         };
       } else if (value instanceof ArrayBuffer) {
         const arr = new Uint8Array(value);
-        const base64 = btoa(String.fromCharCode(...arr.slice(0, 256)));
+        const base64 = btoa(String.fromCharCode.apply(null, Array.from(arr.slice(0, 256))));
         sanitized[key] = {
           type: 'ArrayBuffer',
           length: arr.length,

@@ -14,6 +14,7 @@ export class AttachmentManager {
   constructor(opts = {}) {
     this.apiUrl = opts.apiUrl;
     this.token = opts.token;
+    this.cache = opts.cache || null; // Optional attachment cache (IndexedDB)
   }
 
   /**
@@ -65,6 +66,7 @@ export class AttachmentManager {
 
   /**
    * Download and decrypt an attachment
+   * Uses local cache if available, otherwise fetches from server and caches.
    *
    * @param {object} ref - ContentReference (or object with same fields)
    * @param {string} ref.attachmentId - Server attachment ID
@@ -74,9 +76,27 @@ export class AttachmentManager {
    * @returns {Promise<ArrayBuffer>} Decrypted content
    */
   async download(ref) {
-    const { attachmentId, contentKey, nonce, contentHash } = ref;
+    const { attachmentId, contentKey, nonce, contentHash, contentType, sizeBytes } = ref;
+
+    // Check cache first
+    if (this.cache) {
+      const cached = await this.cache.get(attachmentId);
+      if (cached) {
+        console.log('[Attachments] Cache hit:', attachmentId.slice(0, 8));
+        // Track cache action for tests (avoids race conditions with console listeners)
+        if (typeof window !== 'undefined') {
+          window.__lastCacheAction = { type: 'hit', id: attachmentId, timestamp: Date.now() };
+        }
+        return cached;
+      }
+    }
 
     // Fetch encrypted blob from server
+    console.log('[Attachments] Cache miss, fetching:', attachmentId.slice(0, 8));
+    // Track cache action for tests
+    if (typeof window !== 'undefined') {
+      window.__lastCacheAction = { type: 'miss', id: attachmentId, timestamp: Date.now() };
+    }
     const res = await fetch(`${this.apiUrl}/v1/attachments/${attachmentId}`, {
       headers: {
         'Authorization': `Bearer ${this.token}`,
@@ -91,6 +111,13 @@ export class AttachmentManager {
     const encryptedData = new Uint8Array(await res.arrayBuffer());
 
     // Decrypt and verify integrity
-    return decryptAttachment(encryptedData, contentKey, nonce, contentHash);
+    const decrypted = await decryptAttachment(encryptedData, contentKey, nonce, contentHash);
+
+    // Cache the decrypted content
+    if (this.cache) {
+      await this.cache.put(attachmentId, decrypted, { contentType, sizeBytes });
+    }
+
+    return decrypted;
   }
 }

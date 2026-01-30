@@ -306,6 +306,12 @@ async function main() {
       collectable: false,
       private: true,
     },
+    // TEST-ONLY: streak model for generic ORM machinery tests
+    streak: {
+      fields: { count: 'number', lastActivity: 'timestamp?' },
+      sync: 'lww',
+      collectable: true,
+    },
     profile: {
       fields: { displayName: 'string', avatarUrl: 'string?', bio: 'string?' },
       sync: 'lww',
@@ -782,6 +788,7 @@ async function main() {
   console.log(`\n${'='.repeat(50)}`);
   console.log('  ALL TESTS PASSED!');
   console.log(`${'='.repeat(50)}\n`);
+  process.exit(0);
 }
 
 main().catch(e => {

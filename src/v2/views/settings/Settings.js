@@ -53,6 +53,14 @@ export function render({ settings = null, loading = false, saving = false } = {}
                 </cluster>
               </a>
             </card>
+            <card>
+              <button id="request-sync" variant="ghost">
+                <cluster>
+                  <span>Request Full Sync</span>
+                  <ry-icon name="refresh-cw"></ry-icon>
+                </cluster>
+              </button>
+            </card>
           </stack>
         </section>
 
@@ -131,6 +139,28 @@ export async function mount(container, client, router) {
         } catch (err) {
           console.error('Failed to save settings:', err);
         }
+      }
+    });
+
+    // Request sync button
+    const requestSyncBtn = container.querySelector('#request-sync');
+    requestSyncBtn.addEventListener('click', async () => {
+      requestSyncBtn.disabled = true;
+      requestSyncBtn.querySelector('span').textContent = 'Requesting...';
+
+      try {
+        const count = await client.requestSync();
+        requestSyncBtn.querySelector('span').textContent = `Requested from ${count} device${count > 1 ? 's' : ''}`;
+        setTimeout(() => {
+          requestSyncBtn.querySelector('span').textContent = 'Request Full Sync';
+          requestSyncBtn.disabled = false;
+        }, 3000);
+      } catch (err) {
+        requestSyncBtn.querySelector('span').textContent = err.message;
+        setTimeout(() => {
+          requestSyncBtn.querySelector('span').textContent = 'Request Full Sync';
+          requestSyncBtn.disabled = false;
+        }, 3000);
       }
     });
 

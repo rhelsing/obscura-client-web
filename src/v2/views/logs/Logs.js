@@ -147,8 +147,14 @@ function renderEvent(event, expandedEvent) {
 
   const typeStr = event.eventType.replace(/_/g, ' ').toLowerCase();
 
+  // Extract proto message type if available
+  const protoType = event.data?.clientMessageType || event.data?.messageType || null;
+
   return `
     <card class="log-event ${isExpanded ? 'expanded' : ''}" data-id="${event.id}">
+      ${protoType ? `
+        <div style="font-family: monospace; font-weight: 600; font-size: var(--ry-text-base); color: var(--ry-color-text); margin-bottom: var(--ry-space-2)">${protoType}</div>
+      ` : ''}
       <cluster>
         <span class="log-dir ${direction}">${dirIcon}</span>
         <span style="font-family: monospace; color: var(--ry-color-text-muted); font-size: var(--ry-text-sm)">${timeStr}</span>
@@ -169,15 +175,23 @@ export async function mount(container, client, router) {
   let expandedEvent = null;
   let unsubscribe = null;
 
+  // Event types to hide
+  const hiddenTypes = new Set([
+    LogEventType.GATEWAY_CONNECT,
+    LogEventType.GATEWAY_DISCONNECT,
+  ]);
+
   // Load existing events from logger
   try {
-    events = await logger.getAllEvents(200);
+    const allEvents = await logger.getAllEvents(200);
+    events = allEvents.filter(e => !hiddenTypes.has(e.eventType));
   } catch (err) {
     console.warn('[Logs] Failed to load events:', err);
   }
 
   // Subscribe to new events
   unsubscribe = logger.onLog((event) => {
+    if (hiddenTypes.has(event.eventType)) return;
     events.unshift(event);
     if (events.length > 200) events.pop();
     rerender();

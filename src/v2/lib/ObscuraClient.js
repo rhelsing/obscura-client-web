@@ -563,6 +563,11 @@ export class ObscuraClient {
         this._emit('syncBlob', msg.syncBlob);
         break;
 
+      case 'SYNC_REQUEST':
+        // Another device is requesting a full sync - respond with SYNC_BLOB
+        this._handleSyncRequest(msg.sourceUserId);
+        break;
+
       case 'CONTENT_REFERENCE':
         // Persist attachment reference as a special message type
         this._persistMessage(msg.sourceUserId, {
@@ -860,6 +865,49 @@ export class ObscuraClient {
       });
     }
     return result;
+  }
+
+  /**
+   * Request full sync from other own devices
+   * Sends SYNC_REQUEST to all other linked devices
+   */
+  async requestSync() {
+    const selfTargets = this.devices.getSelfSyncTargets();
+    if (selfTargets.length === 0) {
+      throw new Error('No other devices to sync from');
+    }
+
+    for (const targetUserId of selfTargets) {
+      await this.messenger.sendMessage(targetUserId, {
+        type: 'SYNC_REQUEST',
+        timestamp: Date.now(),
+      });
+    }
+
+    return selfTargets.length;
+  }
+
+  /**
+   * Handle incoming SYNC_REQUEST - respond with SYNC_BLOB
+   */
+  async _handleSyncRequest(sourceUserId) {
+    try {
+      const syncData = {
+        friends: this._serializeFriends(),
+        messages: this.messageStore ? await this.messageStore.exportAll() : this.messages,
+        settings: {},
+      };
+      const compressedData = await compress(syncData);
+
+      await this.messenger.sendMessage(sourceUserId, {
+        type: 'SYNC_BLOB',
+        syncBlob: { compressedData },
+      });
+
+      console.log('[ObscuraClient] Sent SYNC_BLOB in response to SYNC_REQUEST');
+    } catch (e) {
+      console.error('[ObscuraClient] Failed to handle SYNC_REQUEST:', e.message);
+    }
   }
 
   /**

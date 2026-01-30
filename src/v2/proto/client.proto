@@ -65,6 +65,7 @@ message ClientMessage {
     SYNC_BLOB = 23;      // Full state transfer (gzipped JSON)
     SENT_SYNC = 24;      // Notify own devices of sent message
     CONTENT_REFERENCE = 25;  // E2E encrypted attachment key sharing
+    SYNC_REQUEST = 26;   // Request full sync from another device
 
     // ORM Layer (30-39)
     MODEL_SYNC = 30;     // CRDT model operation (create/update/delete)

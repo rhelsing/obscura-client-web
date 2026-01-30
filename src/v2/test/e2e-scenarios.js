@@ -16,6 +16,7 @@ import { generateFirstDeviceKeys, formatSignalKeysForServer, buildDeviceInfo } f
 import { generateLinkCode, parseLinkCode, validateLinkCode, buildLinkApproval, parseLinkApproval, verifyChallenge } from '../device/link.js';
 import { buildDeviceAnnounce, verifyDeviceAnnounce } from '../device/announce.js';
 import { verifyRecoveryPhrase, revokeDevice } from '../device/revoke.js';
+import { DeviceManager } from '../lib/devices.js';
 
 // Get API URL from environment
 const API_URL = process.env.VITE_API_URL || process.env.OBSCURA_API_URL;
@@ -229,6 +230,7 @@ async function scenario3_NewDeviceDetection(firstDevice) {
     // Generate link code for existing device to scan
     const linkCode = generateLinkCode({
       serverUserId: newDeviceUsername,
+      deviceUUID: newDeviceKeys.deviceUUID,
       signalIdentityKey: new Uint8Array(newDeviceKeys.signal.identityKeyPair.pubKey),
     });
     pass('Generate link code', `${linkCode.length} chars`);
@@ -319,29 +321,72 @@ async function scenario6_DeviceLinkApproval(firstDevice, newDevice) {
     }
     pass('Parse link code', parsed.serverUserId);
 
+    // Verify deviceUUID is in the link code (not just serverUserId fallback)
+    if (!parsed.deviceUUID) {
+      throw new Error('Link code missing deviceUUID');
+    }
+    if (parsed.deviceUUID === parsed.serverUserId && newDevice.newDeviceKeys.deviceUUID !== parsed.serverUserId) {
+      throw new Error('Link code deviceUUID is just serverUserId fallback - should be full UUID');
+    }
+    if (parsed.deviceUUID !== newDevice.newDeviceKeys.deviceUUID) {
+      throw new Error(`Link code deviceUUID mismatch: got ${parsed.deviceUUID}, expected ${newDevice.newDeviceKeys.deviceUUID}`);
+    }
+    pass('Link code includes full deviceUUID', parsed.deviceUUID.slice(0, 8));
+
     // Validate link code
     const validation = validateLinkCode(newDevice.linkCode);
     if (!validation.valid) throw new Error(validation.error);
     pass('Validate link code');
 
-    // Build link approval from existing device
+    // === BIDIRECTIONAL DEVICE LINKING TEST ===
+    // Simulate DeviceManager for existing device (first device)
+    const existingDeviceManager = new DeviceManager(firstDevice.deviceUsername);
+
+    // Build new device info
+    const newDeviceInfo = buildDeviceInfo(
+      newDevice.newDeviceKeys.deviceUUID,
+      newDevice.newDeviceUsername,
+      new Uint8Array(newDevice.newDeviceKeys.signal.identityKeyPair.pubKey)
+    );
+
+    // Add new device FIRST (before building approval) - this is the fix!
+    existingDeviceManager.add(newDeviceInfo);
+    pass('Existing device adds new device to list FIRST');
+
+    // Verify existing device now has new device in its list
+    const existingDeviceOthers = existingDeviceManager.getAll();
+    if (existingDeviceOthers.length !== 1) {
+      throw new Error(`Expected existing device to have 1 other device, got ${existingDeviceOthers.length}`);
+    }
+    if (existingDeviceOthers[0].serverUserId !== newDevice.newDeviceUsername) {
+      throw new Error('Existing device should see new device');
+    }
+    // Verify deviceUUID is stored correctly (not just serverUserId)
+    if (existingDeviceOthers[0].deviceUUID !== newDevice.newDeviceKeys.deviceUUID) {
+      throw new Error(`Existing device has wrong deviceUUID for new device: got ${existingDeviceOthers[0].deviceUUID}, expected ${newDevice.newDeviceKeys.deviceUUID}`);
+    }
+    pass('Existing device sees new device with correct deviceUUID');
+
+    // Build approval with FULL device list (includes both devices)
+    const existingDeviceInfo = buildDeviceInfo(
+      firstDevice.keys.deviceUUID,
+      firstDevice.deviceUsername,
+      new Uint8Array(firstDevice.keys.signal.identityKeyPair.pubKey)
+    );
+    const fullDeviceList = existingDeviceManager.buildFullList(existingDeviceInfo);
+
+    // Verify full list has BOTH devices
+    if (fullDeviceList.length !== 2) {
+      throw new Error(`Expected full device list to have 2 devices, got ${fullDeviceList.length}`);
+    }
+    pass('Full device list includes both devices', `${fullDeviceList.length} devices`);
+
     const approval = buildLinkApproval({
       p2pPublicKey: firstDevice.keys.p2pIdentity.publicKey,
       p2pPrivateKey: firstDevice.keys.p2pIdentity.privateKey,
       recoveryPublicKey: firstDevice.keys.recoveryKeypair.publicKey,
       challenge: parsed.challenge,
-      ownDevices: [
-        buildDeviceInfo(
-          firstDevice.keys.deviceUUID,
-          firstDevice.deviceUsername,
-          new Uint8Array(firstDevice.keys.signal.identityKeyPair.pubKey)
-        ),
-        buildDeviceInfo(
-          newDevice.newDeviceKeys.deviceUUID,
-          newDevice.newDeviceUsername,
-          new Uint8Array(newDevice.newDeviceKeys.signal.identityKeyPair.pubKey)
-        ),
-      ],
+      ownDevices: fullDeviceList,
       dbExport: { friends: [], sessions: [] },
     });
 
@@ -362,9 +407,37 @@ async function scenario6_DeviceLinkApproval(firstDevice, newDevice) {
     if (!challengeOk) throw new Error('Challenge verification failed');
     pass('Verify challenge response');
 
-    // Note: Actually sending via Signal session would require full session setup
-    // The functional units are verified - wiring to Signal is integration work
-    pass('Link approval flow complete (functional verification)');
+    // === NEW DEVICE APPLIES APPROVAL ===
+    // Simulate DeviceManager for new device
+    const newDeviceManager = new DeviceManager(newDevice.newDeviceUsername);
+
+    // Apply the received device list (what the new device does on approval.apply())
+    // Note: device/link.js uses deviceUUID (uppercase), real proto uses deviceUuid (lowercase)
+    // setAll handles both cases, so we test with lowercase to simulate real proto decoding
+    const protoStyleDevices = approval.ownDevices.map(d => ({
+      serverUserId: d.serverUserId,
+      deviceUuid: d.deviceUUID,  // Convert uppercase to lowercase (simulating proto decode)
+      deviceName: d.deviceName,
+      signalIdentityKey: d.signalIdentityKey,
+    }));
+    newDeviceManager.setAll(protoStyleDevices);
+
+    // Verify new device sees existing device (but NOT itself)
+    const newDeviceOthers = newDeviceManager.getAll();
+    if (newDeviceOthers.length !== 1) {
+      throw new Error(`Expected new device to have 1 other device, got ${newDeviceOthers.length}`);
+    }
+    if (newDeviceOthers[0].serverUserId !== firstDevice.deviceUsername) {
+      throw new Error(`New device should see existing device, got ${newDeviceOthers[0].serverUserId}`);
+    }
+    // Verify deviceUUID is stored correctly (not just serverUserId)
+    if (newDeviceOthers[0].deviceUUID !== firstDevice.keys.deviceUUID) {
+      throw new Error(`New device has wrong deviceUUID for existing device: got ${newDeviceOthers[0].deviceUUID}, expected ${firstDevice.keys.deviceUUID}`);
+    }
+    pass('New device sees existing device with correct deviceUUID');
+
+    // BIDIRECTIONAL VERIFICATION COMPLETE
+    pass('BIDIRECTIONAL device linking verified - both devices see each other!');
 
   } catch (e) {
     fail('Scenario 6: Device Link Approval', e);

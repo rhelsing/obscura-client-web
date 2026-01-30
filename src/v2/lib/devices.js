@@ -56,6 +56,7 @@ export class DeviceManager {
 
   /**
    * Add an own device (from DEVICE_LINK_APPROVAL)
+   * Handles both proto field name (deviceUuid) and JS convention (deviceUUID)
    * @param {object} device - { serverUserId, deviceUUID?, deviceName, signalIdentityKey? }
    */
   add(device) {
@@ -69,7 +70,8 @@ export class DeviceManager {
     if (!exists) {
       this.ownDevices.push({
         serverUserId: device.serverUserId,
-        deviceUUID: device.deviceUUID || device.serverUserId,
+        // Handle both proto (deviceUuid) and JS (deviceUUID) naming
+        deviceUUID: device.deviceUUID || device.deviceUuid || device.serverUserId,
         deviceName: device.deviceName || 'Unknown Device',
         signalIdentityKey: device.signalIdentityKey,
       });
@@ -80,6 +82,7 @@ export class DeviceManager {
 
   /**
    * Set all own devices (from DEVICE_LINK_APPROVAL)
+   * Handles both proto field name (deviceUuid) and JS convention (deviceUUID)
    * @param {Array} devices - Array of device info objects
    */
   setAll(devices) {
@@ -87,7 +90,8 @@ export class DeviceManager {
       .filter(d => d.serverUserId !== this.currentUserId)
       .map(d => ({
         serverUserId: d.serverUserId,
-        deviceUUID: d.deviceUUID || d.serverUserId,
+        // Handle both proto (deviceUuid) and JS (deviceUUID) naming
+        deviceUUID: d.deviceUUID || d.deviceUuid || d.serverUserId,
         deviceName: d.deviceName || 'Unknown Device',
         signalIdentityKey: d.signalIdentityKey,
       }));
@@ -161,7 +165,7 @@ export class DeviceManager {
 /**
  * Parse link code from another device
  * @param {string} linkCode - Base64 encoded link code
- * @returns {object} { userId, serverUserId, deviceUsername, signalIdentityKey, challenge, signature, expiresAt }
+ * @returns {object} { userId, serverUserId, deviceUUID, deviceUsername, signalIdentityKey, challenge, signature, expiresAt }
  */
 export function parseLinkCode(linkCode) {
   try {
@@ -169,7 +173,9 @@ export function parseLinkCode(linkCode) {
     return {
       userId: data.i,             // UUID for server API calls
       serverUserId: data.i,       // Alias for userId
+      deviceUUID: data.d || data.i, // Full device UUID (fallback to serverUserId for backwards compat)
       deviceUsername: data.u,     // Username for display
+      deviceName: data.u,         // Alias for display
       signalIdentityKey: base64ToUint8Array(data.k),
       challenge: base64ToUint8Array(data.c),
       signature: data.s ? base64ToUint8Array(data.s) : null,  // Signature proving ownership

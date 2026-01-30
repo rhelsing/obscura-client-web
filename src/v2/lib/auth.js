@@ -219,8 +219,9 @@ export async function login(username, password, opts = {}) {
 
   // Generate link code for existing device to scan
   // Use userId (UUID) for server communication, deviceUsername for display
+  // Include deviceUUID for complete device info on approving device
   // Sign the challenge with identity key for security
-  const linkCode = await generateLinkCode(userId, deviceUsername, identityKeyPair);
+  const linkCode = await generateLinkCode(userId, deviceUsername, deviceUUID, identityKeyPair);
 
   return {
     status: 'newDevice',
@@ -266,7 +267,7 @@ function parseUserId(token) {
 }
 
 // Helper: generate signed link code with expiry (base64 encoded)
-async function generateLinkCode(userId, deviceUsername, identityKeyPair) {
+async function generateLinkCode(userId, deviceUsername, deviceUUID, identityKeyPair) {
   const challenge = crypto.getRandomValues(new Uint8Array(16));
   const signature = await signLinkChallenge(challenge, identityKeyPair.privKey);
   const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes from now
@@ -274,6 +275,7 @@ async function generateLinkCode(userId, deviceUsername, identityKeyPair) {
   const data = {
     i: userId,         // UUID for server API calls
     u: deviceUsername, // Username for display
+    d: deviceUUID,     // Full device UUID for complete device info
     k: arrayBufferToBase64(identityKeyPair.pubKey),
     c: arrayBufferToBase64(challenge),
     s: arrayBufferToBase64(signature),  // Signature proves this device owns the key

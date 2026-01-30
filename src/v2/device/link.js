@@ -13,16 +13,18 @@ import { compress, decompress } from '../crypto/compress.js';
  *
  * @param {object} params
  * @param {string} params.serverUserId - Device's server username (e.g., "alice_def456")
+ * @param {string} params.deviceUUID - Full device UUID
  * @param {Uint8Array} params.signalIdentityKey - Device's Signal identity public key
  * @returns {string} Base58-encoded link code
  */
-export function generateLinkCode({ serverUserId, signalIdentityKey }) {
+export function generateLinkCode({ serverUserId, deviceUUID, signalIdentityKey }) {
   // Generate random challenge
   const challenge = new Uint8Array(16);
   crypto.getRandomValues(challenge);
 
   const linkData = {
     serverUserId,
+    deviceUUID: deviceUUID || serverUserId, // Include full UUID, fallback for backwards compat
     signalIdentityKey: uint8ArrayToBase64(signalIdentityKey),
     challenge: uint8ArrayToBase64(challenge),
     timestamp: Date.now(),
@@ -41,6 +43,8 @@ export function parseLinkCode(linkCode) {
 
   return {
     serverUserId: data.serverUserId,
+    deviceUUID: data.deviceUUID || data.serverUserId, // Fallback for backwards compat
+    deviceName: data.serverUserId, // Use serverUserId as display name
     signalIdentityKey: base64ToUint8Array(data.signalIdentityKey),
     challenge: base64ToUint8Array(data.challenge),
     timestamp: data.timestamp,

@@ -814,6 +814,16 @@ export class ObscuraClient {
       }
     }
 
+    // Add new device to our list FIRST so it's included in the approval
+    const newDeviceInfo = {
+      serverUserId: parsed.serverUserId,
+      deviceUUID: parsed.deviceUUID || parsed.serverUserId,
+      deviceName: parsed.deviceName || 'New Device',
+      signalIdentityKey: parsed.signalIdentityKey,
+    };
+    this.devices.add(newDeviceInfo);
+
+    // Build approval with full device list (now includes new device)
     const approval = buildLinkApproval({
       p2pPublicKey: this.p2pIdentity?.publicKey || new Uint8Array(32),
       recoveryPublicKey: this.recoveryPublicKey || new Uint8Array(32),
@@ -825,22 +835,38 @@ export class ObscuraClient {
       }),
     });
 
-    // Send approval first
+    // Send approval to new device
     await this.messenger.sendMessage(parsed.serverUserId, {
       type: 'DEVICE_LINK_APPROVAL',
       deviceLinkApproval: approval,
     });
 
-    // Add new device to our list
-    this.devices.add({
-      serverUserId: parsed.serverUserId,
-      signalIdentityKey: parsed.signalIdentityKey,
-    });
+    // Notify OTHER own devices about the new device (excluding new device we just sent to)
+    const otherDevices = this.devices.getAll().filter(d => d.serverUserId !== parsed.serverUserId);
+    if (otherDevices.length > 0) {
+      const deviceAnnounce = {
+        devices: this.devices.buildFullList(this.deviceInfo || {
+          serverUserId: this.userId,
+          deviceUUID: this.deviceUUID,
+          deviceName: this.username,
+        }),
+        timestamp: Date.now(),
+        isRevocation: false,
+        signature: new Uint8Array(64),
+      };
+      for (const device of otherDevices) {
+        await this.messenger.sendMessage(device.serverUserId, {
+          type: 'DEVICE_ANNOUNCE',
+          deviceAnnounce,
+        });
+      }
+    }
 
-    // Send SYNC_BLOB with full state
+    // Send SYNC_BLOB with full state (including ORM models)
     const syncData = {
       friends: this._serializeFriends(),
       messages: this.messageStore ? await this.messageStore.exportAll() : this.messages,
+      orm: await this._serializeOrmModels(),
       settings: {},
     };
     const compressedData = await compress(syncData);
@@ -868,6 +894,87 @@ export class ObscuraClient {
   }
 
   /**
+   * Serialize ORM models for sync
+   * Includes all models - pix are just metadata refs, not actual images
+   * Filters expired entries for ephemeral models (24h TTL)
+   * @returns {Promise<object>} Map of modelName -> entries array
+   */
+  async _serializeOrmModels() {
+    if (!this._ormModels) return {};
+
+    const result = {};
+    // Ephemeral models - filter out expired entries (24h default)
+    const ephemeralModels = ['story', 'comment', 'reaction'];
+    const now = Date.now();
+    const ttl24h = 24 * 60 * 60 * 1000;
+
+    for (const [name, model] of this._ormModels.entries()) {
+      try {
+        let entries = await model.crdt.getAll();
+
+        // Filter expired entries for ephemeral models
+        if (ephemeralModels.includes(name)) {
+          entries = entries.filter(entry => {
+            const age = now - (entry.timestamp || entry.createdAt || 0);
+            return age < ttl24h;
+          });
+        }
+
+        if (entries.length > 0) {
+          result[name] = entries;
+        }
+      } catch (e) {
+        console.warn(`[ObscuraClient] Failed to serialize ORM model ${name}:`, e.message);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Import ORM models from sync
+   * @param {object} ormData - Map of modelName -> entries array
+   */
+  async _importOrmModels(ormData) {
+    if (!this._ormModels || !ormData) return;
+
+    const ephemeralModels = ['story', 'comment', 'reaction'];
+    const now = Date.now();
+    const ttl24h = 24 * 60 * 60 * 1000;
+
+    for (const [name, entries] of Object.entries(ormData)) {
+      const model = this._ormModels.get(name);
+      if (!model) {
+        console.warn(`[ObscuraClient] Unknown ORM model in sync: ${name}`);
+        continue;
+      }
+
+      try {
+        // Merge entries via CRDT (handles conflicts automatically)
+        const merged = await model.crdt.merge(entries);
+
+        // Schedule TTLs for ephemeral models based on remaining time
+        if (ephemeralModels.includes(name) && model.ttlManager) {
+          for (const entry of entries) {
+            const timestamp = entry.timestamp || entry.createdAt || now;
+            const expiresAt = timestamp + ttl24h;
+            if (expiresAt > now) {
+              // Calculate remaining TTL in ms
+              const remaining = expiresAt - now;
+              const remainingStr = `${Math.ceil(remaining / 1000)}s`;
+              await model.ttlManager.schedule(name, entry.id, remainingStr);
+            }
+          }
+        }
+
+        console.log(`[ObscuraClient] Imported ${entries.length} ${name} entries`);
+      } catch (e) {
+        console.warn(`[ObscuraClient] Failed to import ORM model ${name}:`, e.message);
+      }
+    }
+  }
+
+  /**
    * Request full sync from other own devices
    * Sends SYNC_REQUEST to all other linked devices
    */
@@ -892,22 +999,33 @@ export class ObscuraClient {
    */
   async _handleSyncRequest(sourceUserId) {
     try {
-      const syncData = {
-        friends: this._serializeFriends(),
-        messages: this.messageStore ? await this.messageStore.exportAll() : this.messages,
-        settings: {},
-      };
-      const compressedData = await compress(syncData);
-
-      await this.messenger.sendMessage(sourceUserId, {
-        type: 'SYNC_BLOB',
-        syncBlob: { compressedData },
-      });
-
+      await this.pushHistoryToDevice(sourceUserId);
       console.log('[ObscuraClient] Sent SYNC_BLOB in response to SYNC_REQUEST');
     } catch (e) {
       console.error('[ObscuraClient] Failed to handle SYNC_REQUEST:', e.message);
     }
+  }
+
+  /**
+   * Push full history (friends, messages, ORM models, settings) to a specific device
+   * @param {string} serverUserId - The target device's serverUserId
+   */
+  async pushHistoryToDevice(serverUserId) {
+    const syncData = {
+      friends: this._serializeFriends(),
+      messages: this.messageStore ? await this.messageStore.exportAll() : this.messages,
+      orm: await this._serializeOrmModels(),
+      settings: {},
+    };
+    const compressedData = await compress(syncData);
+
+    await this.messenger.sendMessage(serverUserId, {
+      type: 'SYNC_BLOB',
+      syncBlob: { compressedData },
+    });
+
+    const ormModelCount = Object.keys(syncData.orm).length;
+    console.log(`[ObscuraClient] Pushed history to device: ${serverUserId} (${ormModelCount} ORM models)`);
   }
 
   /**
@@ -934,6 +1052,11 @@ export class ObscuraClient {
         }
         // Also update in-memory cache
         this.messages = [...this.messages, ...data.messages];
+      }
+
+      // Restore ORM models (profile, pixRegistry, settings, etc.)
+      if (data.orm) {
+        await this._importOrmModels(data.orm);
       }
 
       // Settings could be applied here

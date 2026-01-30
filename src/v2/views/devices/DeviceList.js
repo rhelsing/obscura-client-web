@@ -43,6 +43,7 @@ export function render({ devices = [], currentDeviceId = '', loading = false } =
                   <cluster>
                     <ry-icon name="settings"></ry-icon>
                     <span style="font-family: monospace; flex: 1">${d.deviceUUID.slice(0, 8)}...</span>
+                    <button size="sm" class="sync-btn" data-server-id="${d.serverUserId}">Push History</button>
                     <button variant="danger" size="sm" class="revoke-btn" data-device-id="${d.deviceUUID}">Revoke</button>
                   </cluster>
                 </card>
@@ -76,6 +77,30 @@ export async function mount(container, client, router) {
   container.innerHTML = render({
     devices,
     currentDeviceId: client.deviceUUID
+  });
+
+  // Push History buttons
+  container.querySelectorAll('.sync-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const serverId = btn.dataset.serverId;
+      btn.disabled = true;
+      btn.textContent = 'Pushing...';
+      try {
+        await client.pushHistoryToDevice(serverId);
+        btn.textContent = 'Done!';
+        setTimeout(() => {
+          btn.textContent = 'Push History';
+          btn.disabled = false;
+        }, 2000);
+      } catch (e) {
+        console.error('Failed to push history:', e);
+        btn.textContent = 'Failed';
+        setTimeout(() => {
+          btn.textContent = 'Push History';
+          btn.disabled = false;
+        }, 2000);
+      }
+    });
   });
 
   // Revoke buttons

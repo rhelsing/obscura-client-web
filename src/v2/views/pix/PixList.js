@@ -225,24 +225,37 @@ export async function mount(container, client, router) {
           streakEarnedAt = null;
         }
 
-        // Update PixRegistry if we have access
+        // Update PixRegistry only if data changed
         if (client.pixRegistry) {
           const regId = `pixreg_${username}`;
-          try {
-            await client.pixRegistry.upsert(regId, {
-              friendUsername: username,
-              unviewedCount: data.unviewedCount,
-              lastReceivedAt: data.lastReceivedAt || null,
-              totalReceived: data.receivedIn3Days,
-              sentPendingCount: data.sentCount - data.sentViewedCount,
-              lastSentAt: data.lastSentAt || null,
-              totalSent: data.sentIn3Days,
-              streakCount,
-              streakExpiry: streakCount > 0 ? now + THREE_DAYS_MS : null,
-              streakEarnedAt
-            });
-          } catch (err) {
-            console.warn('Failed to update pixRegistry:', err);
+          const newData = {
+            friendUsername: username,
+            unviewedCount: data.unviewedCount,
+            lastReceivedAt: data.lastReceivedAt || null,
+            totalReceived: data.receivedIn3Days,
+            sentPendingCount: data.sentCount - data.sentViewedCount,
+            lastSentAt: data.lastSentAt || null,
+            totalSent: data.sentIn3Days,
+            streakCount,
+            streakExpiry: streakCount > 0 ? now + THREE_DAYS_MS : null,
+            streakEarnedAt
+          };
+
+          // Compare to existing - only upsert if meaningful change
+          const existing = existingReg?.data;
+          const hasChanged = !existing ||
+            existing.unviewedCount !== newData.unviewedCount ||
+            existing.sentPendingCount !== newData.sentPendingCount ||
+            existing.streakCount !== newData.streakCount ||
+            existing.totalReceived !== newData.totalReceived ||
+            existing.totalSent !== newData.totalSent;
+
+          if (hasChanged) {
+            try {
+              await client.pixRegistry.upsert(regId, newData);
+            } catch (err) {
+              console.warn('Failed to update pixRegistry:', err);
+            }
           }
         }
 
@@ -304,15 +317,35 @@ export async function mount(container, client, router) {
 
   router.updatePageLinks();
 
-  // Listen for new pix - refresh list when pix arrives
+  // Listen for new pix - refresh list only when relevant to this user
   const onModelSync = async (event) => {
     if (event.model === 'pix') {
-      console.log('[PixList] New pix received, refreshing list');
-      // Small delay to ensure IndexedDB is updated
-      await new Promise(r => setTimeout(r, 100));
-      // Remove old listener before re-mounting
-      client.off('modelSync', onModelSync);
-      mount(container, client, router);
+      // Decode data from Uint8Array to check relevance
+      let pixData = {};
+      try {
+        if (event.data instanceof Uint8Array) {
+          pixData = JSON.parse(new TextDecoder().decode(event.data));
+        } else if (event.data) {
+          pixData = event.data;
+        }
+      } catch (e) {
+        // If we can't decode, refresh to be safe
+        pixData = {};
+      }
+
+      // Only refresh if this pix involves us (we're sender or recipient)
+      const isRelevant = !pixData.recipientUsername || !pixData.senderUsername ||
+                         pixData.recipientUsername === client.username ||
+                         pixData.senderUsername === client.username;
+
+      if (isRelevant) {
+        console.log('[PixList] Relevant pix sync, refreshing list');
+        // Small delay to ensure IndexedDB is updated
+        await new Promise(r => setTimeout(r, 100));
+        // Remove old listener before re-mounting
+        client.off('modelSync', onModelSync);
+        mount(container, client, router);
+      }
     }
   };
   client.on('modelSync', onModelSync);

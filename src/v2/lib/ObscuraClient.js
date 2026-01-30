@@ -504,13 +504,24 @@ export class ObscuraClient {
 
         await logger.logReceiveDecode(frame.envelope.sourceUserId, msg.type, correlationId);
 
-        this._routeMessage(msg);
+        await this._routeMessage(msg);
         this._acknowledge(frame.envelope.id);
 
         await logger.logReceiveComplete(frame.envelope.id, frame.envelope.sourceUserId, msg.type, correlationId);
 
         // Check and replenish prekeys (non-blocking)
         this._checkAndReplenishPrekeys().catch(() => {});
+      }
+
+      // Handle PreKeyStatus notifications (no ACK needed - PreKeyStatus has no ID)
+      if (frame.preKeyStatus) {
+        console.log('[ws] PreKeyStatus received:', frame.preKeyStatus.oneTimePreKeyCount, '/', frame.preKeyStatus.minThreshold);
+        // Replenish if below threshold
+        if (frame.preKeyStatus.oneTimePreKeyCount < frame.preKeyStatus.minThreshold) {
+          this._checkAndReplenishPrekeys().catch(e => {
+            console.error('[ws] Failed to replenish prekeys:', e.message);
+          });
+        }
       }
     } catch (e) {
       // Suppress replay protection errors (stale messages)
@@ -526,7 +537,7 @@ export class ObscuraClient {
    * This is the CENTRAL place where all incoming messages flow.
    * Persistence happens here (or in called methods) BEFORE ACK.
    */
-  _routeMessage(msg) {
+  async _routeMessage(msg) {
     // Log every incoming message
     console.log('[ws] Message:', msg.type, 'from:', msg.sourceUserId?.slice(-8) || 'unknown');
 
@@ -559,7 +570,7 @@ export class ObscuraClient {
         break;
 
       case 'SYNC_BLOB':
-        this._processSyncBlob(msg);
+        await this._processSyncBlob(msg);
         this._emit('syncBlob', msg.syncBlob);
         break;
 
@@ -585,23 +596,14 @@ export class ObscuraClient {
         break;
 
       case 'MODEL_SYNC':
-        // Route to ORM sync manager - wait for persistence before emitting event
+        // Route to ORM sync manager - await persistence before ACK
         if (this._ormSyncManager) {
-          this._ormSyncManager.handleIncoming(msg.modelSync, msg.sourceUserId)
-            .then(() => {
-              this._emit('modelSync', {
-                ...msg.modelSync,
-                sourceUserId: msg.sourceUserId,
-              });
-            })
-            .catch(e => console.error('MODEL_SYNC handling failed:', e.message));
-        } else {
-          // No ORM, emit immediately
-          this._emit('modelSync', {
-            ...msg.modelSync,
-            sourceUserId: msg.sourceUserId,
-          });
+          await this._ormSyncManager.handleIncoming(msg.modelSync, msg.sourceUserId);
         }
+        this._emit('modelSync', {
+          ...msg.modelSync,
+          sourceUserId: msg.sourceUserId,
+        });
         break;
 
       case 'TEXT':

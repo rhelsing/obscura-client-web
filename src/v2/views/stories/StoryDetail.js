@@ -29,11 +29,11 @@ export function render({ story = null, loading = false, error = null } = {}) {
         <a href="/stories" data-navigo class="back"><ry-icon name="chevron-left"></ry-icon> Back</a>
       </header>
 
-      <card>
-        <cluster>
+      <ry-card>
+        <ry-cluster>
           <strong>${story.authorName || 'Unknown'}</strong>
           <span style="color: var(--ry-color-text-muted)">${formatTime(story.timestamp)}</span>
-        </cluster>
+        </ry-cluster>
 
         <p style="margin: var(--ry-space-3) 0">${escapeHtml(story.data.content)}</p>
 
@@ -51,35 +51,35 @@ export function render({ story = null, loading = false, error = null } = {}) {
 
         <divider></divider>
 
-        <cluster>
+        <ry-cluster>
           ${formatReactionGroups(reactions) || '<span style="color: var(--ry-color-text-muted)">No reactions</span>'}
-        </cluster>
+        </ry-cluster>
 
-        <cluster class="reaction-picker">
+        <ry-cluster class="reaction-picker">
           ${['❤️', '🔥', '😂', '😮', '😢', '👏'].map(emoji => `
             <button variant="ghost" size="sm" class="reaction-btn" data-emoji="${emoji}">${emoji}</button>
           `).join('')}
-        </cluster>
-      </card>
+        </ry-cluster>
+      </ry-card>
 
-      <stack gap="md" class="comments-section" style="margin-top: var(--ry-space-4)">
+      <ry-stack gap="md" class="comments-section" style="margin-top: var(--ry-space-4)">
         <h2>Comments (${comments.length})</h2>
 
-        <stack gap="sm" class="comments-list">
+        <ry-stack gap="sm" class="comments-list">
           ${comments.length === 0 ? `
             <p style="color: var(--ry-color-text-muted)">No comments yet</p>
           ` : `
             ${renderComments(comments)}
           `}
-        </stack>
+        </ry-stack>
 
         <form id="comment-form">
-          <cluster>
+          <ry-cluster>
             <input type="text" id="comment-text" placeholder="Add a comment..." autocomplete="off" style="flex: 1" />
             <button type="submit">Post</button>
-          </cluster>
+          </ry-cluster>
         </form>
-      </stack>
+      </ry-stack>
     </div>
   `;
 }
@@ -204,22 +204,24 @@ function renderComments(comments, depth = 0) {
     : comments;
 
   return topLevel.map(c => `
-    <card style="margin-left: ${depth * 2}rem" data-comment-id="${c.id}">
-      <cluster>
-        <strong>${c.authorName || 'Unknown'}</strong>
-        <span style="color: var(--ry-color-text-muted); font-size: var(--ry-text-sm)">${formatTime(c.timestamp)}</span>
-      </cluster>
-      <p style="margin: var(--ry-space-2) 0">${escapeHtml(c.data?.text)}</p>
-      <button variant="ghost" size="sm" class="reply-btn" data-comment-id="${c.id}">Reply</button>
-      <div class="reply-form hidden" data-for="${c.id}">
-        <cluster style="margin-top: 8px">
-          <input type="text" class="reply-input" placeholder="Write a reply..." style="flex: 1" />
-          <button class="submit-reply-btn" size="sm">Send</button>
-          <button class="cancel-reply-btn" variant="ghost" size="sm">✕</button>
-        </cluster>
-      </div>
+    <ry-card style="margin-left: ${depth * 2}rem" data-comment-id="${c.id}">
+      <ry-stack>
+        <ry-cluster>
+          <strong>${c.authorName || 'Unknown'}</strong>
+          <span style="color: var(--ry-color-text-muted); font-size: var(--ry-text-sm)">${formatTime(c.timestamp)}</span>
+        </ry-cluster>
+        <p style="margin: var(--ry-space-2) 0">${escapeHtml(c.data?.text)}</p>
+        <button variant="ghost" size="sm" class="reply-btn" data-comment-id="${c.id}">Reply</button>
+        <div class="reply-form hidden" data-for="${c.id}">
+          <ry-cluster style="margin-top: 8px">
+            <input type="text" class="reply-input" placeholder="Write a reply..." style="flex: 1" />
+            <button class="submit-reply-btn" size="sm">Send</button>
+            <button class="cancel-reply-btn" variant="ghost" size="sm">✕</button>
+          </ry-cluster>
+        </div>
+      </ry-stack>
       ${c.replies?.length ? renderComments(c.replies, depth + 1) : ''}
-    </card>
+    </ry-card>
   `).join('');
 }
 

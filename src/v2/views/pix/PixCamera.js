@@ -207,6 +207,8 @@ export async function mount(container, client, router) {
         startCamera();
       });
     }
+
+    router.updatePageLinks();
   }
 
   function attachPreviewListeners() {
@@ -298,7 +300,6 @@ export async function mount(container, client, router) {
 
   // Initial render
   renderCameraMode();
-  router.updatePageLinks();
 
   cleanup = () => {
     isCleanedUp = true;

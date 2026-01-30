@@ -219,6 +219,7 @@ export async function mount(container, client, router, params) {
     });
     container.innerHTML = render({ username, displayName, messages, streakCount });
     scrollToBottom();
+    attachListeners();
 
     try {
       await client.send(username, { text });

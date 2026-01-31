@@ -65,10 +65,15 @@ export async function mount(container, client, router, params) {
 
     if (client.profile) {
       if (isOwn) {
-        // Get own profile
-        profile = await client.profile.where({
-          authorDeviceId: client.deviceUUID
-        }).first();
+        // Get own profile from any of our devices (take most recent)
+        const ownDeviceIds = [
+          client.deviceUUID,
+          ...client.devices.getAll().map(d => d.deviceUUID || d.serverUserId)
+        ];
+        const allProfiles = await client.profile.where({}).exec();
+        profile = allProfiles
+          .filter(p => ownDeviceIds.includes(p.authorDeviceId))
+          .sort((a, b) => b.timestamp - a.timestamp)[0] || null;
       } else {
         // Get friend's profile - would need to query by username or userId
         // For now, show placeholder

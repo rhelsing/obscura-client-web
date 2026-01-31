@@ -71,9 +71,15 @@ export async function mount(container, client, router) {
 
   try {
     if (client.profile) {
-      profile = await client.profile.where({
-        authorDeviceId: client.deviceUUID
-      }).first();
+      // Get own profile from any of our devices (take most recent)
+      const ownDeviceIds = [
+        client.deviceUUID,
+        ...client.devices.getAll().map(d => d.deviceUUID || d.serverUserId)
+      ];
+      const allProfiles = await client.profile.where({}).exec();
+      profile = allProfiles
+        .filter(p => ownDeviceIds.includes(p.authorDeviceId))
+        .sort((a, b) => b.timestamp - a.timestamp)[0] || null;
 
       if (profile) {
         profileId = profile.id;

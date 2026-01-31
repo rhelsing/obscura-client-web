@@ -356,15 +356,26 @@ test.describe('Scenario 5b: Cross-User Device Linking', () => {
     // Profile might be stored differently, check if exists
     console.log('Bob2 profile data:', bob2Profile);
 
-    // Verify 5: Stories synced
-    console.log('--- Verify 5: Stories synced ---');
+    // Verify 5: Stories synced AND DISPLAYED
+    console.log('--- Verify 5: Stories synced and displayed ---');
+
+    // First verify data is in store
     const bob2Stories = await bob2Page.evaluate(async () => {
       const stories = await window.__client.story.where({}).exec();
       return stories.map(s => s.data.content);
     });
     expect(bob2Stories).toContain("Bob's first story");
     expect(bob2Stories).toContain("Alice2's story");
-    console.log(`Bob2 stories: ${bob2Stories.join(', ')}`);
+    console.log(`Bob2 stories in store: ${bob2Stories.join(', ')}`);
+
+    // Now verify stories are DISPLAYED on the page
+    await bob2Page.waitForSelector('.story-card', { timeout: 5000 });
+    const displayedStories = await bob2Page.$$eval('.story-card p', els =>
+      els.map(el => el.textContent)
+    );
+    expect(displayedStories).toContain("Bob's first story");
+    expect(displayedStories).toContain("Alice2's story");
+    console.log(`Bob2 stories displayed: ${displayedStories.join(', ')}`);
 
     console.log('\n=== SCENARIO 5b COMPLETE ===\n');
 

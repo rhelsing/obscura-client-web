@@ -135,6 +135,18 @@ export $(cat .env | xargs) && npm run test:e2e
 source .env && node test/smoke/test-keys.js
 ```
 
+### Testing Against Local Server
+
+See [obscura-server/LOCAL_DEV_MACOS.md](https://github.com/barrelmaker97/obscura-server) for server setup.
+
+```bash
+# Start local server (port 3000), then:
+VITE_API_URL=http://localhost:3000 npx playwright test --headed
+
+# Or a specific scenario:
+VITE_API_URL=http://localhost:3000 npx playwright test test/browser/scenario-6.spec.js --headed
+```
+
 ## Tech Stack
 
 - [Vite](https://vitejs.dev/) - Build tool

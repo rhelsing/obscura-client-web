@@ -4,6 +4,8 @@
  * Now with IndexedDB persistence via deviceStore
  */
 
+import { logger } from './logger.js';
+
 export class DeviceManager {
   constructor(currentUserId, store = null) {
     this.currentUserId = currentUserId;
@@ -68,15 +70,18 @@ export class DeviceManager {
     // Don't add duplicates
     const exists = this.ownDevices.some(d => d.serverUserId === device.serverUserId);
     if (!exists) {
+      const deviceUUID = device.deviceUUID || device.deviceUuid || device.serverUserId;
+      const deviceName = device.deviceName || 'Unknown Device';
       this.ownDevices.push({
         serverUserId: device.serverUserId,
         // Handle both proto (deviceUuid) and JS (deviceUUID) naming
-        deviceUUID: device.deviceUUID || device.deviceUuid || device.serverUserId,
-        deviceName: device.deviceName || 'Unknown Device',
+        deviceUUID,
+        deviceName,
         signalIdentityKey: device.signalIdentityKey,
       });
       // Persist to IndexedDB
       this._persistDevices();
+      logger.logDeviceAdd(device.serverUserId, deviceName, deviceUUID);
     }
   }
 
@@ -97,6 +102,7 @@ export class DeviceManager {
       }));
     // Persist to IndexedDB
     this._persistDevices();
+    logger.logDeviceAnnounce(this.ownDevices.length, false, null);
   }
 
   /**
@@ -120,11 +126,17 @@ export class DeviceManager {
    * @param {string} idOrUUID - serverUserId or deviceUUID
    */
   remove(idOrUUID) {
+    const removed = this.ownDevices.find(d =>
+      d.serverUserId === idOrUUID || d.deviceUUID === idOrUUID
+    );
     this.ownDevices = this.ownDevices.filter(d =>
       d.serverUserId !== idOrUUID && d.deviceUUID !== idOrUUID
     );
     // Persist to IndexedDB
     this._persistDevices();
+    if (removed) {
+      logger.logDeviceRemove(removed.serverUserId, removed.deviceUUID);
+    }
   }
 
   /**

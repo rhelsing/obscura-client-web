@@ -285,9 +285,6 @@ function setupGlobalEventHandlers() {
 
   client.on('reconnect', () => {
     console.log('[Global] Reconnected to server');
-    if (typeof RyToast !== 'undefined') {
-      RyToast.success('Reconnected');
-    }
   });
 
   client.on('error', (err) => {

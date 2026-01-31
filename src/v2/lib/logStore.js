@@ -36,6 +36,52 @@ export const LogEventType = {
   GATEWAY_CONNECT: 'gateway_connect',
   GATEWAY_DISCONNECT: 'gateway_disconnect',
   GATEWAY_ACK: 'gateway_ack',
+
+  // Keys & Crypto
+  PREKEY_FETCH: 'prekey_fetch',
+  PREKEY_FETCH_ERROR: 'prekey_fetch_error',
+  PREKEY_REPLENISH: 'prekey_replenish',
+  PREKEY_REPLENISH_ERROR: 'prekey_replenish_error',
+  ENCRYPT_ERROR: 'encrypt_error',
+  DECRYPT_ERROR: 'decrypt_error',
+
+  // Friends
+  FRIEND_REQUEST_SENT: 'friend_request_sent',
+  FRIEND_REQUEST_RECEIVED: 'friend_request_received',
+  FRIEND_ACCEPT: 'friend_accept',
+  FRIEND_REJECT: 'friend_reject',
+  FRIEND_REMOVE: 'friend_remove',
+
+  // Devices
+  DEVICE_ADD: 'device_add',
+  DEVICE_REMOVE: 'device_remove',
+  DEVICE_LINK_START: 'device_link_start',
+  DEVICE_LINK_APPROVE: 'device_link_approve',
+  DEVICE_ANNOUNCE: 'device_announce',
+  DEVICE_REVOKE: 'device_revoke',
+
+  // Attachments
+  ATTACHMENT_UPLOAD: 'attachment_upload',
+  ATTACHMENT_UPLOAD_ERROR: 'attachment_upload_error',
+  ATTACHMENT_DOWNLOAD: 'attachment_download',
+  ATTACHMENT_DOWNLOAD_ERROR: 'attachment_download_error',
+  ATTACHMENT_CACHE_HIT: 'attachment_cache_hit',
+
+  // Storage
+  STORAGE_ERROR: 'storage_error',
+  MESSAGE_PERSIST: 'message_persist',
+  MESSAGE_PERSIST_ERROR: 'message_persist_error',
+
+  // ORM Sync
+  ORM_SYNC_SEND: 'orm_sync_send',
+  ORM_SYNC_RECEIVE: 'orm_sync_receive',
+  ORM_SYNC_ERROR: 'orm_sync_error',
+  SYNC_BLOB_SEND: 'sync_blob_send',
+  SYNC_BLOB_RECEIVE: 'sync_blob_receive',
+
+  // TTL Cleanup
+  TTL_CLEANUP: 'ttl_cleanup',
+  TTL_CLEANUP_ERROR: 'ttl_cleanup_error',
 };
 
 class LogStore {

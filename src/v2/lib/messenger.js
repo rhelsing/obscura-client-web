@@ -4,6 +4,7 @@
  */
 
 import { SessionBuilder, SessionCipher, SignalProtocolAddress } from '@privacyresearch/libsignal-protocol-typescript';
+import { logger } from './logger.js';
 
 // Signal message type constants
 const SIGNAL_PREKEY_MESSAGE = 3;
@@ -100,15 +101,24 @@ export class Messenger {
    * Fetch pre-key bundle for a user
    */
   async fetchPreKeyBundle(userId) {
-    const res = await fetch(`${this.apiUrl}/v1/keys/${userId}`, {
-      headers: { 'Authorization': `Bearer ${this.token}` },
-    });
+    let res;
+    try {
+      res = await fetch(`${this.apiUrl}/v1/keys/${userId}`, {
+        headers: { 'Authorization': `Bearer ${this.token}` },
+      });
+    } catch (e) {
+      await logger.logPrekeyFetchError(userId, e, null);
+      throw e;
+    }
 
     if (!res.ok) {
-      throw new Error(`Failed to fetch keys for ${userId}: ${res.status}`);
+      const error = new Error(`Failed to fetch keys for ${userId}: ${res.status}`);
+      await logger.logPrekeyFetchError(userId, error, res.status);
+      throw error;
     }
 
     const bundle = await res.json();
+    await logger.logPrekeyFetch(userId, !!bundle.preKey, bundle.registrationId);
 
     return {
       identityKey: toArrayBuffer(bundle.identityKey),
@@ -136,6 +146,7 @@ export class Messenger {
       const bundle = await this.fetchPreKeyBundle(targetUserId);
       const sessionBuilder = new SessionBuilder(this.store, address);
       await sessionBuilder.processPreKey(bundle);
+      await logger.logSessionEstablish(targetUserId, !!bundle.preKey);
     }
 
     const cipher = new SessionCipher(this.store, address);
@@ -209,9 +220,11 @@ export class Messenger {
     } catch (e) {
       // Add diagnostic info for sending chain errors
       if (e.message?.includes('sending chain')) {
+        const msgTypeName = messageType === PROTO_PREKEY_MESSAGE ? 'PreKey' : 'Whisper';
+        await logger.logDecryptError(sourceUserId, e, msgTypeName, true);
         console.warn('[Messenger] Decrypt error - sending chain issue:', {
           sourceUserId: sourceUserId?.slice(-8),
-          messageType: messageType === PROTO_PREKEY_MESSAGE ? 'PreKey' : 'Whisper',
+          messageType: msgTypeName,
           hasSession: !!hasSession,
           error: e.message,
         });
@@ -221,6 +234,9 @@ export class Messenger {
         err.originalError = e;
         throw err;
       }
+      // Log other decrypt errors too
+      const msgTypeName = messageType === PROTO_PREKEY_MESSAGE ? 'PreKey' : 'Whisper';
+      await logger.logDecryptError(sourceUserId, e, msgTypeName, false);
       throw e;
     }
 

@@ -5,6 +5,7 @@
  */
 
 import { generateVerifyCode } from '../crypto/signatures.js';
+import { logger } from './logger.js';
 
 export class FriendManager {
   constructor(store = null) {
@@ -116,6 +117,11 @@ export class FriendManager {
     });
     // Persist to IndexedDB (fire-and-forget but logged)
     this._persistFriend(username);
+
+    // Log friend status changes (fire-and-forget, don't block)
+    if (status === 'pending_outgoing') {
+      logger.logFriendRequestSent(username, finalDevices.length).catch(() => {});
+    }
   }
 
   /**
@@ -222,6 +228,7 @@ export class FriendManager {
   remove(username) {
     this._removeFriendFromStore(username);
     this.friends.delete(username);
+    logger.logFriendRemove(username).catch(() => {});
   }
 
   /**
@@ -259,6 +266,7 @@ export class FriendManager {
     const senderIdentityKey = senderDevices[0]?.signalIdentityKey;
 
     this.store(senderUsername, senderDevices, 'pending_incoming');
+    logger.logFriendRequestReceived(senderUsername, msg.sourceUserId, senderDevices.length).catch(() => {});
 
     const self = this;
     return {
@@ -277,12 +285,13 @@ export class FriendManager {
 
       async accept() {
         self.store(senderUsername, senderDevices, 'accepted');
-        // Send response will be handled by ObscuraClient
+        // Send response - logging happens in ObscuraClient._sendFriendResponse
         return sendFn(senderDevices[0]?.serverUserId, senderUsername, true);
       },
 
       async reject() {
         self.remove(senderUsername);
+        // Send response - logging happens in ObscuraClient._sendFriendResponse
         return sendFn(senderDevices[0]?.serverUserId, senderUsername, false);
       },
     };

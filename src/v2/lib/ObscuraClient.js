@@ -415,6 +415,7 @@ export class ObscuraClient {
         // Run TTL cleanup on connect (non-blocking)
         this._runTTLCleanup().catch(e => {
           console.warn('[ObscuraClient] TTL cleanup failed:', e.message);
+          logger.logTtlCleanupError('all', e);
         });
 
         resolve();
@@ -506,8 +507,10 @@ export class ObscuraClient {
         await store.removeTTL(modelName, id);
 
         console.log(`[ObscuraClient] Cleaned up expired ${modelName}: ${id}`);
+        await logger.logTtlCleanup(modelName, 1);
       } catch (e) {
         console.warn(`[ObscuraClient] Failed to cleanup ${modelName}/${id}:`, e.message);
+        await logger.logTtlCleanupError(modelName, e);
       }
     }
 
@@ -538,8 +541,10 @@ export class ObscuraClient {
             }
             await store.removeTTL('story', story.id);
             console.log(`[ObscuraClient] Cleaned up old story: ${story.id}`);
+            await logger.logTtlCleanup('story', 1);
           } catch (e) {
             console.warn(`[ObscuraClient] Failed to cleanup story ${story.id}:`, e.message);
+            await logger.logTtlCleanupError('story', e);
           }
         }
       }
@@ -887,6 +892,13 @@ export class ObscuraClient {
       accepted,
       deviceAnnounce: myDeviceAnnounce,
     });
+
+    // Log friend accept/reject AFTER the message is sent
+    if (accepted) {
+      await logger.logFriendAccept(username);
+    } else {
+      await logger.logFriendReject(username);
+    }
   }
 
   /**
@@ -1135,6 +1147,7 @@ export class ObscuraClient {
         }
       } catch (e) {
         console.warn(`[ObscuraClient] Failed to serialize ORM model ${name}:`, e.message);
+        await logger.logOrmSyncError(name, e, 'serialize');
       }
     }
 
@@ -1156,6 +1169,7 @@ export class ObscuraClient {
       const model = this._ormModels.get(name);
       if (!model) {
         console.warn(`[ObscuraClient] Unknown ORM model in sync: ${name}`);
+        await logger.logOrmSyncError(name, new Error('Unknown model'), 'import');
         continue;
       }
 
@@ -1178,8 +1192,10 @@ export class ObscuraClient {
         }
 
         console.log(`[ObscuraClient] Imported ${entries.length} ${name} entries`);
+        await logger.logOrmSyncReceive(name, null, 'import', entries.length);
       } catch (e) {
         console.warn(`[ObscuraClient] Failed to import ORM model ${name}:`, e.message);
+        await logger.logOrmSyncError(name, e, 'import');
       }
     }
   }
@@ -1213,6 +1229,7 @@ export class ObscuraClient {
       console.log('[ObscuraClient] Sent SYNC_BLOB in response to SYNC_REQUEST');
     } catch (e) {
       console.error('[ObscuraClient] Failed to handle SYNC_REQUEST:', e.message);
+      await logger.logOrmSyncError('sync_request', e, 'send');
     }
   }
 
@@ -1236,6 +1253,7 @@ export class ObscuraClient {
 
     const ormModelCount = Object.keys(syncData.orm).length;
     console.log(`[ObscuraClient] Pushed history to device: ${serverUserId} (${ormModelCount} ORM models)`);
+    await logger.logSyncBlobSend(serverUserId, ormModelCount, compressedData.byteLength || compressedData.length);
   }
 
   /**
@@ -1270,8 +1288,11 @@ export class ObscuraClient {
       }
 
       // Settings could be applied here
+      const modelCount = data.orm ? Object.keys(data.orm).length : 0;
+      await logger.logSyncBlobReceive(msg.sourceUserId, modelCount);
     } catch (e) {
       console.error('Failed to process SYNC_BLOB:', e.message);
+      await logger.logOrmSyncError('sync_blob', e, 'receive');
     }
   }
 
@@ -1341,6 +1362,7 @@ export class ObscuraClient {
       const deleted = await this.messageStore.deleteMessagesByAuthorDevice(revokedServerUserId);
       if (deleted > 0) {
         console.log(`[Revocation] Deleted ${deleted} local messages from revoked device ${revokedServerUserId.slice(-8)}`);
+        await logger.logDeviceRevoke(revokedServerUserId, deleted);
       }
       // Also remove from in-memory cache
       this.messages = this.messages.filter(m => m.authorDeviceId !== revokedServerUserId);
@@ -1415,6 +1437,7 @@ export class ObscuraClient {
                 const deleted = await self.messageStore.deleteMessagesByAuthorDevice(revokedId);
                 if (deleted > 0) {
                   console.log(`[Self-Sync Revocation] Deleted ${deleted} messages from revoked device ${revokedId.slice(-8)}`);
+                  await logger.logDeviceRevoke(revokedId, deleted);
                 }
               }
               // Also remove from in-memory cache
@@ -1450,6 +1473,7 @@ export class ObscuraClient {
             );
             if (!valid) {
               console.warn(`Invalid revocation signature from ${friend.username}, ignoring`);
+              await logger.logOrmSyncError('revocation', new Error(`Invalid signature from ${friend.username}`), 'receive');
               return;
             }
           }
@@ -1466,12 +1490,16 @@ export class ObscuraClient {
               const deleted = await self.messageStore.deleteMessagesByAuthorDevice(revokedId);
               if (deleted > 0) {
                 console.log(`[Revocation] Deleted ${deleted} messages from revoked device ${revokedId.slice(-8)}`);
+                await logger.logDeviceRevoke(revokedId, deleted);
               }
             }
             // Also remove from in-memory cache
             self.messages = self.messages.filter(m => !revokedDeviceIds.includes(m.authorDeviceId));
           }
         }
+
+        // Log the device announce
+        await logger.logDeviceAnnounce(announce.devices.length, announce.isRevocation, msg.sourceUserId);
 
         self.friends.setDevices(friend.username, announce.devices);
       },
@@ -1501,8 +1529,8 @@ export class ObscuraClient {
    */
   async _checkAndReplenishPrekeys() {
     try {
-      const count = await this.store.getPreKeyCount();
-      if (count >= PREKEY_MIN_COUNT) return;
+      const previousCount = await this.store.getPreKeyCount();
+      if (previousCount >= PREKEY_MIN_COUNT) return;
 
       const highestId = await this.store.getHighestPreKeyId();
       const newPreKeys = [];
@@ -1539,9 +1567,14 @@ export class ObscuraClient {
 
       if (!response.ok) {
         console.warn('Prekey replenishment upload failed:', response.status);
+        await logger.logPrekeyReplenishError(new Error(`Upload failed: ${response.status}`), response.status, previousCount);
+      } else {
+        const newCount = await this.store.getPreKeyCount();
+        await logger.logPrekeyReplenish(previousCount, newCount, newPreKeys.length);
       }
     } catch (e) {
       console.warn('Prekey replenishment failed:', e.message);
+      await logger.logPrekeyReplenishError(e, null, null);
     }
   }
 

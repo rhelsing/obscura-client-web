@@ -188,6 +188,263 @@ class Logger {
     });
   }
 
+  // === PREKEY EVENTS ===
+
+  async logPrekeyFetch(targetUserId, hasPreKey, registrationId) {
+    return this.log(LogEventType.PREKEY_FETCH, {
+      targetUserId,
+      hasPreKey,
+      registrationId,
+    });
+  }
+
+  async logPrekeyFetchError(targetUserId, error, status) {
+    return this.log(LogEventType.PREKEY_FETCH_ERROR, {
+      targetUserId,
+      error: error?.message || String(error),
+      status,
+    });
+  }
+
+  async logPrekeyReplenish(previousCount, newCount, uploadedCount) {
+    return this.log(LogEventType.PREKEY_REPLENISH, {
+      previousCount,
+      newCount,
+      uploadedCount,
+    });
+  }
+
+  async logPrekeyReplenishError(error, status, count) {
+    return this.log(LogEventType.PREKEY_REPLENISH_ERROR, {
+      error: error?.message || String(error),
+      status,
+      count,
+    });
+  }
+
+  // === CRYPTO ERRORS ===
+
+  async logEncryptError(targetUserId, error, hasSession) {
+    return this.log(LogEventType.ENCRYPT_ERROR, {
+      targetUserId,
+      error: error?.message || String(error),
+      hasSession,
+    });
+  }
+
+  async logDecryptError(sourceUserId, error, messageType, isSessionDesync = false) {
+    return this.log(LogEventType.DECRYPT_ERROR, {
+      sourceUserId,
+      error: error?.message || String(error),
+      messageType,
+      isSessionDesync,
+    });
+  }
+
+  // === FRIEND EVENTS ===
+
+  async logFriendRequestSent(username, deviceCount) {
+    return this.log(LogEventType.FRIEND_REQUEST_SENT, {
+      username,
+      deviceCount,
+    });
+  }
+
+  async logFriendRequestReceived(username, sourceUserId, deviceCount) {
+    return this.log(LogEventType.FRIEND_REQUEST_RECEIVED, {
+      username,
+      sourceUserId,
+      deviceCount,
+    });
+  }
+
+  async logFriendAccept(username) {
+    return this.log(LogEventType.FRIEND_ACCEPT, {
+      username,
+    });
+  }
+
+  async logFriendReject(username) {
+    return this.log(LogEventType.FRIEND_REJECT, {
+      username,
+    });
+  }
+
+  async logFriendRemove(username) {
+    return this.log(LogEventType.FRIEND_REMOVE, {
+      username,
+    });
+  }
+
+  // === DEVICE EVENTS ===
+
+  async logDeviceAdd(serverUserId, deviceName, deviceUUID) {
+    return this.log(LogEventType.DEVICE_ADD, {
+      serverUserId,
+      deviceName,
+      deviceUUID,
+    });
+  }
+
+  async logDeviceRemove(serverUserId, deviceUUID) {
+    return this.log(LogEventType.DEVICE_REMOVE, {
+      serverUserId,
+      deviceUUID,
+    });
+  }
+
+  async logDeviceLinkStart(deviceUUID, challenge) {
+    return this.log(LogEventType.DEVICE_LINK_START, {
+      deviceUUID,
+      challenge,
+    });
+  }
+
+  async logDeviceLinkApprove(deviceUUID, serverUserId) {
+    return this.log(LogEventType.DEVICE_LINK_APPROVE, {
+      deviceUUID,
+      serverUserId,
+    });
+  }
+
+  async logDeviceAnnounce(deviceCount, isRevocation, sourceUserId) {
+    return this.log(LogEventType.DEVICE_ANNOUNCE, {
+      deviceCount,
+      isRevocation,
+      sourceUserId,
+    });
+  }
+
+  async logDeviceRevoke(revokedDeviceId, deletedMessageCount) {
+    return this.log(LogEventType.DEVICE_REVOKE, {
+      revokedDeviceId,
+      deletedMessageCount,
+    });
+  }
+
+  // === ATTACHMENT EVENTS ===
+
+  async logAttachmentUpload(attachmentId, sizeBytes, contentType) {
+    return this.log(LogEventType.ATTACHMENT_UPLOAD, {
+      attachmentId,
+      sizeBytes,
+      contentType,
+    });
+  }
+
+  async logAttachmentUploadError(error, status, sizeBytes) {
+    return this.log(LogEventType.ATTACHMENT_UPLOAD_ERROR, {
+      error: error?.message || String(error),
+      status,
+      sizeBytes,
+    });
+  }
+
+  async logAttachmentDownload(attachmentId, sizeBytes, fromCache) {
+    return this.log(LogEventType.ATTACHMENT_DOWNLOAD, {
+      attachmentId,
+      sizeBytes,
+      fromCache,
+    });
+  }
+
+  async logAttachmentDownloadError(attachmentId, error, status) {
+    return this.log(LogEventType.ATTACHMENT_DOWNLOAD_ERROR, {
+      attachmentId,
+      error: error?.message || String(error),
+      status,
+    });
+  }
+
+  async logAttachmentCacheHit(attachmentId) {
+    return this.log(LogEventType.ATTACHMENT_CACHE_HIT, {
+      attachmentId,
+    });
+  }
+
+  // === STORAGE EVENTS ===
+
+  async logStorageError(operation, error, context = {}) {
+    return this.log(LogEventType.STORAGE_ERROR, {
+      operation,
+      error: error?.message || String(error),
+      ...context,
+    });
+  }
+
+  async logMessagePersist(conversationId, messageId) {
+    return this.log(LogEventType.MESSAGE_PERSIST, {
+      conversationId,
+      messageId,
+    });
+  }
+
+  async logMessagePersistError(conversationId, error) {
+    return this.log(LogEventType.MESSAGE_PERSIST_ERROR, {
+      conversationId,
+      error: error?.message || String(error),
+    });
+  }
+
+  // === ORM SYNC EVENTS ===
+
+  async logOrmSyncSend(model, id, op, targetDeviceCount) {
+    return this.log(LogEventType.ORM_SYNC_SEND, {
+      model,
+      id,
+      op,
+      targetDeviceCount,
+    });
+  }
+
+  async logOrmSyncReceive(model, id, op, authorDeviceId) {
+    return this.log(LogEventType.ORM_SYNC_RECEIVE, {
+      model,
+      id,
+      op,
+      authorDeviceId,
+    });
+  }
+
+  async logOrmSyncError(model, error, direction) {
+    return this.log(LogEventType.ORM_SYNC_ERROR, {
+      model,
+      error: error?.message || String(error),
+      direction,
+    });
+  }
+
+  async logSyncBlobSend(targetUserId, modelCount, compressedSize) {
+    return this.log(LogEventType.SYNC_BLOB_SEND, {
+      targetUserId,
+      modelCount,
+      compressedSize,
+    });
+  }
+
+  async logSyncBlobReceive(sourceUserId, modelCount) {
+    return this.log(LogEventType.SYNC_BLOB_RECEIVE, {
+      sourceUserId,
+      modelCount,
+    });
+  }
+
+  // === TTL CLEANUP EVENTS ===
+
+  async logTtlCleanup(model, deletedCount) {
+    return this.log(LogEventType.TTL_CLEANUP, {
+      model,
+      deletedCount,
+    });
+  }
+
+  async logTtlCleanupError(model, error) {
+    return this.log(LogEventType.TTL_CLEANUP_ERROR, {
+      model,
+      error: error?.message || String(error),
+    });
+  }
+
   // === QUERY METHODS ===
 
   async getAllEvents(limit = 500) {

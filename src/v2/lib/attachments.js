@@ -9,6 +9,7 @@
  */
 
 import { encryptAttachment, decryptAttachment } from '../crypto/aes.js';
+import { logger } from './logger.js';
 
 export class AttachmentManager {
   constructor(opts = {}) {
@@ -47,10 +48,13 @@ export class AttachmentManager {
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`Attachment upload failed: ${res.status} ${text}`);
+      const error = new Error(`Attachment upload failed: ${res.status} ${text}`);
+      await logger.logAttachmentUploadError(error, res.status, encrypted.sizeBytes);
+      throw error;
     }
 
     const { id, expiresAt } = await res.json();
+    await logger.logAttachmentUpload(id, encrypted.sizeBytes, encrypted.contentType);
 
     // Cache the original (decrypted) bytes so future downloads are instant cache hits
     // This helps the uploader on page refresh - other users/devices cache on download()
@@ -93,6 +97,7 @@ export class AttachmentManager {
       const cached = await this.cache.get(attachmentId);
       if (cached) {
         console.log('[Attachments] Cache hit:', attachmentId.slice(0, 8));
+        await logger.logAttachmentCacheHit(attachmentId);
         // Track cache action for tests (avoids race conditions with console listeners)
         if (typeof window !== 'undefined') {
           window.__lastCacheAction = { type: 'hit', id: attachmentId, timestamp: Date.now() };
@@ -115,13 +120,16 @@ export class AttachmentManager {
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`Attachment download failed: ${res.status} ${text}`);
+      const error = new Error(`Attachment download failed: ${res.status} ${text}`);
+      await logger.logAttachmentDownloadError(attachmentId, error, res.status);
+      throw error;
     }
 
     const encryptedData = new Uint8Array(await res.arrayBuffer());
 
     // Decrypt and verify integrity
     const decrypted = await decryptAttachment(encryptedData, contentKey, nonce, contentHash);
+    await logger.logAttachmentDownload(attachmentId, sizeBytes || decrypted.byteLength, false);
 
     // Cache the decrypted content
     if (this.cache) {

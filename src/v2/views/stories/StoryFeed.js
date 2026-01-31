@@ -245,17 +245,15 @@ export async function mount(container, client, router) {
     }
 
     // Resolve author names and check for media
-    const storiesWithNames = stories.map(s => {
-      // Check sessionStorage for cached blob URL (set after posting)
-      const cachedUrl = sessionStorage.getItem(`story_media_${s.id}`);
-      return {
-        ...s,
-        authorName: resolveAuthorName(s, client, profileMap),
-        hasMedia: !!parseMediaUrl(s.data?.mediaUrl),
-        mediaBlobUrl: cachedUrl || null,
-        mediaLoading: false,
-      };
-    });
+    // NOTE: Don't use sessionStorage for blob URLs - they become invalid after page refresh
+    // The attachmentStore caches actual bytes, so download() will be a cache hit
+    const storiesWithNames = stories.map(s => ({
+      ...s,
+      authorName: resolveAuthorName(s, client, profileMap),
+      hasMedia: !!parseMediaUrl(s.data?.mediaUrl),
+      mediaBlobUrl: null,
+      mediaLoading: false,
+    }));
 
     // Store stories for later reference (for loading media)
     let displayStories = storiesWithNames;

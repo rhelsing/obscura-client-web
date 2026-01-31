@@ -23,6 +23,7 @@ import {
 import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
 import { createSchema } from '../orm/index.js';
 import { logger } from './logger.js';
+import { createMediaUrl } from './attachmentUtils.js';
 
 // Default reconnect settings
 const RECONNECT_DELAY_MS = 1000;
@@ -163,6 +164,26 @@ export class ObscuraClient {
   }
 
   /**
+   * Check if a JWT token is expired
+   * @param {string} token - JWT token
+   * @param {number} bufferSeconds - Buffer before actual expiration (default 60s)
+   * @returns {boolean} true if expired or invalid
+   */
+  static isTokenExpired(token, bufferSeconds = 60) {
+    if (!token) return true;
+    try {
+      const parts = token.split('.');
+      if (parts.length !== 3) return true;
+      const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+      if (!payload.exp) return true;
+      const now = Math.floor(Date.now() / 1000);
+      return payload.exp <= (now + bufferSeconds);
+    } catch (e) {
+      return true;
+    }
+  }
+
+  /**
    * Restore session from localStorage
    * @returns {ObscuraClient|null}
    */
@@ -175,6 +196,13 @@ export class ObscuraClient {
     try {
       const session = JSON.parse(saved);
       if (!session.token || !session.username) return null;
+
+      // Check if token is expired - clear and require fresh login
+      if (ObscuraClient.isTokenExpired(session.token)) {
+        console.log('[ObscuraClient] Session token expired, clearing');
+        ObscuraClient.clearSession();
+        return null;
+      }
 
       // Recreate store from IndexedDB using username
       const store = createStore(session.username);
@@ -835,6 +863,9 @@ export class ObscuraClient {
     // Upload and encrypt once
     const ref = await this.attachments.upload(content);
 
+    // Create mediaUrl JSON string for storage (no Uint8Array serialization issues)
+    const mediaUrl = createMediaUrl(ref);
+
     // Fan-out ContentReference to all friend devices
     const targets = this.friends.getFanOutTargets(friendUsername);
     const timestamp = Date.now();
@@ -847,7 +878,7 @@ export class ObscuraClient {
       });
     }
 
-    // Self-sync to own devices
+    // Self-sync to own devices (include mediaUrl for storage)
     const selfTargets = this.devices.getSelfSyncTargets();
     for (const targetUserId of selfTargets) {
       await this.messenger.sendMessage(targetUserId, {
@@ -856,13 +887,13 @@ export class ObscuraClient {
           conversationId: friendUsername,
           messageId: ref.attachmentId,
           timestamp,
-          contentReference: ref,
-          authorDeviceId: this.userId, // Track which device sent this
+          mediaUrl, // JSON string instead of contentReference object
+          authorDeviceId: this.userId,
         },
       });
     }
 
-    return ref;
+    return mediaUrl; // Return JSON string instead of ref object
   }
 
   /**

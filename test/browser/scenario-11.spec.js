@@ -182,8 +182,9 @@ test.describe('Scenario 11: Media Auto-Download + Cache Persistence', () => {
     await page.waitForURL('**/stories', { timeout: 10000 });
     console.log('Alice posted story with image');
 
-    // Verify Alice sees image immediately (from sessionStorage cache)
+    // Verify Alice sees image immediately after posting
     await page.waitForSelector('.story-card', { timeout: 10000 });
+    await page.waitForSelector('.story-card img', { timeout: 15000 });
     const aliceStoryCard = await page.$('.story-card');
     const aliceImg = await aliceStoryCard.$('img');
     expect(aliceImg).not.toBeNull();
@@ -192,6 +193,17 @@ test.describe('Scenario 11: Media Auto-Download + Cache Persistence', () => {
     // Get the story ID for later
     const storyId = await aliceStoryCard.getAttribute('data-id');
     console.log('Story ID:', storyId);
+
+    // CRITICAL TEST: Alice refreshes page - blob URL would be stale, but cache-on-upload saves us
+    console.log('--- Alice refreshes page (testing cache-on-upload) ---');
+    await page.reload();
+    await page.waitForSelector('.story-card', { timeout: 10000 });
+    await page.waitForSelector('.story-card img', { timeout: 15000 });
+    const aliceImgAfterRefresh = await page.$('.story-card img');
+    expect(aliceImgAfterRefresh).not.toBeNull();
+    const aliceImgSrcAfterRefresh = await aliceImgAfterRefresh.getAttribute('src');
+    expect(aliceImgSrcAfterRefresh.startsWith('blob:')).toBe(true);
+    console.log('Alice: Image loads after refresh (cache-on-upload worked!)');
 
     // Alice logs out (open drawer, click logout)
     await page.waitForSelector('button[drawer="more-drawer"]', { timeout: 10000 });

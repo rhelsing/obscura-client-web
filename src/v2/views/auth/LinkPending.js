@@ -90,10 +90,13 @@ export async function mount(container, _client, router) {
   let syncHandler = null;
 
   try {
-    // 1. Connect FIRST - this starts receiving from the dumb pipe
+    // 1. Define schema FIRST so ORM models exist when SYNC_BLOB arrives
+    await pendingClient.schema(fullSchema);
+
+    // 2. Connect - this starts receiving from the dumb pipe
     await pendingClient.connect();
 
-    // 2. Register BOTH handlers AFTER connect (they're live now)
+    // 3. Register BOTH handlers AFTER connect (they're live now)
     approvalHandler = (approval) => {
       container.innerHTML = render({ linkCode: pendingClient.linkCode, waiting: false });
       approval.apply();
@@ -101,10 +104,7 @@ export async function mount(container, _client, router) {
 
     syncHandler = async () => {
       try {
-        // 3. Define schema AFTER receiving sync blob
-        await pendingClient.schema(fullSchema);
-
-        // Clean up temp storage
+        // Schema already defined before connect, just clean up and navigate
         delete window.__pendingClient;
 
         // Set as active client and navigate

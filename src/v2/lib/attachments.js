@@ -52,6 +52,16 @@ export class AttachmentManager {
 
     const { id, expiresAt } = await res.json();
 
+    // Cache the original (decrypted) bytes so future downloads are instant cache hits
+    // This helps the uploader on page refresh - other users/devices cache on download()
+    if (this.cache) {
+      const bytes = content instanceof Uint8Array
+        ? content
+        : new Uint8Array(content instanceof ArrayBuffer ? content : await content.arrayBuffer());
+      await this.cache.put(id, bytes, { contentType: encrypted.contentType, sizeBytes: encrypted.sizeBytes });
+      console.log('[Attachments] Cached on upload:', id.slice(0, 8));
+    }
+
     // Return ContentReference-compatible object
     return {
       attachmentId: id,

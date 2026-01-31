@@ -3,7 +3,7 @@
  * - Username + password inputs
  * - Handle: ok (existing device), newDevice, error
  */
-import { Obscura } from '../../lib/index.js';
+import { Obscura, ObscuraClient } from '../../lib/index.js';
 import { setClient, navigate, getApiUrl } from '../index.js';
 import { fullSchema } from '../../lib/schema.js';
 
@@ -45,9 +45,11 @@ export function mount(container, client, router) {
     try {
       const apiUrl = getApiUrl();
 
+      // Clear any stale session before login to prevent old user's session competing
+      ObscuraClient.clearSession();
+
       // Note: Obscura.login() automatically uses IndexedDBStore which persists to IndexedDB.
       // It checks store.getDeviceIdentity() to detect if this is an existing device.
-      // No need to manually load from localStorage.
       const result = await Obscura.login(username, password, { apiUrl });
 
       if (result.status === 'ok') {

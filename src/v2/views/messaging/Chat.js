@@ -8,6 +8,7 @@
  * Also handles sentSync for messages sent from other devices.
  */
 import { navigate } from '../index.js';
+import { parseMediaUrl, createMediaUrl } from '../../lib/attachmentUtils.js';
 
 let cleanup = null;
 let messages = [];
@@ -84,6 +85,20 @@ function formatTime(ts) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// Helper: Convert blob to data URL
+function blobToDataUrl(blob) {
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Helper: Generate unique message ID
+function generateMsgId() {
+  return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export async function mount(container, client, router, params) {
   const username = params.username;
 
@@ -126,27 +141,40 @@ export async function mount(container, client, router, params) {
   // Load existing messages from IndexedDB (or in-memory fallback)
   try {
     const stored = await client.getMessages(username);
-    messages = stored.map(m => ({
-      text: m.text || m.content || '',
-      fromMe: m.isSent,
-      timestamp: m.timestamp,
-      attachment: m.contentReference || m.attachment,
-      contentReference: m.contentReference,
-      downloaded: false,
-    }));
+    messages = stored.map(m => {
+      // Convert old contentReference to mediaUrl if needed
+      let mediaUrl = m.mediaUrl;
+      if (!mediaUrl && m.contentReference) {
+        mediaUrl = createMediaUrl(m.contentReference);
+      }
+      return {
+        text: m.text || m.content || '',
+        fromMe: m.isSent,
+        timestamp: m.timestamp,
+        attachment: !!mediaUrl,
+        mediaUrl,
+        downloaded: false,
+      };
+    });
   } catch (err) {
     console.error('Failed to load messages:', err);
     // Fallback to in-memory
     messages = (client.messages || [])
       .filter(m => m.from === username || m.to === username || m.conversationId === username)
-      .map(m => ({
-        text: m.text || (m.content ? (typeof m.content === 'string' ? m.content : new TextDecoder().decode(m.content)) : ''),
-        fromMe: m.isSent || m.to === username,
-        timestamp: m.timestamp,
-        attachment: m.contentReference || m.attachment,
-        contentReference: m.contentReference,
-        downloaded: false,
-      }))
+      .map(m => {
+        let mediaUrl = m.mediaUrl;
+        if (!mediaUrl && m.contentReference) {
+          mediaUrl = createMediaUrl(m.contentReference);
+        }
+        return {
+          text: m.text || (m.content ? (typeof m.content === 'string' ? m.content : new TextDecoder().decode(m.content)) : ''),
+          fromMe: m.isSent || m.to === username,
+          timestamp: m.timestamp,
+          attachment: !!mediaUrl,
+          mediaUrl,
+          downloaded: false,
+        };
+      })
       .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
   }
 
@@ -161,37 +189,44 @@ export async function mount(container, client, router, params) {
 
   // Auto-download any attachments that need loading
   const downloadAttachments = async () => {
-    for (let i = 0; i < messages.length; i++) {
-      const m = messages[i];
-      if (m.contentReference && !m.imageDataUrl && !m.downloading) {
-        m.downloading = true;
-        container.innerHTML = render({ username, displayName, messages, streakCount });
-        try {
-          const decrypted = await client.attachments.download(m.contentReference);
-          const blob = new Blob([decrypted], { type: 'image/jpeg' });
-          const dataUrl = await new Promise(resolve => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.readAsDataURL(blob);
-          });
+    // Collect all messages needing download first (avoid modifying during iteration)
+    const toDownload = messages.filter(m =>
+      m.mediaUrl && !m.imageDataUrl && !m.downloading
+    );
+
+    if (toDownload.length === 0) return;
+
+    // Mark all as downloading, single render
+    toDownload.forEach(m => m.downloading = true);
+    container.innerHTML = render({ username, displayName, messages, streakCount });
+    attachListeners();
+
+    // Download all in parallel
+    await Promise.all(toDownload.map(async (m) => {
+      try {
+        const parsed = parseMediaUrl(m.mediaUrl);
+        if (!parsed?.isRef) {
           m.downloading = false;
-          m.imageDataUrl = dataUrl;
-          m.downloaded = true;
-          container.innerHTML = render({ username, displayName, messages, streakCount });
-          attachListeners();
-          // Wait for image to render then scroll
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => scrollToBottom());
-          });
-        } catch (err) {
-          console.error('Failed to download attachment:', err);
-          m.downloading = false;
-          m.attachmentPreview = '[Failed to load]';
-          container.innerHTML = render({ username, displayName, messages, streakCount });
-          attachListeners();
+          return;
         }
+        const decrypted = await client.attachments.download(parsed.ref);
+        const blob = new Blob([decrypted], { type: parsed.ref.contentType || 'image/jpeg' });
+        m.imageDataUrl = await blobToDataUrl(blob);
+        m.downloading = false;
+        m.downloaded = true;
+      } catch (err) {
+        console.error('Failed to download attachment:', err);
+        m.downloading = false;
+        m.attachmentPreview = '[Failed to load]';
       }
-    }
+    }));
+
+    // Single re-render after all downloads complete
+    container.innerHTML = render({ username, displayName, messages, streakCount });
+    attachListeners();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => scrollToBottom());
+    });
   };
 
   const form = container.querySelector('#message-form');
@@ -252,40 +287,45 @@ export async function mount(container, client, router, params) {
 
       // Convert to data URL for immediate display
       const blob = new Blob([bytes], { type: file.type || 'image/jpeg' });
-      const imageDataUrl = await new Promise(resolve => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.readAsDataURL(blob);
-      });
+      const imageDataUrl = await blobToDataUrl(blob);
       console.log('[Upload] Step 8: Data URL created');
 
       const timestamp = Date.now();
-      const msgIndex = messages.length;
+      const msgId = generateMsgId();
 
-      // Optimistic UI - show actual image
-      messages.push({
+      // Optimistic UI - show actual image (use ID instead of index)
+      const msg = {
+        id: msgId,
         attachment: true,
         imageDataUrl,
         fromMe: true,
         timestamp
-      });
+      };
+      messages.push(msg);
+      console.log('[Upload] Step 9: Messages array now has', messages.length, 'messages,', messages.filter(m => m.imageDataUrl).length, 'with images');
       container.innerHTML = render({ username, displayName, messages, streakCount });
+      const imgCount = container.querySelectorAll('.attachment-image').length;
+      console.log('[Upload] Step 9: DOM now has', imgCount, 'attachment-image elements');
       scrollToBottom();
       attachListeners();
       console.log('[Upload] Step 9: UI updated with optimistic image');
 
-      // Send and get the contentReference back
+      // Send and get mediaUrl back (JSON string)
       console.log('[Upload] Step 10: Calling sendAttachment to', username);
-      const ref = await client.sendAttachment(username, bytes);
-      console.log('[Upload] Step 11: sendAttachment returned:', ref?.attachmentId || 'NO REF');
+      const mediaUrl = await client.sendAttachment(username, bytes);
+      const parsed = parseMediaUrl(mediaUrl);
+      console.log('[Upload] Step 11: sendAttachment returned:', parsed?.ref?.attachmentId || 'NO REF');
 
-      // Store to IndexedDB with contentReference for persistence
-      if (ref && ref.attachmentId) {
-        messages[msgIndex].contentReference = ref;
+      // Store to IndexedDB with mediaUrl for persistence (find by ID, not index)
+      if (mediaUrl && parsed?.ref?.attachmentId) {
+        const targetMsg = messages.find(m => m.id === msgId);
+        if (targetMsg) {
+          targetMsg.mediaUrl = mediaUrl;
+        }
         await client.messageStore.addMessage(username, {
-          messageId: `att_${ref.attachmentId}`,
+          messageId: `att_${parsed.ref.attachmentId}`,
           content: '',
-          contentReference: ref,
+          mediaUrl,
           isSent: true,
           timestamp,
         });
@@ -331,14 +371,20 @@ export async function mount(container, client, router, params) {
     const friend = client.friends.get(username);
     const isFromFriend = friend?.devices?.some(d => d.serverUserId === att.from);
     if (isFromFriend) {
-      // Add message with loading state
-      const msgIndex = messages.length;
-      messages.push({
-        attachment: att.contentReference,
+      // Convert contentReference to mediaUrl
+      const mediaUrl = createMediaUrl(att.contentReference);
+
+      // Add message with loading state (use ID instead of index)
+      const msgId = generateMsgId();
+      const msg = {
+        id: msgId,
+        attachment: true,
+        mediaUrl,
         downloading: true,
         fromMe: false,
         timestamp: Date.now()
-      });
+      };
+      messages.push(msg);
       container.innerHTML = render({ username, displayName, messages, streakCount });
       scrollToBottom();
       attachListeners();
@@ -346,48 +392,37 @@ export async function mount(container, client, router, params) {
       // Auto-download and display
       try {
         const decrypted = await client.attachments.download(att.contentReference);
-        // Convert to data URL for display
-        const blob = new Blob([decrypted], { type: 'image/jpeg' });
-        const dataUrl = await new Promise(resolve => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.readAsDataURL(blob);
-        });
-        messages[msgIndex].downloading = false;
-        messages[msgIndex].imageDataUrl = dataUrl;
-        messages[msgIndex].downloaded = true;
-        messages[msgIndex].contentReference = att.contentReference;
+        const blob = new Blob([decrypted], { type: att.contentReference?.contentType || 'image/jpeg' });
+        const dataUrl = await blobToDataUrl(blob);
+
+        // Find message by ID (safe even if array modified)
+        const targetMsg = messages.find(m => m.id === msgId);
+        if (targetMsg) {
+          targetMsg.downloading = false;
+          targetMsg.imageDataUrl = dataUrl;
+          targetMsg.downloaded = true;
+        }
         container.innerHTML = render({ username, displayName, messages, streakCount });
         attachListeners();
-        // Scroll after render
-        scrollToBottom();
-        // Wait for image to render and scroll again
-        const images = container.querySelectorAll('.attachment-image');
-        const lastImg = images[images.length - 1];
-        if (lastImg) {
-          if (lastImg.complete) {
-            // Image already loaded (data URL), wait for next frame to ensure layout
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => scrollToBottom());
-            });
-          } else {
-            // Image still loading
-            lastImg.onload = () => scrollToBottom();
-          }
-        }
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => scrollToBottom());
+        });
 
-        // Store to IndexedDB for persistence
+        // Store to IndexedDB for persistence (use mediaUrl string)
         await client.messageStore.addMessage(username, {
           messageId: `att_${att.contentReference?.attachmentId || Date.now()}`,
           content: '',
-          contentReference: att.contentReference,
+          mediaUrl,
           isSent: false,
           timestamp: Date.now(),
         });
       } catch (err) {
         console.error('Failed to download attachment:', err);
-        messages[msgIndex].downloading = false;
-        messages[msgIndex].attachmentPreview = '[Failed to load]';
+        const targetMsg = messages.find(m => m.id === msgId);
+        if (targetMsg) {
+          targetMsg.downloading = false;
+          targetMsg.attachmentPreview = '[Failed to load]';
+        }
         container.innerHTML = render({ username, displayName, messages, streakCount });
         attachListeners();
       }
@@ -395,7 +430,7 @@ export async function mount(container, client, router, params) {
   };
 
   // Sent sync - messages sent from another device
-  const handleSentSync = (sync) => {
+  const handleSentSync = async (sync) => {
     if (sync.conversationId === username) {
       // Decode content if it's a Uint8Array
       let text = '';
@@ -405,16 +440,56 @@ export async function mount(container, client, router, params) {
           : String(sync.content);
       }
 
-      messages.push({
+      // Use mediaUrl from sync (now a JSON string)
+      const mediaUrl = sync.mediaUrl;
+      const hasAttachment = !!mediaUrl;
+
+      const msgId = generateMsgId();
+      const msg = {
+        id: msgId,
         text,
         fromMe: true,
         timestamp: sync.timestamp || Date.now(),
-        attachment: sync.contentReference,
+        attachment: hasAttachment,
+        mediaUrl,
+        downloading: hasAttachment,
         downloaded: false,
-      });
+      };
+      messages.push(msg);
       container.innerHTML = render({ username, displayName, messages, streakCount });
       scrollToBottom();
       attachListeners();
+
+      // Auto-download if has attachment
+      if (mediaUrl) {
+        try {
+          const parsed = parseMediaUrl(mediaUrl);
+          if (parsed?.isRef) {
+            const decrypted = await client.attachments.download(parsed.ref);
+            const blob = new Blob([decrypted], { type: parsed.ref.contentType || 'image/jpeg' });
+            const dataUrl = await blobToDataUrl(blob);
+
+            const targetMsg = messages.find(m => m.id === msgId);
+            if (targetMsg) {
+              targetMsg.downloading = false;
+              targetMsg.imageDataUrl = dataUrl;
+              targetMsg.downloaded = true;
+            }
+            container.innerHTML = render({ username, displayName, messages, streakCount });
+            attachListeners();
+            scrollToBottom();
+          }
+        } catch (err) {
+          console.error('Failed to download synced attachment:', err);
+          const targetMsg = messages.find(m => m.id === msgId);
+          if (targetMsg) {
+            targetMsg.downloading = false;
+            targetMsg.attachmentPreview = '[Failed to load]';
+          }
+          container.innerHTML = render({ username, displayName, messages, streakCount });
+          attachListeners();
+        }
+      }
     }
   };
 

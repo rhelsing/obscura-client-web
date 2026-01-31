@@ -41,6 +41,10 @@ export function render({ story = null, loading = false, error = null } = {}) {
           <div class="story-media">
             <img src="${story.mediaBlobUrl}" alt="" style="width: 100%; border-radius: var(--ry-radius-md)" />
           </div>
+        ` : story.mediaLoading ? `
+          <div class="story-media">
+            <span style="color: var(--ry-color-text-muted)">Loading media...</span>
+          </div>
         ` : story.hasMedia ? `
           <div class="story-media">
             <button variant="secondary" size="sm" id="load-media-btn">
@@ -289,6 +293,7 @@ export async function mount(container, client, router, params) {
     story.authorName = resolveAuthorName(story, client, profileMap);
     story.hasMedia = !!parseMediaUrl(story.data?.mediaUrl);
     story.mediaBlobUrl = null;
+    story.mediaLoading = story.hasMedia; // Start loading if has media
 
     const rerender = () => {
       container.innerHTML = render({ story });
@@ -379,6 +384,13 @@ export async function mount(container, client, router, params) {
 
     container.innerHTML = render({ story });
     attachEventHandlers();
+
+    // Auto-download media if present
+    if (story.hasMedia && !story.mediaBlobUrl) {
+      story.mediaBlobUrl = await loadMedia(story.data?.mediaUrl, client);
+      story.mediaLoading = false;
+      rerender();
+    }
 
   } catch (err) {
     container.innerHTML = render({ error: err.message });

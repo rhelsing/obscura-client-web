@@ -265,6 +265,13 @@ export async function mount(container, client, router) {
       attachEventHandlers();
     };
 
+    // Auto-download media for stories that need it
+    const storiesNeedingMedia = displayStories.filter(s => s.hasMedia && !s.mediaBlobUrl);
+    if (storiesNeedingMedia.length > 0) {
+      // Mark as loading
+      storiesNeedingMedia.forEach(s => s.mediaLoading = true);
+    }
+
     const attachEventHandlers = () => {
       // Click handlers for story cards
       container.querySelectorAll('.story-card').forEach(card => {
@@ -316,6 +323,18 @@ export async function mount(container, client, router) {
 
     container.innerHTML = render({ stories: displayStories });
     attachEventHandlers();
+
+    // Auto-download media in background after initial render
+    if (storiesNeedingMedia.length > 0) {
+      // Download all in parallel
+      await Promise.all(storiesNeedingMedia.map(async (s) => {
+        const blobUrl = await loadMediaForStory(s, client);
+        s.mediaLoading = false;
+        s.mediaBlobUrl = blobUrl;
+      }));
+      // Re-render with loaded media
+      rerender();
+    }
 
   } catch (err) {
     container.innerHTML = `<div class="error">Failed to load stories: ${err.message}</div>`;

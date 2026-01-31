@@ -153,6 +153,7 @@ export function createMessageStore(userId) {
      * Import messages from sync (idempotent)
      * @param {Array} messages - Messages to import
      * @returns {Promise} Resolves when done
+     * Note: Deserializes contentReference Arrays back to Uint8Arrays
      */
     async importMessages(messages) {
       const store = await getStore(STORES.MESSAGES, 'readwrite');
@@ -161,6 +162,15 @@ export function createMessageStore(userId) {
         // Only add if not already present (dedup by messageId)
         const existing = await promisify(store.get(msg.messageId));
         if (!existing) {
+          // Deserialize contentReference (Array -> Uint8Array)
+          if (msg.contentReference) {
+            msg.contentReference = {
+              ...msg.contentReference,
+              contentKey: msg.contentReference.contentKey ? new Uint8Array(msg.contentReference.contentKey) : undefined,
+              nonce: msg.contentReference.nonce ? new Uint8Array(msg.contentReference.nonce) : undefined,
+              contentHash: msg.contentReference.contentHash ? new Uint8Array(msg.contentReference.contentHash) : undefined,
+            };
+          }
           await promisify(store.put({
             ...msg,
             storedAt: Date.now(),
@@ -172,10 +182,22 @@ export function createMessageStore(userId) {
     /**
      * Export all messages for sync
      * @returns {Promise<Array>} All messages (without storedAt, for cleaner export)
+     * Note: Serializes contentReference Uint8Arrays to Arrays for JSON compatibility
      */
     async exportAll() {
       const messages = await this.getAllMessages();
-      return messages.map(({ storedAt, ...msg }) => msg);
+      return messages.map(({ storedAt, ...msg }) => {
+        // Serialize contentReference for JSON (Uint8Array -> Array)
+        if (msg.contentReference) {
+          msg.contentReference = {
+            ...msg.contentReference,
+            contentKey: msg.contentReference.contentKey ? Array.from(msg.contentReference.contentKey) : undefined,
+            nonce: msg.contentReference.nonce ? Array.from(msg.contentReference.nonce) : undefined,
+            contentHash: msg.contentReference.contentHash ? Array.from(msg.contentReference.contentHash) : undefined,
+          };
+        }
+        return msg;
+      });
     },
 
     /**

@@ -127,6 +127,11 @@ export function mount(container, client, router) {
     try {
       const { userId, username } = parseLink(friendLink);
 
+      // Reject self-friending (same identity across devices)
+      if (username === client.username) {
+        throw new Error("You can't add yourself as a friend");
+      }
+
       container.innerHTML = render({ myLink, loading: true });
 
       await client.befriend(userId, username);

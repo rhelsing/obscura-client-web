@@ -277,6 +277,32 @@ test.describe('Scenario 5: Multi-Device Linking', () => {
     expect(deviceCountAfterReplay).toBe(1); // Still just 1 other device
     console.log('No duplicate devices after replay attempt');
 
+    // --- 5.8: Self-friend rejection: bob2 can't add bob ---
+    console.log('--- 5.8: Self-friend rejection ---');
+
+    // Get bob's friend link from original device
+    await bobPage.goto('/friends/add');
+    await bobPage.waitForSelector('#my-link-input');
+    const bobFriendLink = await bobPage.inputValue('#my-link-input');
+
+    // bob2 attempts to add bob's friend link (same user!)
+    await bob2Page.goto('/friends/add');
+    await bob2Page.waitForSelector('#friend-link');
+    await bob2Page.fill('#friend-link', bobFriendLink);
+    await bob2Page.click('button[type="submit"]');
+    await delay(500);
+
+    // Should show error, NOT success
+    const selfFriendError = await bob2Page.$('ry-alert[type="danger"]');
+    expect(selfFriendError).not.toBeNull();
+    console.log('Self-friend correctly rejected');
+
+    // Verify bob is NOT in bob2's friend list
+    await bob2Page.goto('/friends');
+    const selfInFriends = await bob2Page.$(`[data-username="${bobUsername}"]`);
+    expect(selfInFriends).toBeNull();
+    console.log('Bob not in bob2 friend list (correct)');
+
     console.log('\n=== SCENARIO 5 COMPLETE ===\n');
 
     // ============================================================

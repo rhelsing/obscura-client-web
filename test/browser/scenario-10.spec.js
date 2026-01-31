@@ -255,11 +255,6 @@ test.describe('Scenario 10: Story Attachments', () => {
     // ============================================================
     console.log('--- Test 6: Decryption succeeds ---');
 
-    // For Bob, media should show "Load Media" button (not cached)
-    const bobLoadBtn = await bobStoryCard.$('.load-media-btn');
-    expect(bobLoadBtn).not.toBeNull();
-    console.log('Bob sees "Load Media" button');
-
     // Set up console listener to catch any errors
     let decryptError = null;
     const errorHandler = msg => {
@@ -269,19 +264,20 @@ test.describe('Scenario 10: Story Attachments', () => {
     };
     bobPage.on('console', errorHandler);
 
-    // Click Load Media
-    await bobLoadBtn.click();
-    console.log('Bob clicked "Load Media"');
-
-    // Wait for image to appear (successful decryption)
+    // Wait for image to auto-load (media now auto-downloads)
     await bobPage.waitForSelector('.story-card img', { timeout: 15000 });
-    console.log('Image loaded successfully');
+    console.log('Image auto-loaded successfully');
 
     // Check no decryption errors occurred
     expect(decryptError).toBeNull();
     console.log('No constantTimeEqual errors');
 
-    // Re-query the DOM since it re-rendered after loading media
+    // Verify no "Load Media" button (auto-downloaded)
+    const bobLoadBtn = await bobPage.$('.load-media-btn');
+    expect(bobLoadBtn).toBeNull();
+    console.log('No "Load Media" button (auto-downloaded)');
+
+    // Verify blob URL
     const bobImgSrc = await bobPage.$eval('.story-card img', el => el.src);
     expect(bobImgSrc.startsWith('blob:')).toBe(true);
     console.log('Bob sees decrypted image with blob URL');
@@ -299,22 +295,14 @@ test.describe('Scenario 10: Story Attachments', () => {
     await bobPage.goto('/stories');
     await bobPage.waitForSelector('.story-card', { timeout: 10000 });
 
-    // Since we're not using sessionStorage for Bob's cache (that's for poster only),
-    // Bob should see "Load Media" button again - but the attachmentStore should have cached the decrypted blob
-    // Let's verify the download is faster the second time by timing it
-    const bobLoadBtn2 = await bobPage.$('.load-media-btn');
+    // Image should auto-load again (from attachmentStore cache)
+    await bobPage.waitForSelector('.story-card img', { timeout: 15000 });
+    console.log('Image auto-loaded from cache');
 
-    if (bobLoadBtn2) {
-      const startTime = Date.now();
-      await bobLoadBtn2.click();
-      await bobPage.waitForSelector('.story-card img', { timeout: 15000 });
-      const loadTime = Date.now() - startTime;
-      console.log(`Second load took ${loadTime}ms (cached via attachmentStore)`);
-      // Cache should make it faster, but we can't guarantee exact timing
-    } else {
-      // If no button, the image was already loaded (UI cached the blob URL)
-      console.log('Image already loaded (UI cached blob URL)');
-    }
+    // No "Load Media" button
+    const bobLoadBtn2 = await bobPage.$('.load-media-btn');
+    expect(bobLoadBtn2).toBeNull();
+    console.log('No "Load Media" button (cached)');
 
     // ============================================================
     // TEST 8: Story with text and image

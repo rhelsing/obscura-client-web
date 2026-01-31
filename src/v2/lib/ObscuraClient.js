@@ -305,6 +305,7 @@ export class ObscuraClient {
       await this.messageStore.addMessage(conversationId, {
         messageId: message.messageId || `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`,
         content: message.text || message.content,
+        contentReference: message.contentReference, // For attachments
         timestamp: message.timestamp || Date.now(),
         isSent: message.isSent || false,
         authorDeviceId: message.authorDeviceId || this.deviceUUID,
@@ -656,9 +657,12 @@ export class ObscuraClient {
         break;
 
       case 'CONTENT_REFERENCE':
+        // Look up username from serverUserId for correct conversationId (like TEXT messages)
+        const attachConversationId = this.friends.getUsernameFromServerId(msg.sourceUserId) || msg.sourceUserId;
         // Persist attachment reference as a special message type
-        this._persistMessage(msg.sourceUserId, {
+        this._persistMessage(attachConversationId, {
           from: msg.sourceUserId,
+          conversationId: attachConversationId,
           type: 'ATTACHMENT',
           contentReference: msg.contentReference,
           timestamp: msg.timestamp,
@@ -667,6 +671,7 @@ export class ObscuraClient {
         });
         this._emit('attachment', {
           from: msg.sourceUserId,
+          conversationId: attachConversationId,
           contentReference: msg.contentReference,
           timestamp: msg.timestamp,
         });

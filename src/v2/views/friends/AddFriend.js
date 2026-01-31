@@ -83,7 +83,9 @@ function parseLink(link) {
   }
 }
 
-export function mount(container, client, router, error = null) {
+export function mount(container, client, router, params = {}) {
+  const error = typeof params === 'string' ? params : params?.error || null;
+
   // Generate my link
   const myLink = `obscura://add?userId=${client.userId}&username=${client.username}`;
 
@@ -144,7 +146,10 @@ export function mount(container, client, router, error = null) {
       });
 
     } catch (err) {
-      mount(container, client, router, err.message);
+      const message = typeof err === 'string' ? err
+        : err?.message && typeof err.message === 'string' ? err.message
+        : 'Something went wrong';
+      mount(container, client, router, message);
     }
   };
 

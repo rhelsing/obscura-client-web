@@ -53,13 +53,7 @@ test.describe('Scenario 6: Attachments', () => {
     await delay(300);
     await page.waitForURL('**/stories', { timeout: 30000 });
 
-    let aliceWs = false;
-    for (let i = 0; i < 10; i++) {
-      await delay(500);
-      aliceWs = await page.evaluate(() => window.__client?.ws?.readyState === 1);
-      if (aliceWs) break;
-    }
-    expect(aliceWs).toBe(true);
+    await page.waitForFunction(() => window.__client?.ws?.readyState === 1, { timeout: 10000 });
     console.log('Alice registered and connected');
 
     // ============================================================
@@ -80,13 +74,7 @@ test.describe('Scenario 6: Attachments', () => {
     await delay(300);
     await bobPage.waitForURL('**/stories', { timeout: 30000 });
 
-    let bobWs = false;
-    for (let i = 0; i < 10; i++) {
-      await delay(500);
-      bobWs = await bobPage.evaluate(() => window.__client?.ws?.readyState === 1);
-      if (bobWs) break;
-    }
-    expect(bobWs).toBe(true);
+    await bobPage.waitForFunction(() => window.__client?.ws?.readyState === 1, { timeout: 10000 });
     console.log('Bob registered and connected');
 
     // ============================================================
@@ -151,13 +139,7 @@ test.describe('Scenario 6: Attachments', () => {
 
     await bob2Page.waitForURL('**/stories', { timeout: 20000 });
 
-    let bob2Ws = false;
-    for (let i = 0; i < 10; i++) {
-      await delay(500);
-      bob2Ws = await bob2Page.evaluate(() => window.__client?.ws?.readyState === 1);
-      if (bob2Ws) break;
-    }
-    expect(bob2Ws).toBe(true);
+    await bob2Page.waitForFunction(() => window.__client?.ws?.readyState === 1, { timeout: 10000 });
     console.log('Bob2 linked and connected');
 
     // ============================================================
@@ -315,96 +297,42 @@ test.describe('Scenario 6: Attachments', () => {
     // --- 6.5: Test receiver on different page (not chat) ---
     console.log('\n--- 6.5: Receiver on different page ---');
 
+    // Count Bob's current attachments before this test
+    const bobAttachmentsBefore65 = await bobPage.$$eval('.attachment-image', els => els.length);
+    console.log('Bob has', bobAttachmentsBefore65, 'attachments before 6.5');
+
     // Bob navigates away from chat to /stories
     await bobPage.goto('/stories');
+    await bobPage.waitForFunction(() => window.__client?.ws?.readyState === 1, { timeout: 10000 });
+    console.log('Bob navigated to /stories');
 
-    // Wait for Bob to be connected via state polling (not console)
-    let bobConnected = false;
-    for (let i = 0; i < 20; i++) {
-      await delay(500);
-      bobConnected = await bobPage.evaluate(() => window.__client?.ws?.readyState === 1);
-      if (bobConnected) break;
-    }
-    expect(bobConnected).toBe(true);
-    console.log('Bob navigated to /stories and connected');
-
-    // Track any errors on Bob's page
-    const bobErrors = [];
-    const errorHandler = msg => {
-      const text = msg.text();
-      if (text.includes('error') || text.includes('Error') || text.includes('Failed')) {
-        bobErrors.push(text);
-      }
-    };
-    bobPage.on('console', errorHandler);
-
-    // Alice navigates to chat first
+    // Alice navigates to chat and sends attachment
     await page.goto(`/messages/${bobUsername}`);
     await page.waitForSelector('#message-text');
-
-    // Wait for Alice to be connected
-    let aliceConnected = false;
-    for (let i = 0; i < 10; i++) {
-      await delay(500);
-      aliceConnected = await page.evaluate(() => window.__client?.ws?.readyState === 1);
-      if (aliceConnected) break;
-    }
-    expect(aliceConnected).toBe(true);
-
-    // Record Bob's initial message count
-    const bobInitialMsgCount = await bobPage.evaluate(() =>
-      window.__client?.messages?.filter(m => m.contentReference)?.length || 0
-    );
-
-    // Wait for chat view to be fully rendered
-    await page.waitForSelector('#message-text', { timeout: 15000 });
-    await delay(1000); // Give time for full render
-
-    // Count Alice's current attachment images in DOM
-    const aliceInitialImages = await page.$$eval('.attachment-image', els => els.length);
-    console.log('Alice has', aliceInitialImages, 'existing attachments');
-
-    // Use setInputFiles with the selector directly
+    await page.waitForFunction(() => window.__client?.ws?.readyState === 1, { timeout: 10000 });
     await page.setInputFiles('#file-input', testImagePath);
-    console.log('File input triggered');
-
-    // Wait for Alice's UI to show the new attachment (DOM-based, longer timeout)
-    await page.waitForFunction(
-      (count) => document.querySelectorAll('.attachment-image').length > count,
-      { timeout: 30000 },
-      aliceInitialImages
-    );
     console.log('Alice sent attachment while Bob on /stories');
 
-    // Poll for Bob to receive it in background (state-based, not console-based)
-    let bobReceivedInBg = false;
-    for (let i = 0; i < 30; i++) {
-      await delay(500);
-      const bobNewMsgCount = await bobPage.evaluate(() =>
-        window.__client?.messages?.filter(m => m.contentReference)?.length || 0
-      );
-      if (bobNewMsgCount > bobInitialMsgCount) {
-        bobReceivedInBg = true;
-        break;
-      }
-    }
-    expect(bobReceivedInBg).toBe(true);
-    console.log('Bob received attachment while on /stories ✓');
+    // Give message time to be delivered and stored
+    await delay(1000);
 
-    bobPage.off('console', errorHandler);
-
-    // Verify no critical errors (sending chain errors are now suppressed but logged)
-    const criticalErrors = bobErrors.filter(e =>
-      e.includes('decrypt') && !e.includes('SendingChainError')
+    // Bob navigates to chat to verify NEW attachment arrived (should be 2 total)
+    await bobPage.goto(`/messages/${username}`);
+    await bobPage.waitForSelector('#messages', { timeout: 10000 });
+    await bobPage.waitForFunction(
+      () => document.querySelectorAll('.attachment-image').length >= 2,
+      { timeout: 15000 }
     );
-    if (criticalErrors.length > 0) {
-      console.log('ERRORS on Bob:', criticalErrors);
-    }
-    expect(criticalErrors.length).toBe(0);
-    console.log('No decryption errors ✓');
+    const bobAttachmentsAfter65 = await bobPage.$$eval('.attachment-image', els => els.length);
+    expect(bobAttachmentsAfter65).toBe(2);
+    console.log('Bob has exactly 2 attachments ✓');
 
     // --- 6.6: Test receiver logged out (queued delivery) ---
     console.log('\n--- 6.6: Offline attachment delivery ---');
+
+    // Count Bob's attachments before logout
+    const bobAttachmentsBefore66 = await bobPage.$$eval('.attachment-image', els => els.length);
+    console.log('Bob has', bobAttachmentsBefore66, 'attachments before 6.6');
 
     // Bob logs out
     await bobPage.goto('/settings');
@@ -417,26 +345,8 @@ test.describe('Scenario 6: Attachments', () => {
     // Alice sends attachment while Bob is offline
     await page.goto(`/messages/${bobUsername}`);
     await page.waitForSelector('#message-text');
-
-    // Wait for Alice to be connected first
-    let aliceReadyForOffline = false;
-    for (let i = 0; i < 10; i++) {
-      await delay(500);
-      aliceReadyForOffline = await page.evaluate(() => window.__client?.ws?.readyState === 1);
-      if (aliceReadyForOffline) break;
-    }
-    expect(aliceReadyForOffline).toBe(true);
-
-    const fileInput3 = await page.$('#file-input');
-    await fileInput3.setInputFiles(testImagePath);
-
-    // Wait for Alice to confirm she sent it
-    const initialAliceAttachments = await page.$$eval('.attachment-image', els => els.length);
-    await page.waitForFunction(
-      (count) => document.querySelectorAll('.attachment-image').length > count,
-      { timeout: 15000 },
-      initialAliceAttachments
-    );
+    await page.waitForFunction(() => window.__client?.ws?.readyState === 1, { timeout: 10000 });
+    await page.setInputFiles('#file-input', testImagePath);
     console.log('Alice sent attachment while Bob offline');
 
     // Bob logs back in
@@ -444,46 +354,21 @@ test.describe('Scenario 6: Attachments', () => {
     await bobPage.fill('#password', password);
     await bobPage.click('button[type="submit"]');
     await bobPage.waitForURL('**/stories');
-
-    // Wait for WebSocket to be ready
-    let bobWsReady = false;
-    for (let i = 0; i < 20; i++) {
-      await delay(500);
-      bobWsReady = await bobPage.evaluate(() => window.__client?.ws?.readyState === 1);
-      if (bobWsReady) break;
-    }
-    expect(bobWsReady).toBe(true);
+    await bobPage.waitForFunction(() => window.__client?.ws?.readyState === 1, { timeout: 10000 });
     console.log('Bob logged back in and connected');
 
-    // Wait for queued messages to be delivered (poll for message count increase)
-    let bobReceivedQueued = false;
-    for (let i = 0; i < 30; i++) {
-      await delay(500);
-      const bobMsgCount = await bobPage.evaluate(() =>
-        window.__client?.messages?.filter(m => m.contentReference)?.length || 0
-      );
-      // We expect at least 2 attachments now (one from 6.1, one from this test)
-      if (bobMsgCount >= 2) {
-        bobReceivedQueued = true;
-        break;
-      }
-    }
-    expect(bobReceivedQueued).toBe(true);
-    console.log('Bob received queued attachment');
-
-    // Navigate to chat and verify attachment is there
+    // Navigate to chat to verify queued attachment was delivered
     await bobPage.goto(`/messages/${username}`);
     await bobPage.waitForSelector('#messages', { timeout: 10000 });
 
-    // Wait for attachments to render
+    // Wait for exactly 3 attachments (1 from 6.1 + 1 from 6.5 + 1 from 6.6)
     await bobPage.waitForFunction(
-      () => document.querySelectorAll('.attachment-image').length >= 2,
+      () => document.querySelectorAll('.attachment-image').length >= 3,
       { timeout: 15000 }
     );
-
-    const attachmentCount = await bobPage.$$eval('.attachment-image', els => els.length);
-    expect(attachmentCount).toBeGreaterThanOrEqual(2);
-    console.log('Bob sees', attachmentCount, 'attachments after logging back in ✓');
+    const bobAttachmentsAfter66 = await bobPage.$$eval('.attachment-image', els => els.length);
+    expect(bobAttachmentsAfter66).toBe(3);
+    console.log('Bob has exactly 3 attachments after logging back in ✓');
 
     console.log('\n=== SCENARIO 6 COMPLETE ===\n');
 

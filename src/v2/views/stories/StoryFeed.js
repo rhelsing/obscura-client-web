@@ -228,12 +228,16 @@ export async function mount(container, client, router) {
       }
     }
 
-    // Query all stories then filter to known devices
+    // Query all stories then filter to known devices and non-expired (24h TTL)
     const allStories = await client.story.where({})
       .orderBy('timestamp', 'desc')
       .exec();
 
-    const stories = allStories.filter(s => knownDeviceIds.has(s.authorDeviceId));
+    const now = Date.now();
+    const ttl24h = 24 * 60 * 60 * 1000;
+    const stories = allStories
+      .filter(s => knownDeviceIds.has(s.authorDeviceId))
+      .filter(s => (now - s.timestamp) < ttl24h);
 
     // Batch load comments and reactions
     if (client.comment) {

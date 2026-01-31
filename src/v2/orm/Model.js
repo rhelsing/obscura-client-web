@@ -101,8 +101,8 @@ export class Model {
     // 7. Broadcast to friends + self-sync
     await this.syncManager.broadcast(this, entry);
 
-    // 8. Schedule TTL if ephemeral
-    if (this.config.ephemeral && this.config.ttl && this.ttlManager) {
+    // 8. Schedule TTL if model has TTL defined
+    if (this.config.ttl && this.ttlManager) {
       await this.ttlManager.schedule(this.name, id, this.config.ttl);
     }
 

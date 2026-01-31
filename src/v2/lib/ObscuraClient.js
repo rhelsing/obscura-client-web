@@ -407,10 +407,16 @@ export class ObscuraClient {
       console.log('[ObscuraClient] wsUrl:', this.wsUrl);
       this.ws = new WS(url);
 
-      const onOpen = () => {
+      const onOpen = async () => {
         console.log('[ObscuraClient] WebSocket connected!');
         this._reconnectAttempts = 0;
         logger.logGatewayConnect();
+
+        // Run TTL cleanup on connect (non-blocking)
+        this._runTTLCleanup().catch(e => {
+          console.warn('[ObscuraClient] TTL cleanup failed:', e.message);
+        });
+
         resolve();
       };
 
@@ -452,6 +458,92 @@ export class ObscuraClient {
         this.ws.onmessage = onMessage;
       }
     });
+  }
+
+  /**
+   * Run TTL cleanup - removes expired entries and their attachments
+   */
+  async _runTTLCleanup() {
+    if (!this._ormModels || !this._ormSyncManager?.store) return;
+
+    const store = this._ormSyncManager.store;
+    const now = Date.now();
+    const ttl24h = 24 * 60 * 60 * 1000;
+
+    // Get expired entries from TTL store
+    const expired = await store.getExpired();
+
+    for (const { modelName, id } of expired) {
+      try {
+        // Get entry to check for attachments
+        const entry = await store.get(modelName, id);
+
+        // Clean up attachments if this is a story with mediaUrl
+        if (entry?.data?.mediaUrl && this._attachmentStore) {
+          try {
+            const parsed = JSON.parse(entry.data.mediaUrl);
+            if (parsed.attachmentId) {
+              await this._attachmentStore.delete(parsed.attachmentId);
+              console.log(`[ObscuraClient] Deleted attachment: ${parsed.attachmentId}`);
+            }
+          } catch {
+            // Not JSON or no attachmentId, skip
+          }
+        }
+
+        // Delete the model entry
+        await store.delete(modelName, id);
+
+        // Also delete from CRDT cache (GSet uses 'elements', LWWMap uses 'entries')
+        const model = this._ormModels.get(modelName);
+        if (model?.crdt?.elements) {
+          model.crdt.elements.delete(id);
+        } else if (model?.crdt?.entries) {
+          model.crdt.entries.delete(id);
+        }
+
+        // Remove TTL tracking
+        await store.removeTTL(modelName, id);
+
+        console.log(`[ObscuraClient] Cleaned up expired ${modelName}: ${id}`);
+      } catch (e) {
+        console.warn(`[ObscuraClient] Failed to cleanup ${modelName}/${id}:`, e.message);
+      }
+    }
+
+    // Also cleanup stories that don't have TTL tracking but are older than 24h
+    const storyModel = this._ormModels.get('story');
+    if (storyModel) {
+      const allStories = await storyModel.crdt.getAll();
+      for (const story of allStories) {
+        const age = now - story.timestamp;
+        if (age >= ttl24h) {
+          try {
+            // Clean up attachment
+            if (story.data?.mediaUrl && this._attachmentStore) {
+              try {
+                const parsed = JSON.parse(story.data.mediaUrl);
+                if (parsed.attachmentId) {
+                  await this._attachmentStore.delete(parsed.attachmentId);
+                }
+              } catch {
+                // Not JSON, skip
+              }
+            }
+
+            // Delete from storage and cache
+            await store.delete('story', story.id);
+            if (storyModel.crdt.elements) {
+              storyModel.crdt.elements.delete(story.id);
+            }
+            await store.removeTTL('story', story.id);
+            console.log(`[ObscuraClient] Cleaned up old story: ${story.id}`);
+          } catch (e) {
+            console.warn(`[ObscuraClient] Failed to cleanup story ${story.id}:`, e.message);
+          }
+        }
+      }
+    }
   }
 
   /**

@@ -387,6 +387,78 @@ test.describe('Scenario 5b: Cross-User Device Linking', () => {
     expect(displayedStories).toContain("Alice2's story");
     console.log(`Bob2 stories displayed: ${displayedStories.join(', ')}`);
 
+    // Verify 6: TTL cleanup removes old stories AND attachments
+    console.log('--- Verify 6: TTL cleanup removes old stories and attachments ---');
+
+    // Create a fake attachment and old story with mediaUrl
+    const { oldStoryId, attachmentId } = await bob2Page.evaluate(async () => {
+      const oldTimestamp = Date.now() - (25 * 60 * 60 * 1000); // 25 hours ago
+      const testAttachmentId = 'test_attachment_' + Date.now();
+
+      // Add fake attachment to cache
+      if (window.__client._attachmentStore) {
+        await window.__client._attachmentStore.put(testAttachmentId, new ArrayBuffer(100), {
+          contentType: 'image/jpeg',
+        });
+      }
+
+      // Create old story with mediaUrl pointing to attachment
+      const story = {
+        id: 'test_old_story_' + Date.now(),
+        data: {
+          content: 'Old expired story with image',
+          mediaUrl: JSON.stringify({ attachmentId: testAttachmentId, contentKey: [], nonce: [] }),
+        },
+        timestamp: oldTimestamp,
+        signature: new Uint8Array(0),
+        authorDeviceId: window.__client.deviceUUID,
+      };
+      await window.__client.story.crdt.add(story);
+      return { oldStoryId: story.id, attachmentId: testAttachmentId };
+    });
+    console.log(`Created old story: ${oldStoryId} with attachment: ${attachmentId}`);
+
+    // Verify story and attachment exist before cleanup
+    const beforeCleanup = await bob2Page.evaluate(async ({ storyId, attachId }) => {
+      const stories = await window.__client.story.where({}).exec();
+      const storyExists = stories.some(s => s.id === storyId);
+      const attachExists = window.__client._attachmentStore
+        ? await window.__client._attachmentStore.has(attachId)
+        : false;
+      return { storyExists, attachExists };
+    }, { storyId: oldStoryId, attachId: attachmentId });
+    expect(beforeCleanup.storyExists).toBe(true);
+    expect(beforeCleanup.attachExists).toBe(true);
+    console.log(`Before cleanup - Story exists: ${beforeCleanup.storyExists}, Attachment exists: ${beforeCleanup.attachExists}`);
+
+    // Run TTL cleanup
+    await bob2Page.evaluate(async () => {
+      await window.__client._runTTLCleanup();
+    });
+    console.log('TTL cleanup executed');
+
+    // Verify both are deleted
+    const afterCleanup = await bob2Page.evaluate(async ({ storyId, attachId }) => {
+      const stories = await window.__client.story.where({}).exec();
+      const storyExists = stories.some(s => s.id === storyId);
+      const attachExists = window.__client._attachmentStore
+        ? await window.__client._attachmentStore.has(attachId)
+        : false;
+      return { storyExists, attachExists };
+    }, { storyId: oldStoryId, attachId: attachmentId });
+    expect(afterCleanup.storyExists).toBe(false);
+    expect(afterCleanup.attachExists).toBe(false);
+    console.log(`After cleanup - Story exists: ${afterCleanup.storyExists}, Attachment exists: ${afterCleanup.attachExists}`);
+
+    // Verify fresh stories still exist
+    const freshStoriesAfter = await bob2Page.evaluate(async () => {
+      const stories = await window.__client.story.where({}).exec();
+      return stories.map(s => s.data.content);
+    });
+    expect(freshStoriesAfter).toContain("Bob's first story");
+    expect(freshStoriesAfter).toContain("Alice2's story");
+    console.log(`Fresh stories preserved: ${freshStoriesAfter.join(', ')}`);
+
     console.log('\n=== SCENARIO 5b COMPLETE ===\n');
 
     // ============================================================

@@ -31,8 +31,8 @@ export function render({ mode = 'camera', capturedPreview = null, friends = [], 
             <span id="duration-value">${duration}s</span>
           </div>
 
-          <button class="pix-camera__btn pix-camera__btn--send" id="send-btn" ${sending ? 'disabled' : ''}>
-            <ry-icon name="chevron-right"></ry-icon>
+          <button class="pix-camera__btn pix-camera__btn--send ${sending ? 'pix-camera__btn--loading' : ''}" id="send-btn" ${sending ? 'disabled' : ''}>
+            ${sending ? '<span class="pix-camera__spinner"></span>' : '<ry-icon name="chevron-right"></ry-icon>'}
           </button>
         </div>
 

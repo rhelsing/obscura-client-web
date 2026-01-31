@@ -182,9 +182,22 @@ export async function mount(container, client, router, params) {
 
   // Get messagesContainer and define scrollToBottom BEFORE downloadAttachments
   const getMessagesContainer = () => container.querySelector('#messages');
-  const scrollToBottom = () => {
+  const scrollToBottom = (instant = false) => {
     const mc = getMessagesContainer();
-    if (mc) mc.scrollTop = mc.scrollHeight;
+    if (!mc) return;
+
+    if (instant) {
+      // Immediate jump for initial page load
+      mc.scrollTop = mc.scrollHeight;
+    } else {
+      // Delayed smooth scroll for new messages
+      setTimeout(() => {
+        mc.scrollTo({
+          top: mc.scrollHeight,
+          behavior: 'smooth'
+        });
+      }, 500);
+    }
   };
 
   // Auto-download any attachments that need loading
@@ -224,9 +237,7 @@ export async function mount(container, client, router, params) {
     // Single re-render after all downloads complete
     container.innerHTML = render({ username, displayName, messages, streakCount });
     attachListeners();
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => scrollToBottom());
-    });
+    scrollToBottom();
   };
 
   const form = container.querySelector('#message-form');
@@ -404,9 +415,7 @@ export async function mount(container, client, router, params) {
         }
         container.innerHTML = render({ username, displayName, messages, streakCount });
         attachListeners();
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => scrollToBottom());
-        });
+        scrollToBottom();
         // Note: Message already persisted by ObscuraClient._persistMessage() with contentReference
       } catch (err) {
         console.error('Failed to download attachment:', err);
@@ -536,7 +545,7 @@ export async function mount(container, client, router, params) {
   }
 
   attachListeners();
-  scrollToBottom();
+  scrollToBottom(true);  // instant on page load
 
   // Start downloading any attachments that need loading
   downloadAttachments();

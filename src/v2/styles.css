@@ -1232,6 +1232,24 @@ ry-drawer a[data-navigo]:hover,
   color: white;
 }
 
+.pix-camera__btn--loading {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.pix-camera__spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: pix-spin 0.8s linear infinite;
+}
+
+@keyframes pix-spin {
+  to { transform: rotate(360deg); }
+}
+
 .pix-camera__duration {
   display: flex;
   align-items: center;

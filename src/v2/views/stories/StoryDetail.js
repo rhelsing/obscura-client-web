@@ -150,6 +150,7 @@ function parseMediaUrl(mediaUrl) {
           attachmentId: parsed.attachmentId,
           contentKey: new Uint8Array(parsed.contentKey),
           nonce: new Uint8Array(parsed.nonce),
+          contentHash: parsed.contentHash ? new Uint8Array(parsed.contentHash) : undefined,
           contentType: parsed.contentType || 'application/octet-stream',
         },
       };

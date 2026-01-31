@@ -25,7 +25,6 @@ export function render({ error = null, loading = false, mediaName = null } = {})
               id="content"
               placeholder="Share something..."
               rows="5"
-              required
               ${loading ? 'disabled' : ''}
             ></textarea>
           </ry-field>
@@ -85,8 +84,8 @@ export function mount(container, client, router) {
 
     const content = container.querySelector('#content').value.trim();
 
-    if (!content) {
-      container.innerHTML = render({ error: 'Please enter some content' });
+    if (!content && !pendingMedia) {
+      container.innerHTML = render({ error: 'Please enter content or add media' });
       mount(container, client, router);
       return;
     }
@@ -110,15 +109,23 @@ export function mount(container, client, router) {
           attachmentId: ref.attachmentId,
           contentKey: Array.from(ref.contentKey),
           nonce: Array.from(ref.nonce),
+          contentHash: Array.from(ref.contentHash),
           contentType: pendingMedia.contentType,
         });
       }
 
-      await client.story.create({
+      const story = await client.story.create({
         content,
         mediaUrl,
         authorUsername: client.username,
       });
+
+      // Cache the blob URL for immediate display after redirect
+      if (pendingMedia && story.id) {
+        const blob = new Blob([pendingMedia.bytes], { type: pendingMedia.contentType });
+        const blobUrl = URL.createObjectURL(blob);
+        sessionStorage.setItem(`story_media_${story.id}`, blobUrl);
+      }
 
       navigate('/stories');
 

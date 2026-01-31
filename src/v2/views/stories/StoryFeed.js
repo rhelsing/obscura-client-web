@@ -113,6 +113,7 @@ function parseMediaUrl(mediaUrl) {
           attachmentId: parsed.attachmentId,
           contentKey: new Uint8Array(parsed.contentKey),
           nonce: new Uint8Array(parsed.nonce),
+          contentHash: parsed.contentHash ? new Uint8Array(parsed.contentHash) : undefined,
           contentType: parsed.contentType || 'application/octet-stream',
         },
       };
@@ -244,13 +245,17 @@ export async function mount(container, client, router) {
     }
 
     // Resolve author names and check for media
-    const storiesWithNames = stories.map(s => ({
-      ...s,
-      authorName: resolveAuthorName(s, client, profileMap),
-      hasMedia: !!parseMediaUrl(s.data?.mediaUrl),
-      mediaBlobUrl: null,
-      mediaLoading: false,
-    }));
+    const storiesWithNames = stories.map(s => {
+      // Check sessionStorage for cached blob URL (set after posting)
+      const cachedUrl = sessionStorage.getItem(`story_media_${s.id}`);
+      return {
+        ...s,
+        authorName: resolveAuthorName(s, client, profileMap),
+        hasMedia: !!parseMediaUrl(s.data?.mediaUrl),
+        mediaBlobUrl: cachedUrl || null,
+        mediaLoading: false,
+      };
+    });
 
     // Store stories for later reference (for loading media)
     let displayStories = storiesWithNames;

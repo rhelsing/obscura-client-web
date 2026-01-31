@@ -83,11 +83,11 @@ function parseLink(link) {
   }
 }
 
-export function mount(container, client, router) {
+export function mount(container, client, router, error = null) {
   // Generate my link
   const myLink = `obscura://add?userId=${client.userId}&username=${client.username}`;
 
-  container.innerHTML = render({ myLink });
+  container.innerHTML = render({ myLink, error });
 
   // Generate QR code
   const qrContainer = container.querySelector('#my-qr');
@@ -144,8 +144,7 @@ export function mount(container, client, router) {
       });
 
     } catch (err) {
-      container.innerHTML = render({ myLink, error: err.message });
-      mount(container, client, router);
+      mount(container, client, router, err.message);
     }
   };
 

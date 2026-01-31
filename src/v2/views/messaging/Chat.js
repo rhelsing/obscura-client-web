@@ -407,15 +407,7 @@ export async function mount(container, client, router, params) {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => scrollToBottom());
         });
-
-        // Store to IndexedDB for persistence (use mediaUrl string)
-        await client.messageStore.addMessage(username, {
-          messageId: `att_${att.contentReference?.attachmentId || Date.now()}`,
-          content: '',
-          mediaUrl,
-          isSent: false,
-          timestamp: Date.now(),
-        });
+        // Note: Message already persisted by ObscuraClient._persistMessage() with contentReference
       } catch (err) {
         console.error('Failed to download attachment:', err);
         const targetMsg = messages.find(m => m.id === msgId);

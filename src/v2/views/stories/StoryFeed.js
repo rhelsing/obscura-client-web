@@ -205,8 +205,18 @@ export async function mount(container, client, router) {
       return;
     }
 
-    // Get all known device IDs (self + friends)
+    // Get all known device IDs (all own devices + friends)
     const knownDeviceIds = new Set([client.deviceUUID]);
+
+    // Add all own devices (for stories synced from other devices)
+    if (client.devices) {
+      client.devices.getAll().forEach(d => {
+        if (d.deviceUUID) knownDeviceIds.add(d.deviceUUID);
+        if (d.serverUserId) knownDeviceIds.add(d.serverUserId);
+      });
+    }
+
+    // Add all friend devices
     if (client.friends && client.friends.friends) {
       for (const [, data] of client.friends.friends) {
         if (data.devices) {

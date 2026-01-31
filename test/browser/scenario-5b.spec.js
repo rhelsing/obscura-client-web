@@ -350,11 +350,21 @@ test.describe('Scenario 5b: Cross-User Device Linking', () => {
     // Verify 4: Profile synced
     console.log('--- Verify 4: Profile synced ---');
     const bob2Profile = await bob2Page.evaluate(async () => {
-      const profiles = await window.__client.profile?.all?.()?.exec?.() || [];
-      return profiles[0]?.data || null;
+      // Query profiles from all own devices (same logic as ViewProfile.js)
+      const ownDeviceIds = [
+        window.__client.deviceUUID,
+        ...window.__client.devices.getAll().map(d => d.deviceUUID || d.serverUserId)
+      ];
+      const allProfiles = await window.__client.profile.where({}).exec();
+      const profile = allProfiles
+        .filter(p => ownDeviceIds.includes(p.authorDeviceId))
+        .sort((a, b) => b.timestamp - a.timestamp)[0];
+      return profile?.data || null;
     });
-    // Profile might be stored differently, check if exists
-    console.log('Bob2 profile data:', bob2Profile);
+    expect(bob2Profile).not.toBeNull();
+    expect(bob2Profile.displayName).toBe('Bob Test');
+    expect(bob2Profile.bio).toBe('Hello from Bob!');
+    console.log('Bob2 profile:', bob2Profile);
 
     // Verify 5: Stories synced AND DISPLAYED
     console.log('--- Verify 5: Stories synced and displayed ---');

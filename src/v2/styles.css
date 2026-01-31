@@ -488,6 +488,12 @@ ul {
 }
 
 /* Chat */
+.view.chat {
+  height: 100vh;
+  min-height: unset;
+  overflow: hidden;
+}
+
 .messages-container {
   flex: 1;
   overflow-y: auto;

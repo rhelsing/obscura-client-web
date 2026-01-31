@@ -180,24 +180,33 @@ export async function mount(container, client, router, params) {
 
   container.innerHTML = render({ username, displayName, messages, streakCount });
 
-  // Get messagesContainer and define scrollToBottom BEFORE downloadAttachments
+  // Get messagesContainer and helpers
   const getMessagesContainer = () => container.querySelector('#messages');
-  const scrollToBottom = (instant = false) => {
-    const mc = getMessagesContainer();
-    if (!mc) return;
 
-    if (instant) {
-      // Immediate jump for initial page load
-      mc.scrollTop = mc.scrollHeight;
-    } else {
-      // Delayed smooth scroll for new messages
-      setTimeout(() => {
-        mc.scrollTo({
-          top: mc.scrollHeight,
-          behavior: 'smooth'
-        });
-      }, 500);
-    }
+  // Track initial load period (instant scroll for first 2 seconds)
+  let isInitialLoad = true;
+  setTimeout(() => { isInitialLoad = false; }, 2000);
+
+  // Re-render while preserving scroll position
+  const rerender = () => {
+    const mc = getMessagesContainer();
+    const scrollPos = mc ? mc.scrollTop : 0;
+    container.innerHTML = render({ username, displayName, messages, streakCount });
+    const newMc = getMessagesContainer();
+    if (newMc) newMc.scrollTop = scrollPos;
+  };
+
+  const scrollToBottom = (instant = false) => {
+    const useInstant = instant || isInitialLoad;
+    requestAnimationFrame(() => {
+      const mc = getMessagesContainer();
+      if (!mc) return;
+      if (useInstant) {
+        mc.scrollTop = mc.scrollHeight;
+      } else {
+        mc.scrollTo({ top: mc.scrollHeight, behavior: 'smooth' });
+      }
+    });
   };
 
   // Auto-download any attachments that need loading
@@ -211,7 +220,7 @@ export async function mount(container, client, router, params) {
 
     // Mark all as downloading, single render
     toDownload.forEach(m => m.downloading = true);
-    container.innerHTML = render({ username, displayName, messages, streakCount });
+    rerender();
     attachListeners();
 
     // Download all in parallel
@@ -235,7 +244,7 @@ export async function mount(container, client, router, params) {
     }));
 
     // Single re-render after all downloads complete
-    container.innerHTML = render({ username, displayName, messages, streakCount });
+    rerender();
     attachListeners();
     scrollToBottom();
   };
@@ -263,9 +272,13 @@ export async function mount(container, client, router, params) {
       fromMe: true,
       timestamp: Date.now()
     });
-    container.innerHTML = render({ username, displayName, messages, streakCount });
+    rerender();
     scrollToBottom();
     attachListeners();
+
+    // Re-focus the input after re-render
+    const newInput = container.querySelector('#message-text');
+    if (newInput) newInput.focus();
 
     try {
       await client.send(username, { text });
@@ -314,7 +327,7 @@ export async function mount(container, client, router, params) {
       };
       messages.push(msg);
       console.log('[Upload] Step 9: Messages array now has', messages.length, 'messages,', messages.filter(m => m.imageDataUrl).length, 'with images');
-      container.innerHTML = render({ username, displayName, messages, streakCount });
+      rerender();
       const imgCount = container.querySelectorAll('.attachment-image').length;
       console.log('[Upload] Step 9: DOM now has', imgCount, 'attachment-image elements');
       scrollToBottom();
@@ -370,7 +383,7 @@ export async function mount(container, client, router, params) {
         fromMe: false,
         timestamp: msg.timestamp || Date.now()
       });
-      container.innerHTML = render({ username, displayName, messages, streakCount });
+      rerender();
       scrollToBottom();
       attachListeners();
     }
@@ -396,7 +409,7 @@ export async function mount(container, client, router, params) {
         timestamp: Date.now()
       };
       messages.push(msg);
-      container.innerHTML = render({ username, displayName, messages, streakCount });
+      rerender();
       scrollToBottom();
       attachListeners();
 
@@ -413,7 +426,7 @@ export async function mount(container, client, router, params) {
           targetMsg.imageDataUrl = dataUrl;
           targetMsg.downloaded = true;
         }
-        container.innerHTML = render({ username, displayName, messages, streakCount });
+        rerender();
         attachListeners();
         scrollToBottom();
         // Note: Message already persisted by ObscuraClient._persistMessage() with contentReference
@@ -424,7 +437,7 @@ export async function mount(container, client, router, params) {
           targetMsg.downloading = false;
           targetMsg.attachmentPreview = '[Failed to load]';
         }
-        container.innerHTML = render({ username, displayName, messages, streakCount });
+        rerender();
         attachListeners();
       }
     }
@@ -457,7 +470,7 @@ export async function mount(container, client, router, params) {
         downloaded: false,
       };
       messages.push(msg);
-      container.innerHTML = render({ username, displayName, messages, streakCount });
+      rerender();
       scrollToBottom();
       attachListeners();
 
@@ -476,7 +489,7 @@ export async function mount(container, client, router, params) {
               targetMsg.imageDataUrl = dataUrl;
               targetMsg.downloaded = true;
             }
-            container.innerHTML = render({ username, displayName, messages, streakCount });
+            rerender();
             attachListeners();
             scrollToBottom();
           }
@@ -487,7 +500,7 @@ export async function mount(container, client, router, params) {
             targetMsg.downloading = false;
             targetMsg.attachmentPreview = '[Failed to load]';
           }
-          container.innerHTML = render({ username, displayName, messages, streakCount });
+          rerender();
           attachListeners();
         }
       }
@@ -520,6 +533,13 @@ export async function mount(container, client, router, params) {
       newFileInput.addEventListener('change', handleFileSelect);
     }
 
+    // Scroll to bottom when images load (they change container height)
+    container.querySelectorAll('.attachment-image').forEach(img => {
+      if (!img.complete) {
+        img.addEventListener('load', () => scrollToBottom());
+      }
+    });
+
     // Download buttons
     container.querySelectorAll('.download-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -533,7 +553,7 @@ export async function mount(container, client, router, params) {
             msg.downloaded = true;
             msg.attachmentPreview = `[${data.length} bytes]`;
           }
-          container.innerHTML = render({ username, displayName, messages, streakCount });
+          rerender();
           attachListeners();
         } catch (err) {
           btn.textContent = 'Failed';

@@ -36,6 +36,7 @@ export class InMemoryStore {
     this.deviceUsername = null;
     this.deviceUUID = null;
     this.coreUsername = null;
+    this.isFirstDevice = false;
   }
 
   // === Signal Protocol Store Interface ===
@@ -125,19 +126,22 @@ export class InMemoryStore {
       deviceUsername: this.deviceUsername,
       deviceUUID: this.deviceUUID,
       coreUsername: this.coreUsername,
+      isFirstDevice: this.isFirstDevice,
     };
   }
 
-  async storeDeviceIdentity({ deviceUsername, deviceUUID, coreUsername }) {
+  async storeDeviceIdentity({ deviceUsername, deviceUUID, coreUsername, isFirstDevice }) {
     this.deviceUsername = deviceUsername;
     this.deviceUUID = deviceUUID;
     this.coreUsername = coreUsername;
+    this.isFirstDevice = isFirstDevice ?? false;
   }
 
   async clearDeviceIdentity() {
     this.deviceUsername = null;
     this.deviceUUID = null;
     this.coreUsername = null;
+    this.isFirstDevice = false;
   }
 
   // === Helpers ===
@@ -156,6 +160,7 @@ export class InMemoryStore {
     this.deviceUsername = null;
     this.deviceUUID = null;
     this.coreUsername = null;
+    this.isFirstDevice = false;
   }
 
   getPreKeyCount() {

@@ -232,16 +232,18 @@ export class IndexedDBStore {
       deviceUsername: record.deviceUsername,
       deviceUUID: record.deviceUUID,
       coreUsername: record.coreUsername,
+      isFirstDevice: record.isFirstDevice ?? false,
     };
   }
 
-  async storeDeviceIdentity({ deviceUsername, deviceUUID, coreUsername }) {
+  async storeDeviceIdentity({ deviceUsername, deviceUUID, coreUsername, isFirstDevice }) {
     const store = await this._getStore(STORES.DEVICE_IDENTITY, 'readwrite');
     await this._promisify(store.put({
       id: 'current',
       deviceUsername,
       deviceUUID,
       coreUsername,
+      isFirstDevice: isFirstDevice ?? false,
     }));
   }
 

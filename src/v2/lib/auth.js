@@ -60,6 +60,7 @@ export async function register(username, password, opts = {}) {
     deviceUsername,
     deviceUUID: keys.deviceUUID,
     coreUsername: username,
+    isFirstDevice: true,
   });
 
   // Parse userId from token
@@ -213,6 +214,7 @@ export async function login(username, password, opts = {}) {
     deviceUsername,
     deviceUUID,
     coreUsername: username,
+    isFirstDevice: false,
   });
 
   const userId = parseUserId(deviceData.token);

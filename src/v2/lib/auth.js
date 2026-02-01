@@ -294,3 +294,50 @@ function arrayBufferToBase64(buffer) {
   }
   return btoa(binary);
 }
+
+/**
+ * Unlink this device - wipes all local data for the user
+ * After this, logging in again will treat it as a fresh device needing link approval
+ *
+ * @param {string} username - Core username
+ * @param {string} userId - User ID (for message/friend store namespacing)
+ * @returns {Promise<void>}
+ */
+export async function unlinkDevice(username, userId) {
+  if (typeof indexedDB === 'undefined') {
+    throw new Error('IndexedDB not available');
+  }
+
+  // All database prefixes used by the app
+  const databases = [
+    `obscura_signal_v2_${username}`,
+    `obscura_device_${username}`,
+    `obscura_friends_v2_${userId}`,
+    `obscura_messages_v2_${userId}`,
+    `obscura_attachments_${userId}`,
+    `obscura_logs_${username}`,
+  ];
+
+  const errors = [];
+
+  for (const dbName of databases) {
+    try {
+      await new Promise((resolve, reject) => {
+        const request = indexedDB.deleteDatabase(dbName);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+        request.onblocked = () => {
+          // Database is open elsewhere - still counts as pending delete
+          console.warn(`Database ${dbName} deletion blocked - will complete when connections close`);
+          resolve();
+        };
+      });
+    } catch (err) {
+      errors.push({ dbName, error: err.message });
+    }
+  }
+
+  if (errors.length > 0) {
+    console.warn('Some databases failed to delete:', errors);
+  }
+}

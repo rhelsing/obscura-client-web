@@ -340,4 +340,9 @@ export async function unlinkDevice(username, userId) {
   if (errors.length > 0) {
     console.warn('Some databases failed to delete:', errors);
   }
+
+  // Also clear localStorage session
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem('obscura_session');
+  }
 }

@@ -315,7 +315,8 @@ export async function unlinkDevice(username, userId) {
     `obscura_friends_v2_${userId}`,
     `obscura_messages_v2_${userId}`,
     `obscura_attachments_${userId}`,
-    `obscura_logs_${username}`,
+    `obscura_logs_${userId}`,
+    `obscura_models_${userId}`,
   ];
 
   const errors = [];

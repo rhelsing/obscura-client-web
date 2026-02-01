@@ -3,7 +3,7 @@
  * Per identity.md spec: Create shell account + device account
  */
 
-import { generateDeviceUUID, uuidPrefix } from '../crypto/uuid.js';
+import { generateDeviceUUID, generateDeviceUsername } from '../crypto/uuid.js';
 import { generateP2PIdentity } from '../crypto/ed25519.js';
 import { generateMnemonic } from '../crypto/bip39.js';
 import { deriveRecoveryKeypair } from '../crypto/signatures.js';
@@ -99,7 +99,8 @@ export async function registerFirstDevice(client, username, password, keys) {
   }
 
   // Step 2: Register device account (with Signal keys)
-  const deviceUsername = `${username}_${uuidPrefix(deviceUUID)}`;
+  // Use unlinkable device username - server cannot correlate with shell account
+  const deviceUsername = generateDeviceUsername();
   const signalKeys = formatSignalKeysForServer(signal);
 
   let deviceResult;

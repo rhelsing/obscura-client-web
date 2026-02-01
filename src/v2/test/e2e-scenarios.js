@@ -7,7 +7,7 @@
  */
 
 import { createClient } from '../api/client.js';
-import { generateDeviceUUID, uuidPrefix } from '../crypto/uuid.js';
+import { generateDeviceUUID, generateDeviceUsername } from '../crypto/uuid.js';
 import { generateP2PIdentity, sign, verify } from '../crypto/ed25519.js';
 import { generateMnemonic, validateMnemonic, deriveKeypair } from '../crypto/bip39.js';
 import { encryptAttachment, decryptAttachment } from '../crypto/aes.js';
@@ -83,8 +83,8 @@ async function scenario1_FirstDeviceRegistration() {
 
     await delay(250);
 
-    // Step 2: Register device account
-    const deviceUsername = `${username}_${uuidPrefix(keys.deviceUUID)}`;
+    // Step 2: Register device account (unlinkable from shell)
+    const deviceUsername = generateDeviceUsername();
     const deviceResult = await client.registerDevice({
       username: deviceUsername,
       password,
@@ -212,7 +212,7 @@ async function scenario3_NewDeviceDetection(firstDevice) {
 
     // Generate new device keys
     const newDeviceKeys = await generateFirstDeviceKeys();
-    const newDeviceUsername = `${firstDevice.username}_${uuidPrefix(newDeviceKeys.deviceUUID)}`;
+    const newDeviceUsername = generateDeviceUsername();
     pass('Generate new device keys', newDeviceUsername);
 
     await delay(250);

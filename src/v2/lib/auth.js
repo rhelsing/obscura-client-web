@@ -5,7 +5,7 @@
 
 import { generateFirstDeviceKeys, formatSignalKeysForServer } from '../auth/register.js';
 import { LoginScenario, detectScenario } from '../auth/scenarios.js';
-import { generateDeviceUUID, uuidPrefix } from '../crypto/uuid.js';
+import { generateDeviceUUID, generateDeviceUsername } from '../crypto/uuid.js';
 import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
 import { createStore, InMemoryStore } from './store.js';
 import { signLinkChallenge } from '../crypto/signatures.js';
@@ -54,8 +54,8 @@ export async function register(username, password, opts = {}) {
     await store.storePreKey(pk.keyId, pk.keyPair);
   }
 
-  // Store device identity
-  const deviceUsername = `${username}_${uuidPrefix(keys.deviceUUID)}`;
+  // Store device identity - use unlinkable device username
+  const deviceUsername = generateDeviceUsername();
   await store.storeDeviceIdentity({
     deviceUsername,
     deviceUUID: keys.deviceUUID,
@@ -164,7 +164,7 @@ export async function login(username, password, opts = {}) {
 
   // New device - generate keys and register device account
   const deviceUUID = generateDeviceUUID();
-  const deviceUsername = `${username}_${uuidPrefix(deviceUUID)}`;
+  const deviceUsername = generateDeviceUsername();
 
   const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
   const registrationId = KeyHelper.generateRegistrationId();

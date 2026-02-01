@@ -709,6 +709,25 @@ export class ObscuraClient {
         return;
       }
 
+      // Auto-recovery: "No record" + Whisper = no session but sender expects one
+      const isNoRecord = e.message?.toLowerCase().includes('no record');
+      const isWhisper = frame.envelope?.message?.type === 2;
+
+      if (isNoRecord && isWhisper && frame.envelope?.sourceUserId) {
+        console.log('[ws] Auto-recovering: no session for sender, sending SESSION_RESET');
+        try {
+          await this.resetSessionWith(frame.envelope.sourceUserId, 'auto_no_record');
+          await logger.logSessionReset(frame.envelope.sourceUserId, 'auto_no_record');
+          // ACK the message - it's encrypted with dead session, unrecoverable
+          // This stops retry loop. Message is lost, sender must resend.
+          this._acknowledge(frame.envelope.id);
+          return;
+        } catch (resetErr) {
+          console.error('[ws] Auto-reset failed:', resetErr.message);
+          // Fall through to normal error handling
+        }
+      }
+
       // Enhanced diagnostic logging - show which device and what message
       const deviceSuffix = this.userId?.slice(-8) || 'unknown';
       const envelopeId = frame?.envelope?.id ?
@@ -779,6 +798,12 @@ export class ObscuraClient {
       case 'SYNC_REQUEST':
         // Another device is requesting a full sync - respond with SYNC_BLOB
         this._handleSyncRequest(msg.sourceUserId);
+        break;
+
+      case 'SESSION_RESET':
+        // Other party's session is broken - delete ours so next message uses PreKey
+        await this._handleSessionReset(msg.sourceUserId, msg.resetReason);
+        this._emit('sessionReset', { sourceUserId: msg.sourceUserId, reason: msg.resetReason });
         break;
 
       case 'CONTENT_REFERENCE':
@@ -1221,6 +1246,86 @@ export class ObscuraClient {
   }
 
   /**
+   * Reset Signal session with a specific user
+   * Use when receiving "Bad MAC" or "No record" errors from a contact
+   *
+   * Flow:
+   * 1. Delete local session for the user
+   * 2. Send SESSION_RESET message (establishes new session via PreKey)
+   * 3. User receives it, deletes their session with us
+   * 4. Next message exchange uses fresh PreKey handshake
+   *
+   * @param {string} userId - The user's serverUserId (device account)
+   * @param {string} reason - Optional reason for reset (for logging)
+   * @returns {Promise<void>}
+   */
+  async resetSessionWith(userId, reason = 'manual_reset') {
+    const address = `${userId}.1`;
+
+    // 1. Delete local session (forces PreKey on next send)
+    await this.store.removeSession(address);
+    console.log('[ObscuraClient] Deleted local session for:', userId?.slice(-8));
+
+    // 2. Send SESSION_RESET to the user (this will fetch their prekeys, build new session)
+    await this.messenger.sendMessage(userId, {
+      type: 'SESSION_RESET',
+      resetReason: reason,
+      timestamp: Date.now(),
+    });
+
+    console.log('[ObscuraClient] Sent SESSION_RESET to:', userId?.slice(-8), 'reason:', reason);
+    await logger.logSessionReset(userId, reason);
+  }
+
+  /**
+   * Reset all Signal sessions with all known contacts
+   * Nuclear option - use when device is completely out of sync
+   *
+   * @param {string} reason - Reason for reset (for logging)
+   * @returns {Promise<number>} Number of sessions reset
+   */
+  async resetAllSessions(reason = 'device_recovery') {
+    // Get all friend device userIds
+    const allFriends = this.friends.getAll();
+    const allDeviceIds = [];
+
+    for (const friend of allFriends) {
+      // Include all devices for each friend
+      if (friend.devices && friend.devices.length > 0) {
+        for (const device of friend.devices) {
+          allDeviceIds.push(device.serverUserId);
+        }
+      }
+    }
+
+    // Also include own devices (Bob1↔Bob2) for self-sync recovery
+    const ownDeviceIds = this.devices.getSelfSyncTargets();
+    allDeviceIds.push(...ownDeviceIds);
+
+    if (allDeviceIds.length === 0) {
+      console.log('[ObscuraClient] No devices to reset');
+      return 0;
+    }
+
+    const friendCount = allDeviceIds.length - ownDeviceIds.length;
+    const ownCount = ownDeviceIds.length;
+    console.log(`[ObscuraClient] Resetting sessions with ${allDeviceIds.length} devices (${friendCount} friend, ${ownCount} own)...`);
+
+    let resetCount = 0;
+    for (const deviceId of allDeviceIds) {
+      try {
+        await this.resetSessionWith(deviceId, reason);
+        resetCount++;
+      } catch (e) {
+        console.warn('[ObscuraClient] Failed to reset session with:', deviceId?.slice(-8), e.message);
+      }
+    }
+
+    console.log(`[ObscuraClient] Reset ${resetCount}/${allDeviceIds.length} sessions`);
+    return resetCount;
+  }
+
+  /**
    * Handle incoming SYNC_REQUEST - respond with SYNC_BLOB
    */
   async _handleSyncRequest(sourceUserId) {
@@ -1230,6 +1335,21 @@ export class ObscuraClient {
     } catch (e) {
       console.error('[ObscuraClient] Failed to handle SYNC_REQUEST:', e.message);
       await logger.logOrmSyncError('sync_request', e, 'send');
+    }
+  }
+
+  /**
+   * Handle incoming SESSION_RESET - delete local session with sender
+   * This forces the next message exchange to use PreKey (fresh session)
+   */
+  async _handleSessionReset(sourceUserId, reason) {
+    try {
+      const address = `${sourceUserId}.1`;
+      await this.store.removeSession(address);
+      console.log('[ObscuraClient] Session reset received from:', sourceUserId?.slice(-8), 'reason:', reason);
+      await logger.logSessionReset(sourceUserId, reason || 'remote_request');
+    } catch (e) {
+      console.error('[ObscuraClient] Failed to handle SESSION_RESET:', e.message);
     }
   }
 

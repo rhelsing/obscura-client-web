@@ -609,13 +609,13 @@ test.describe('Scenarios 1-4: Core Flow', () => {
     await page.waitForSelector('.logs-list', { timeout: 10000 });
 
     // Check that we have logged events (gateway connect, send, receive)
-    const eventCount = await page.$eval('badge[variant="primary"]', el => el.textContent);
+    const eventCount = await page.$eval('ry-badge[variant="primary"]', el => el.textContent);
     const count = parseInt(eventCount);
     expect(count).toBeGreaterThan(0);
     console.log(`Alice has ${count} log events`);
 
     // Check for specific event types in the logs
-    const logEvents = await page.$$eval('.log-event badge', els => els.map(el => el.textContent));
+    const logEvents = await page.$$eval('.log-event ry-badge', els => els.map(el => el.textContent));
     expect(logEvents.some(e => e.includes('send'))).toBe(true);
     console.log('Logs verified: send events present');
 

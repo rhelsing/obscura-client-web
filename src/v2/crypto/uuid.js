@@ -36,9 +36,22 @@ export function generateDeviceUUID() {
  * Extract first 8 characters of UUID for server username suffix
  * @param {string} uuid - Full UUID
  * @returns {string} First 8 characters (e.g., "550e8400")
+ * @deprecated Use generateDeviceUsername() for unlinkable device IDs
  */
 export function uuidPrefix(uuid) {
   return uuid.replace(/-/g, '').slice(0, 8);
+}
+
+/**
+ * Generate an unlinkable device username
+ * Uses random bytes so server cannot link devices to shell account
+ * @returns {string} Device username (e.g., "d_7f3a9c2b1e4d8f6a0c5b3e9d7a2f1c8b")
+ */
+export function generateDeviceUsername() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  const hex = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+  return `d_${hex}`;
 }
 
 /**

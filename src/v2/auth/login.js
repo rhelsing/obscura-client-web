@@ -4,7 +4,7 @@
  */
 
 import { LoginScenario, detectScenario } from './scenarios.js';
-import { generateDeviceUUID, uuidPrefix } from '../crypto/uuid.js';
+import { generateDeviceUUID, generateDeviceUsername } from '../crypto/uuid.js';
 import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
 import { formatSignalKeysForServer } from './register.js';
 
@@ -122,7 +122,7 @@ export async function login(client, username, password, deviceStore) {
 export async function registerNewDevice(client, coreUsername, password) {
   // Generate device UUID
   const deviceUUID = generateDeviceUUID();
-  const deviceUsername = `${coreUsername}_${uuidPrefix(deviceUUID)}`;
+  const deviceUsername = generateDeviceUsername();
 
   // Generate Signal keys for this device
   const identityKeyPair = await KeyHelper.generateIdentityKeyPair();

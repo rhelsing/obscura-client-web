@@ -7,7 +7,7 @@
  */
 
 import { createClient } from '../api/client.js';
-import { generateDeviceUUID, uuidPrefix, isValidUUID } from '../crypto/uuid.js';
+import { generateDeviceUUID, uuidPrefix, isValidUUID, generateDeviceUsername } from '../crypto/uuid.js';
 import { generateP2PIdentity, sign, verify } from '../crypto/ed25519.js';
 import { generateMnemonic, validateMnemonic, deriveKeypair } from '../crypto/bip39.js';
 import { encode, decode, encodeJSON, decodeJSON } from '../crypto/base58.js';
@@ -251,7 +251,7 @@ async function testAuthFlows() {
 
   // Test 5: Register device account with keys
   const deviceUUID = generateDeviceUUID();
-  const deviceUsername = `${testUser}_${uuidPrefix(deviceUUID)}`;
+  const deviceUsername = generateDeviceUsername();
 
   try {
     const keys = await generateFirstDeviceKeys();

@@ -8,6 +8,7 @@
 import { navigate, clearClient } from '../index.js';
 import { renderNav, initNav } from '../components/Nav.js';
 import { ObscuraClient } from '../../lib/ObscuraClient.js';
+import { unlinkDevice } from '../../lib/auth.js';
 
 let cleanup = null;
 
@@ -88,7 +89,10 @@ export function render({ settings = null, loading = false, saving = false } = {}
 
         <section class="settings-group danger">
           <h2>Account</h2>
-          <button variant="danger" modal="logout-modal">Log Out</button>
+          <stack gap="sm">
+            <button variant="danger" modal="logout-modal">Log Out</button>
+            <button variant="danger" modal="unlink-modal">Unlink Device</button>
+          </stack>
         </section>
       </stack>
 
@@ -97,6 +101,15 @@ export function render({ settings = null, loading = false, saving = false } = {}
         <actions slot="footer">
           <button variant="ghost" close>Cancel</button>
           <button variant="danger" id="confirm-logout">Logout</button>
+        </actions>
+      </ry-modal>
+
+      <ry-modal id="unlink-modal" title="Unlink Device">
+        <p>This will erase all local data for this account on this device.</p>
+        <p>You will need to link this device again from another device to use this account here.</p>
+        <actions slot="footer">
+          <button variant="ghost" close>Cancel</button>
+          <button variant="danger" id="confirm-unlink">Unlink</button>
         </actions>
       </ry-modal>
 
@@ -171,6 +184,27 @@ export async function mount(container, client, router) {
       ObscuraClient.clearSession();
       clearClient();
       navigate('/login');
+    });
+
+    // Unlink device - wipes all local data
+    const confirmUnlink = container.querySelector('#confirm-unlink');
+    confirmUnlink.addEventListener('click', async () => {
+      confirmUnlink.disabled = true;
+      confirmUnlink.textContent = 'Unlinking...';
+
+      try {
+        client.disconnect();
+        await unlinkDevice(client.username, client.userId);
+        clearClient();
+        navigate('/login');
+      } catch (err) {
+        console.error('Failed to unlink device:', err);
+        confirmUnlink.textContent = 'Failed';
+        setTimeout(() => {
+          confirmUnlink.disabled = false;
+          confirmUnlink.textContent = 'Unlink';
+        }, 2000);
+      }
     });
 
     // Init nav

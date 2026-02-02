@@ -1153,6 +1153,9 @@ export class ObscuraClient {
       type: 'SYNC_BLOB',
       syncBlob: { compressedData },
     });
+
+    // Announce updated device list to all friends
+    await this.announceDevices();
   }
 
   /**
@@ -1456,10 +1459,32 @@ export class ObscuraClient {
 
     return {
       ...approval,
-      apply() {
+      async apply() {
         // Apply the device list
         if (approval.ownDevices) {
           self.devices.setAll(approval.ownDevices);
+        }
+
+        // Announce ourselves to all other own devices
+        // This provides redundancy - both approver and new device announce
+        const selfTargets = self.devices.getSelfSyncTargets();
+        if (selfTargets.length > 0) {
+          const deviceAnnounce = {
+            devices: self.devices.buildFullList(self.deviceInfo || {
+              serverUserId: self.userId,
+              deviceUUID: self.deviceUUID,
+              deviceName: self.username,
+            }),
+            timestamp: Date.now(),
+            isRevocation: false,
+            signature: new Uint8Array(64),
+          };
+          for (const targetUserId of selfTargets) {
+            await self.messenger.sendMessage(targetUserId, {
+              type: 'DEVICE_ANNOUNCE',
+              deviceAnnounce,
+            });
+          }
         }
       },
     };
@@ -1594,10 +1619,10 @@ export class ObscuraClient {
               // Also remove from in-memory cache
               self.messages = self.messages.filter(m => !revokedDeviceIds.includes(m.authorDeviceId));
             }
-
-            // Update own device list (remove revoked device)
-            self.devices.setAll(announce.devices);
           }
+
+          // Always update own device list (handles both new devices and revocations)
+          self.devices.setAll(announce.devices);
           return;
         }
 

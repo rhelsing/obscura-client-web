@@ -166,7 +166,6 @@ test.describe('Scenario 16: Multi-Device Offline Sync (Bidirectional)', () => {
 
     await bob1Page.evaluate(async (code) => {
       await window.__client.approveLink(code);
-      await window.__client.announceDevices();
     }, bob2LinkCode);
 
     await bob2Page.waitForURL('**/stories', { timeout: 20000 });
@@ -403,7 +402,6 @@ test.describe('Scenario 16: Multi-Device Offline Sync (Bidirectional)', () => {
       const bob2ReLinkCode = await bob2Page.$eval('.link-code', el => el.value || el.textContent);
       await bob1Page.evaluate(async (code) => {
         await window.__client.approveLink(code);
-        await window.__client.announceDevices();
       }, bob2ReLinkCode);
 
       await bob2Page.waitForURL('**/stories', { timeout: 20000 });
@@ -577,7 +575,6 @@ test.describe('Scenario 16: Multi-Device Offline Sync (Bidirectional)', () => {
 
       await bob2Page.evaluate(async (code) => {
         await window.__client.approveLink(code);
-        await window.__client.announceDevices();
       }, bob1ReLinkCode);
 
       await bob1Page.waitForURL('**/stories', { timeout: 20000 });
@@ -692,6 +689,17 @@ test.describe('Scenario 16: Multi-Device Offline Sync (Bidirectional)', () => {
     expect(bob1Devices).toContain(bob2UserId);
     expect(bob2Devices).toContain(bob1UserId);
     console.log('Devices synced: PASS');
+
+    // Verify Alice knows about both Bob devices (critical for fan-out messaging)
+    console.log('\n--- Alice device knowledge ---');
+    const aliceKnowsBobDevices = await alicePage.evaluate((bobUsername) => {
+      const bob = window.__client.friends.friends.get(bobUsername);
+      return bob?.devices?.map(d => d.serverUserId) || [];
+    }, bobUsername);
+    console.log('Alice knows Bob devices:', aliceKnowsBobDevices);
+    expect(aliceKnowsBobDevices).toContain(bob1UserId);
+    expect(aliceKnowsBobDevices).toContain(bob2UserId);
+    console.log('Alice knows both Bob devices: PASS');
 
     console.log('\n========================================');
     console.log('SCENARIO 16 COMPLETE');

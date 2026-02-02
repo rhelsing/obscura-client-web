@@ -248,6 +248,31 @@ export function createMessageStore(userId) {
 
       return toDelete.length;
     },
+
+    /**
+     * Migrate messages from one conversationId to another
+     * Used when DEVICE_ANNOUNCE reveals that messages stored under a raw serverUserId
+     * actually belong to a known friend's conversation.
+     * @param {string} fromConversationId - Old conversation ID (typically a serverUserId)
+     * @param {string} toConversationId - New conversation ID (friend's username)
+     * @returns {Promise<number>} Number of messages migrated
+     */
+    async migrateMessages(fromConversationId, toConversationId) {
+      if (fromConversationId === toConversationId) return 0;
+
+      const messages = await this.getMessages(fromConversationId);
+      if (messages.length === 0) return 0;
+
+      const store = await getStore(STORES.MESSAGES, 'readwrite');
+      for (const msg of messages) {
+        // Update the conversationId and re-store
+        msg.conversationId = toConversationId;
+        await promisify(store.put(msg));
+      }
+
+      console.log(`[MessageStore] Migrated ${messages.length} messages from ${fromConversationId.slice(-8)} to ${toConversationId}`);
+      return messages.length;
+    },
   };
 }
 

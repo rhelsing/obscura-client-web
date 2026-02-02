@@ -148,10 +148,6 @@ export async function login(username, password, opts = {}) {
   const storedIdentity = await store.getDeviceIdentity();
 
   if (storedIdentity && storedIdentity.coreUsername === username) {
-    // Existing device - we have local keys, use shell token
-    // (In single-account mode, shell login IS the device login)
-    const userId = parseUserId(shellToken);
-
     // Load and decrypt identity keys (with migration for old format)
     const identityKeyPair = await loadAndDecryptIdentity(store, password);
 
@@ -159,24 +155,84 @@ export async function login(username, password, opts = {}) {
       return { status: 'error', reason: 'Could not decrypt local keys - try clearing data and re-linking' };
     }
 
-    return {
-      status: 'ok',
-      client: {
-        store,
-        token: shellToken,
-        refreshToken: null,
-        userId,
-        username,
-        deviceUsername: storedIdentity.deviceUsername,
-        deviceUUID: storedIdentity.deviceUUID,
-        deviceInfo: {
+    // Check if device is pending approval (never completed linking)
+    // This handles the case where user logged out before approval was received
+    if (storedIdentity.linkStatus === 'pending') {
+      console.log('[auth] Device has pending link status, regenerating link code');
+
+      // Re-login the device account to get a fresh token
+      // (The device account was already registered on the server during first login attempt)
+      const deviceRes = await fetch(`${apiUrl}/v1/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: storedIdentity.deviceUsername,
+          password,
+        }),
+      });
+
+      if (!deviceRes.ok) {
+        // Device account may have been cleaned up - treat as completely new device
+        // Clear the stale pending identity and fall through to new device flow
+        console.log('[auth] Pending device account login failed, clearing stale identity');
+        await store.storeDeviceIdentity(null);
+        // Fall through to new device flow below
+      } else {
+        const deviceData = await deviceRes.json();
+        const userId = parseUserId(deviceData.token);
+
+        // Regenerate link code with fresh challenge/signature
+        const linkCode = await generateLinkCode(
+          userId,
+          storedIdentity.deviceUsername,
+          storedIdentity.deviceUUID,
+          identityKeyPair
+        );
+
+        return {
+          status: 'newDevice',
+          linkCode,
+          client: {
+            store,
+            token: deviceData.token,
+            refreshToken: deviceData.refreshToken,
+            userId,
+            username,
+            deviceUsername: storedIdentity.deviceUsername,
+            deviceUUID: storedIdentity.deviceUUID,
+            deviceInfo: {
+              deviceUUID: storedIdentity.deviceUUID,
+              serverUserId: userId,
+              deviceName: detectDeviceName(),
+              signalIdentityKey: new Uint8Array(identityKeyPair.pubKey),
+            },
+          },
+        };
+      }
+    } else {
+      // Existing approved device - we have local keys, use shell token
+      // (In single-account mode, shell login IS the device login)
+      const userId = parseUserId(shellToken);
+
+      return {
+        status: 'ok',
+        client: {
+          store,
+          token: shellToken,
+          refreshToken: null,
+          userId,
+          username,
+          deviceUsername: storedIdentity.deviceUsername,
           deviceUUID: storedIdentity.deviceUUID,
-          serverUserId: userId,
-          deviceName: detectDeviceName(),
-          signalIdentityKey: identityKeyPair ? new Uint8Array(identityKeyPair.pubKey) : null,
+          deviceInfo: {
+            deviceUUID: storedIdentity.deviceUUID,
+            serverUserId: userId,
+            deviceName: detectDeviceName(),
+            signalIdentityKey: identityKeyPair ? new Uint8Array(identityKeyPair.pubKey) : null,
+          },
         },
-      },
-    };
+      };
+    }
   }
 
   // New device - generate keys and register device account
@@ -232,12 +288,13 @@ export async function login(username, password, opts = {}) {
     await store.storePreKey(pk.keyId, pk.keyPair);
   }
 
-  // Store device identity
+  // Store device identity with pending status
   await store.storeDeviceIdentity({
     deviceUsername,
     deviceUUID,
     coreUsername: username,
     isFirstDevice: false,
+    linkStatus: 'pending',  // Will be set to 'approved' when DEVICE_LINK_APPROVAL received
   });
 
   const userId = parseUserId(deviceData.token);

@@ -1430,10 +1430,25 @@ export class ObscuraClient {
 
     return {
       ...approval,
-      apply() {
+      async apply() {
         // Apply the device list
         if (approval.ownDevices) {
           self.devices.setAll(approval.ownDevices);
+        }
+
+        // Mark device as approved in the store
+        // This prevents the pending device flow on next login
+        if (self.store) {
+          try {
+            const identity = await self.store.getDeviceIdentity();
+            if (identity) {
+              identity.linkStatus = 'approved';
+              await self.store.storeDeviceIdentity(identity);
+              console.log('[ObscuraClient] Device link status updated to approved');
+            }
+          } catch (err) {
+            console.warn('[ObscuraClient] Failed to update link status:', err);
+          }
         }
       },
     };
@@ -1587,6 +1602,10 @@ export class ObscuraClient {
 
         if (!friend) return;
 
+        // Track old device IDs for comparison
+        const oldDeviceIds = new Set(friend.devices.map(d => d.serverUserId));
+        const newDeviceIds = new Set(announce.devices.map(d => d.serverUserId));
+
         // For revocations, verify signature if we have their recovery public key
         if (announce.isRevocation) {
           if (friend.recoveryPublicKey && announce.signature) {
@@ -1605,8 +1624,6 @@ export class ObscuraClient {
           // If no recoveryPublicKey stored, accept anyway (backwards compat)
 
           // Find devices that were revoked (in old list but not in new)
-          const oldDeviceIds = new Set(friend.devices.map(d => d.serverUserId));
-          const newDeviceIds = new Set(announce.devices.map(d => d.serverUserId));
           const revokedDeviceIds = [...oldDeviceIds].filter(id => !newDeviceIds.has(id));
 
           // Delete messages from revoked devices
@@ -1620,6 +1637,24 @@ export class ObscuraClient {
             }
             // Also remove from in-memory cache
             self.messages = self.messages.filter(m => !revokedDeviceIds.includes(m.authorDeviceId));
+          }
+        }
+
+        // Find NEW devices (in announce but not in old list)
+        // These might have sent messages before we knew about them, stored under serverUserId
+        const addedDeviceIds = [...newDeviceIds].filter(id => !oldDeviceIds.has(id));
+
+        // Migrate any messages that were stored under the raw serverUserId to the friend's username
+        if (addedDeviceIds.length > 0 && self.messageStore) {
+          for (const deviceId of addedDeviceIds) {
+            const migrated = await self.messageStore.migrateMessages(deviceId, friend.username);
+            if (migrated > 0) {
+              console.log(`[DeviceAnnounce] Migrated ${migrated} messages from new device ${deviceId.slice(-8)} to ${friend.username}`);
+              // Also update in-memory cache
+              self.messages = self.messages.map(m =>
+                m.conversationId === deviceId ? { ...m, conversationId: friend.username } : m
+              );
+            }
           }
         }
 

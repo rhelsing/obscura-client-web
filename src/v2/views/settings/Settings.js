@@ -66,6 +66,24 @@ export function render({ settings = null, loading = false, saving = false, isFir
         </section>
 
         <section class="settings-group">
+          <h2>Data Migration</h2>
+          <stack gap="sm">
+            <card>
+              <ry-field label="Old User ID (from shell account)">
+                <input type="text" id="old-user-id" placeholder="e.g., abc123-def456-..." />
+              </ry-field>
+              <button id="migrate-data" variant="ghost">
+                <cluster>
+                  <span>Migrate from Old DB</span>
+                  <ry-icon name="database"></ry-icon>
+                </cluster>
+              </button>
+              <p class="hint">One-time migration from old shell account IndexedDB. Only needed if you used the app before the device account fix.</p>
+            </card>
+          </stack>
+        </section>
+
+        <section class="settings-group">
           <h2>Profile</h2>
           <stack gap="sm">
             <card>
@@ -180,6 +198,101 @@ export async function mount(container, client, router) {
         } catch (err) {
           console.error('Failed to save settings:', err);
         }
+      }
+    });
+
+    // Migrate data button - copies from old shell account DB to new device account DB
+    const migrateBtn = container.querySelector('#migrate-data');
+    const oldUserIdInput = container.querySelector('#old-user-id');
+
+    migrateBtn.addEventListener('click', async () => {
+      const oldUserId = oldUserIdInput.value.trim();
+      if (!oldUserId) {
+        RyToast.error('Enter the old user ID from your shell account');
+        return;
+      }
+
+      migrateBtn.disabled = true;
+      migrateBtn.querySelector('span').textContent = 'Migrating...';
+
+      try {
+        const newUserId = client.userId;
+        const from = `obscura_models_${oldUserId}`;
+        const to = `obscura_models_${newUserId}`;
+
+        // Open source database
+        const sourceDb = await new Promise((resolve, reject) => {
+          const req = indexedDB.open(from);
+          req.onerror = () => reject(new Error(`DB not found: ${from}`));
+          req.onsuccess = () => resolve(req.result);
+        });
+
+        const storeNames = Array.from(sourceDb.objectStoreNames);
+        if (storeNames.length === 0) {
+          sourceDb.close();
+          throw new Error('No stores in source DB');
+        }
+
+        // Open target database with same version
+        const targetDb = await new Promise((resolve, reject) => {
+          const req = indexedDB.open(to, sourceDb.version);
+          req.onerror = () => reject(req.error);
+          req.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            for (const storeName of storeNames) {
+              if (!db.objectStoreNames.contains(storeName)) {
+                const sourceStore = sourceDb.transaction(storeName, 'readonly').objectStore(storeName);
+                const keyPath = sourceStore.keyPath;
+                if (keyPath) {
+                  db.createObjectStore(storeName, { keyPath });
+                } else {
+                  db.createObjectStore(storeName);
+                }
+              }
+            }
+          };
+          req.onsuccess = () => resolve(req.result);
+        });
+
+        // Copy all data from each store
+        let totalCopied = 0;
+        for (const storeName of storeNames) {
+          const allData = await new Promise((resolve, reject) => {
+            const tx = sourceDb.transaction(storeName, 'readonly');
+            const req = tx.objectStore(storeName).getAll();
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+          });
+
+          for (const item of allData) {
+            await new Promise((resolve, reject) => {
+              const tx = targetDb.transaction(storeName, 'readwrite');
+              const req = tx.objectStore(storeName).put(item);
+              req.onsuccess = () => { totalCopied++; resolve(); };
+              req.onerror = () => reject(req.error);
+            });
+          }
+        }
+
+        sourceDb.close();
+        targetDb.close();
+        console.log(`Migrated ${from} -> ${to}`);
+
+        migrateBtn.querySelector('span').textContent = `Migrated ${totalCopied} records`;
+        RyToast.success(`Migrated ${totalCopied} ORM records`);
+
+        setTimeout(() => {
+          migrateBtn.querySelector('span').textContent = 'Migrate from Old DB';
+          migrateBtn.disabled = false;
+        }, 3000);
+      } catch (err) {
+        console.error('Migration failed:', err);
+        migrateBtn.querySelector('span').textContent = 'Migration failed';
+        RyToast.error(err.message);
+        setTimeout(() => {
+          migrateBtn.querySelector('span').textContent = 'Migrate from Old DB';
+          migrateBtn.disabled = false;
+        }, 3000);
       }
     });
 

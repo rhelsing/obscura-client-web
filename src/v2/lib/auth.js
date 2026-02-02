@@ -544,6 +544,9 @@ async function migrateUserData(oldUserId, newUserId) {
   // Migrate attachments database
   await migrateDatabase(`obscura_attachments_${oldUserId}`, `obscura_attachments_${newUserId}`);
 
+  // Migrate ORM models database (stories, pix, pixRegistry, comments, etc.)
+  await migrateDatabase(`obscura_models_${oldUserId}`, `obscura_models_${newUserId}`);
+
   console.log('[Auth] Data migration complete');
 }
 
@@ -658,6 +661,7 @@ export async function unlinkDevice(username, userId) {
     `obscura_friends_v2_${userId}`,
     `obscura_messages_v2_${userId}`,
     `obscura_attachments_${userId}`,
+    `obscura_models_${userId}`,
     `obscura_logs_${username}`,
   ];
 

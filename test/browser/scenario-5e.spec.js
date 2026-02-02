@@ -167,7 +167,6 @@ test.describe('Scenario 5e: Own-Device SESSION_RESET', () => {
 
     await bob1Page.evaluate(async (code) => {
       await window.__client.approveLink(code);
-      await window.__client.announceDevices();
     }, bob2LinkCode);
     console.log('Bob1 approved Bob2');
 

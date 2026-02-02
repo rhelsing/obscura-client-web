@@ -173,7 +173,6 @@ test.describe('Scenario 15: Linked Device Data Persistence', () => {
     // Alice1 approves Alice2
     await alice1Page.evaluate(async (code) => {
       await window.__client.approveLink(code);
-      // announceDevices() no longer needed - now called automatically in approveLink()
     }, alice2LinkCode);
 
     await alice2Page.waitForURL('**/stories', { timeout: 20000 });

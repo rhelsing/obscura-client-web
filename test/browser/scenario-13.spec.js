@@ -88,7 +88,6 @@ test.describe('Scenario 13: Device Unlink', () => {
     // Bob1 approves Bob2
     await bob1Page.evaluate(async (code) => {
       await window.__client.approveLink(code);
-      await window.__client.announceDevices();
     }, bob2LinkCode);
 
     await bob2Page.waitForURL('**/stories', { timeout: 20000 });

@@ -674,7 +674,6 @@ test.describe('V2 Full E2E Flow', () => {
     // --- 5.3: Bob (original device) approves bob2 ---
     await bobPage.evaluate(async (code) => {
       await window.__client.approveLink(code);
-      await window.__client.announceDevices();
     }, bob2LinkCode);
     console.log('Bob approved bob2');
 
@@ -953,7 +952,6 @@ test.describe('V2 Full E2E Flow', () => {
     // Bob approves bob3
     await bobPage.evaluate(async (code) => {
       await window.__client.approveLink(code);
-      await window.__client.announceDevices();
     }, bob3LinkCode);
 
     await bob3Page.waitForURL('**/stories', { timeout: 20000 });
@@ -1076,7 +1074,6 @@ test.describe('V2 Full E2E Flow', () => {
     // Alice (page) approves alice3
     await page.evaluate(async (code) => {
       await window.__client.approveLink(code);
-      await window.__client.announceDevices();
     }, alice3LinkCode);
     console.log('Alice approved alice3');
 

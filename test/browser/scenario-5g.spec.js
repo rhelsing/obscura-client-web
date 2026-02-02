@@ -161,7 +161,6 @@ test.describe('Scenario 5g: Multi-Device Auto-Recovery', () => {
 
     await bob1Page.evaluate(async (code) => {
       await window.__client.approveLink(code);
-      await window.__client.announceDevices();
     }, bob2LinkCode);
     console.log('Bob1 approved Bob2');
 

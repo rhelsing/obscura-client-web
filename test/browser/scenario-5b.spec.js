@@ -299,7 +299,6 @@ test.describe('Scenario 5b: Cross-User Device Linking', () => {
 
     await bobPage.evaluate(async (code) => {
       await window.__client.approveLink(code);
-      await window.__client.announceDevices();
     }, bob2LinkCode);
     console.log('Bob1 approved Bob2');
 

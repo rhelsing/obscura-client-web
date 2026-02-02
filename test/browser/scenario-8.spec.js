@@ -131,7 +131,6 @@ test.describe('Scenario 8: ORM Layer', () => {
 
     await bobPage.evaluate(async (code) => {
       await window.__client.approveLink(code);
-      await window.__client.announceDevices();
     }, bob2LinkCode);
 
     await bob2Page.waitForURL('**/stories', { timeout: 20000 });
@@ -735,12 +734,7 @@ test.describe('Scenario 8: ORM Layer', () => {
     expect(replyCount).toBeGreaterThanOrEqual(2); // Original comment + reply
     console.log('Test 23: Inline comment reply shows in UI ✓');
 
-    // Test 24: Story filtering - only friends + self (Fix 7)
-    // Carol is a friend but bob3 was revoked - stories should only show from known devices
-    // This is implicitly tested via group exclusion tests above
-    console.log('Test 24: Story filtering (verified via friend/device checks) ✓');
-
-    // Test 25: Groups appear on chats page with last message
+    // Test 24: Groups appear on chats page with last message
     await page.goto('/chats');
     await delay(500);
     const groupOnChats = await page.$('.conversation-item[data-type="group"]');
@@ -750,9 +744,9 @@ test.describe('Scenario 8: ORM Layer', () => {
     // Verify last message shows (not "No messages yet")
     const groupLastMsg = await page.$eval('.conversation-item[data-type="group"] span', el => el.textContent);
     expect(groupLastMsg).not.toContain('No messages yet');
-    console.log('Test 25: Groups appear on chats page with last message ✓');
+    console.log('Test 24: Groups appear on chats page with last message ✓');
 
-    // Test 26: Bob and Carol set profiles, names appear in UI
+    // Test 25: Bob and Carol set profiles, names appear in UI
     await bobPage.goto('/profile/edit');
     await bobPage.waitForSelector('#profile-form', { timeout: 10000 });
     await bobPage.fill('#display-name', 'Bob Display');
@@ -778,9 +772,9 @@ test.describe('Scenario 8: ORM Layer', () => {
     await carolPage.waitForSelector('card h2', { timeout: 10000 });
     const carolDisplayName = await carolPage.$eval('card h2', el => el.textContent);
     expect(carolDisplayName).toBe('Carol Display');
-    console.log('Test 26: Profile names display correctly ✓');
+    console.log('Test 25: Profile names display correctly ✓');
 
-    // Test 26b: Profile displayNames show in story feed
+    // Test 25b: Profile displayNames show in story feed
     // Bob creates a story, Alice should see "Bob Display" as author (not username)
     await bobPage.evaluate(async () => {
       await window.__client.story.create({ content: 'Story with profile name!' });
@@ -793,23 +787,23 @@ test.describe('Scenario 8: ORM Layer', () => {
     const authorNames = await page.$$eval('.story-card strong', els => els.map(e => e.textContent));
     const hasBobDisplay = authorNames.some(name => name === 'Bob Display');
     expect(hasBobDisplay).toBe(true);
-    console.log('Test 26b: Profile displayNames show in story feed ✓');
+    console.log('Test 25b: Profile displayNames show in story feed ✓');
 
-    // Test 26c: Profile displayNames show in chats list (not usernames)
+    // Test 25c: Profile displayNames show in chats list (not usernames)
     await page.goto('/chats');
     await page.waitForSelector('.conversation-item', { timeout: 10000 });
     const chatNames = await page.$$eval('.conversation-item strong', els => els.map(e => e.textContent));
     // Should have "Bob Display" not the username
     const hasBobInChats = chatNames.some(name => name === 'Bob Display');
     expect(hasBobInChats).toBe(true);
-    console.log('Test 26c: Profile displayNames show in chats list ✓');
+    console.log('Test 25c: Profile displayNames show in chats list ✓');
 
-    // Test 27: Group chat back button goes to /chats
+    // Test 26: Group chat back button goes to /chats
     await page.goto(`/groups/${group.id}`);
     await page.waitForSelector('.back', { timeout: 10000 });
     await page.click('.back');
     await page.waitForURL('**/chats', { timeout: 10000 });
-    console.log('Test 27: Group chat back button goes to /chats ✓');
+    console.log('Test 26: Group chat back button goes to /chats ✓');
 
     console.log('\n=== SCENARIO 8 COMPLETE ===\n');
 

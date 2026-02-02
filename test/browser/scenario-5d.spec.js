@@ -164,7 +164,6 @@ test.describe('Scenario 5d: Multi-Device SESSION_RESET', () => {
 
     await alice1Page.evaluate(async (code) => {
       await window.__client.approveLink(code);
-      await window.__client.announceDevices();
     }, alice2LinkCode);
     console.log('Alice1 approved Alice2');
 
@@ -200,7 +199,6 @@ test.describe('Scenario 5d: Multi-Device SESSION_RESET', () => {
 
     await bob1Page.evaluate(async (code) => {
       await window.__client.approveLink(code);
-      await window.__client.announceDevices();
     }, bob2LinkCode);
     console.log('Bob1 approved Bob2');
 

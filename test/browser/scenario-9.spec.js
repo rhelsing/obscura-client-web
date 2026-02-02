@@ -166,7 +166,6 @@ test.describe('Scenario 9: Pix Flow', () => {
     // Bob approves bob2
     await bobPage.evaluate(async (code) => {
       await window.__client.approveLink(code);
-      await window.__client.announceDevices();
     }, bob2LinkCode);
 
     await bob2Page.waitForURL('**/stories', { timeout: 20000 });

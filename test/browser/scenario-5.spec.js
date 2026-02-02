@@ -174,7 +174,6 @@ test.describe('Scenario 5: Multi-Device Linking', () => {
     console.log('--- 5.3: Device approval ---');
     await bobPage.evaluate(async (code) => {
       await window.__client.approveLink(code);
-      await window.__client.announceDevices();
     }, bob2LinkCode);
     console.log('Bob approved bob2');
 
@@ -330,7 +329,6 @@ test.describe('Scenario 5: Multi-Device Linking', () => {
     // Alice1 approves Alice2
     await page.evaluate(async (code) => {
       await window.__client.approveLink(code);
-      await window.__client.announceDevices();
     }, alice2LinkCode);
     console.log('Alice approved alice2');
 

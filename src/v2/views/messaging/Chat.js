@@ -507,9 +507,42 @@ export async function mount(container, client, router, params) {
     }
   };
 
+  // Handle messages migrated from unknown device to this conversation
+  // This happens when a DEVICE_ANNOUNCE reveals messages that were stored under a serverUserId
+  const handleMessagesMigrated = async (event) => {
+    if (event.conversationId === username) {
+      console.log(`[Chat] ${event.count} messages migrated to this conversation, reloading`);
+      // Reload messages from IndexedDB
+      try {
+        const stored = await client.getMessages(username);
+        messages = stored.map(m => {
+          let mediaUrl = m.mediaUrl;
+          if (!mediaUrl && m.contentReference) {
+            mediaUrl = createMediaUrl(m.contentReference);
+          }
+          return {
+            text: m.text || m.content || '',
+            fromMe: m.isSent,
+            timestamp: m.timestamp,
+            attachment: !!mediaUrl,
+            mediaUrl,
+            downloaded: false,
+          };
+        });
+        rerender();
+        attachListeners();
+        scrollToBottom();
+        downloadAttachments();
+      } catch (err) {
+        console.error('Failed to reload messages after migration:', err);
+      }
+    }
+  };
+
   client.on('message', handleMessage);
   client.on('attachment', handleAttachment);
   client.on('sentSync', handleSentSync);
+  client.on('messagesMigrated', handleMessagesMigrated);
 
   function attachListeners() {
     // Re-attach form listener after re-render
@@ -574,6 +607,7 @@ export async function mount(container, client, router, params) {
     client.off('message', handleMessage);
     client.off('attachment', handleAttachment);
     client.off('sentSync', handleSentSync);
+    client.off('messagesMigrated', handleMessagesMigrated);
   };
 }
 

@@ -5,12 +5,7 @@
  * Tests: Camera capture, send, receive, multi-recipient, offline delivery, PixViewer UI
  */
 import { test, expect } from '@playwright/test';
-
-const delay = (ms = 300) => new Promise(r => setTimeout(r, ms));
-
-function randomUsername() {
-  return 'test_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-}
+import { delay, randomUsername, waitForViewReady } from './helpers.js';
 
 test.describe('Scenario 9: Pix Flow', () => {
 

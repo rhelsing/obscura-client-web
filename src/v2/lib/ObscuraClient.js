@@ -103,6 +103,7 @@ export class ObscuraClient {
       friendRequest: [],
       friendResponse: [],
       deviceAnnounce: [],
+      messagesMigrated: [],  // Emitted when messages are migrated to correct conversationId after DEVICE_ANNOUNCE
       linkApproval: [],
       sentSync: [],
       syncBlob: [],
@@ -1587,6 +1588,10 @@ export class ObscuraClient {
 
         if (!friend) return;
 
+        // Track old device IDs for comparison
+        const oldDeviceIds = new Set(friend.devices.map(d => d.serverUserId));
+        const newDeviceIds = new Set(announce.devices.map(d => d.serverUserId));
+
         // For revocations, verify signature if we have their recovery public key
         if (announce.isRevocation) {
           if (friend.recoveryPublicKey && announce.signature) {
@@ -1605,8 +1610,6 @@ export class ObscuraClient {
           // If no recoveryPublicKey stored, accept anyway (backwards compat)
 
           // Find devices that were revoked (in old list but not in new)
-          const oldDeviceIds = new Set(friend.devices.map(d => d.serverUserId));
-          const newDeviceIds = new Set(announce.devices.map(d => d.serverUserId));
           const revokedDeviceIds = [...oldDeviceIds].filter(id => !newDeviceIds.has(id));
 
           // Delete messages from revoked devices
@@ -1620,6 +1623,30 @@ export class ObscuraClient {
             }
             // Also remove from in-memory cache
             self.messages = self.messages.filter(m => !revokedDeviceIds.includes(m.authorDeviceId));
+          }
+        }
+
+        // Find NEW devices (in announce but not in old list)
+        // These might have sent messages before we knew about them, stored under serverUserId
+        const addedDeviceIds = [...newDeviceIds].filter(id => !oldDeviceIds.has(id));
+
+        // Migrate any messages that were stored under the raw serverUserId to the friend's username
+        if (addedDeviceIds.length > 0 && self.messageStore) {
+          let totalMigrated = 0;
+          for (const deviceId of addedDeviceIds) {
+            const migrated = await self.messageStore.migrateMessages(deviceId, friend.username);
+            if (migrated > 0) {
+              console.log(`[DeviceAnnounce] Migrated ${migrated} messages from new device ${deviceId.slice(-8)} to ${friend.username}`);
+              totalMigrated += migrated;
+              // Also update in-memory cache
+              self.messages = self.messages.map(m =>
+                m.conversationId === deviceId ? { ...m, conversationId: friend.username } : m
+              );
+            }
+          }
+          // Notify UI to refresh the conversation if messages were migrated
+          if (totalMigrated > 0) {
+            self._emit('messagesMigrated', { conversationId: friend.username, count: totalMigrated });
           }
         }
 

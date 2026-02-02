@@ -39,6 +39,7 @@ export class InMemoryStore {
     this.deviceUUID = null;
     this.coreUsername = null;
     this.isFirstDevice = false;
+    this.userId = null;
   }
 
   // === Signal Protocol Store Interface ===
@@ -138,14 +139,16 @@ export class InMemoryStore {
       deviceUUID: this.deviceUUID,
       coreUsername: this.coreUsername,
       isFirstDevice: this.isFirstDevice,
+      userId: this.userId,
     };
   }
 
-  async storeDeviceIdentity({ deviceUsername, deviceUUID, coreUsername, isFirstDevice }) {
+  async storeDeviceIdentity({ deviceUsername, deviceUUID, coreUsername, isFirstDevice, userId }) {
     this.deviceUsername = deviceUsername;
     this.deviceUUID = deviceUUID;
     this.coreUsername = coreUsername;
     this.isFirstDevice = isFirstDevice ?? false;
+    this.userId = userId;
   }
 
   async clearDeviceIdentity() {
@@ -153,6 +156,7 @@ export class InMemoryStore {
     this.deviceUUID = null;
     this.coreUsername = null;
     this.isFirstDevice = false;
+    this.userId = null;
   }
 
   // === Encrypted Identity Storage (compatibility with IndexedDBStore) ===

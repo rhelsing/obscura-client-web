@@ -23,18 +23,18 @@ export async function register(username, password, opts = {}) {
   const { apiUrl } = opts;
   const store = opts.store || createStore(username);
 
-  // Generate all keys
+  // Generate keys for shell account (for findability)
   const keys = await generateFirstDeviceKeys();
-  const signalKeys = formatSignalKeysForServer(keys.signal);
+  const shellSignalKeys = formatSignalKeysForServer(keys.signal);
 
-  // Register shell account
+  // Register shell account with Signal keys (for findability)
   const shellRes = await fetch(`${apiUrl}/v1/users`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       username,
       password,
-      ...signalKeys,
+      ...shellSignalKeys,
     }),
   });
 
@@ -46,46 +46,81 @@ export async function register(username, password, opts = {}) {
     throw new Error(`Registration failed: ${text}`);
   }
 
-  const shellData = await shellRes.json();
+  // Generate SEPARATE keys for device account
+  const deviceIdentityKeyPair = await KeyHelper.generateIdentityKeyPair();
+  const deviceRegistrationId = KeyHelper.generateRegistrationId();
+  const deviceSignedPreKey = await KeyHelper.generateSignedPreKey(deviceIdentityKeyPair, 1);
 
-  // Encrypt and store identity keys
-  const encrypted = await encryptKeys({
-    identityKeyPair: keys.signal.identityKeyPair,
-  }, password);
-  encrypted.registrationId = keys.signal.registrationId;
-  await store.storeEncryptedIdentity(encrypted);
+  const devicePreKeys = [];
+  for (let i = 1; i <= 100; i++) {
+    const preKey = await KeyHelper.generatePreKey(i);
+    devicePreKeys.push(preKey);
+  }
 
-  // Cache decrypted keys for this session
-  keyCache.set({
-    identityKeyPair: keys.signal.identityKeyPair,
-    registrationId: keys.signal.registrationId,
+  const deviceSignalKeys = formatSignalKeysForServer({
+    identityKeyPair: deviceIdentityKeyPair,
+    registrationId: deviceRegistrationId,
+    signedPreKey: deviceSignedPreKey,
+    preKeys: devicePreKeys,
   });
 
-  // Store prekeys (not encrypted - ephemeral and less sensitive)
-  await store.storeSignedPreKey(keys.signal.signedPreKey.keyId, keys.signal.signedPreKey.keyPair);
-  for (const pk of keys.signal.preKeys) {
+  // Register device account with its own Signal keys
+  const deviceUsername = generateDeviceUsername();
+  const deviceRes = await fetch(`${apiUrl}/v1/users`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: deviceUsername,
+      password,
+      ...deviceSignalKeys,
+    }),
+  });
+
+  if (!deviceRes.ok) {
+    const text = await deviceRes.text();
+    throw new Error(`Device registration failed: ${text}`);
+  }
+
+  const deviceData = await deviceRes.json();
+
+  // Use DEVICE token's userId, not shell
+  const userId = parseUserId(deviceData.token);
+
+  // Encrypt and store DEVICE identity keys (not shell keys)
+  const encrypted = await encryptKeys({
+    identityKeyPair: deviceIdentityKeyPair,
+  }, password);
+  encrypted.registrationId = deviceRegistrationId;
+  await store.storeEncryptedIdentity(encrypted);
+
+  // Cache decrypted DEVICE keys for this session
+  keyCache.set({
+    identityKeyPair: deviceIdentityKeyPair,
+    registrationId: deviceRegistrationId,
+  });
+
+  // Store DEVICE prekeys (not shell prekeys)
+  await store.storeSignedPreKey(deviceSignedPreKey.keyId, deviceSignedPreKey.keyPair);
+  for (const pk of devicePreKeys) {
     await store.storePreKey(pk.keyId, pk.keyPair);
   }
 
-  // Store device identity - use unlinkable device username
-  const deviceUsername = generateDeviceUsername();
+  // Store device identity with userId for re-login
   await store.storeDeviceIdentity({
     deviceUsername,
     deviceUUID: keys.deviceUUID,
     coreUsername: username,
     isFirstDevice: true,
+    userId,
   });
-
-  // Parse userId from token
-  const userId = parseUserId(shellData.token);
 
   // Recovery phrase - one-time access
   let recoveryPhrase = keys.recoveryPhrase;
 
   return {
     store,
-    token: shellData.token,
-    refreshToken: shellData.refreshToken,
+    token: deviceData.token,  // Use device token!
+    refreshToken: deviceData.refreshToken,
     userId,
     username,
     deviceUsername,
@@ -97,7 +132,7 @@ export async function register(username, password, opts = {}) {
       deviceUUID: keys.deviceUUID,
       serverUserId: userId,  // Use UUID, not deviceUsername!
       deviceName: detectDeviceName(),
-      signalIdentityKey: new Uint8Array(keys.signal.identityKeyPair.pubKey),
+      signalIdentityKey: new Uint8Array(deviceIdentityKeyPair.pubKey),  // Device's key, not shell's
     },
 
     // Explicit backup flow - clears after first read
@@ -148,32 +183,139 @@ export async function login(username, password, opts = {}) {
   const storedIdentity = await store.getDeviceIdentity();
 
   if (storedIdentity && storedIdentity.coreUsername === username) {
-    // Existing device - we have local keys, use shell token
-    // (In single-account mode, shell login IS the device login)
-    const userId = parseUserId(shellToken);
+    // Existing device - shell login succeeded, now login to device account
+    const deviceRes = await fetch(`${apiUrl}/v1/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: storedIdentity.deviceUsername,
+        password,
+      }),
+    });
 
-    // Load and decrypt identity keys (with migration for old format)
-    const identityKeyPair = await loadAndDecryptIdentity(store, password);
+    if (deviceRes.ok) {
+      // Normal path - device account exists
+      const deviceData = await deviceRes.json();
+      const userId = parseUserId(deviceData.token);
 
-    if (!identityKeyPair) {
-      return { status: 'error', reason: 'Could not decrypt local keys - try clearing data and re-linking' };
+      // Load and decrypt identity keys (with migration for old format)
+      const identityKeyPair = await loadAndDecryptIdentity(store, password);
+
+      if (!identityKeyPair) {
+        return { status: 'error', reason: 'Could not decrypt local keys - try clearing data and re-linking' };
+      }
+
+      return {
+        status: 'ok',
+        client: {
+          store,
+          token: deviceData.token,  // Device token, not shell!
+          refreshToken: deviceData.refreshToken,
+          userId,
+          username,
+          deviceUsername: storedIdentity.deviceUsername,
+          deviceUUID: storedIdentity.deviceUUID,
+          deviceInfo: {
+            deviceUUID: storedIdentity.deviceUUID,
+            serverUserId: userId,
+            deviceName: detectDeviceName(),
+            signalIdentityKey: identityKeyPair ? new Uint8Array(identityKeyPair.pubKey) : null,
+          },
+        },
+      };
     }
+
+    // MIGRATION: Old user without device account (shell = device in old system)
+    console.log('[Auth] Migrating old shell-only user to shell+device model...');
+    const shellUserId = parseUserId(shellToken);
+
+    // Load existing identity keys
+    const existingIdentityKeyPair = await loadAndDecryptIdentity(store, password);
+    if (!existingIdentityKeyPair) {
+      return { status: 'error', reason: 'Could not decrypt local keys for migration' };
+    }
+
+    // Generate new device account with NEW keys (existing keys belong to shell)
+    const deviceIdentityKeyPair = await KeyHelper.generateIdentityKeyPair();
+    const deviceRegistrationId = KeyHelper.generateRegistrationId();
+    const deviceSignedPreKey = await KeyHelper.generateSignedPreKey(deviceIdentityKeyPair, 1);
+
+    const devicePreKeys = [];
+    for (let i = 1; i <= 100; i++) {
+      const preKey = await KeyHelper.generatePreKey(i);
+      devicePreKeys.push(preKey);
+    }
+
+    const deviceSignalKeys = formatSignalKeysForServer({
+      identityKeyPair: deviceIdentityKeyPair,
+      registrationId: deviceRegistrationId,
+      signedPreKey: deviceSignedPreKey,
+      preKeys: devicePreKeys,
+    });
+
+    // Create new device account
+    const newDeviceUsername = generateDeviceUsername();
+    const newDeviceRes = await fetch(`${apiUrl}/v1/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: newDeviceUsername,
+        password,
+        ...deviceSignalKeys,
+      }),
+    });
+
+    if (!newDeviceRes.ok) {
+      const text = await newDeviceRes.text();
+      return { status: 'error', reason: `Migration failed - could not create device account: ${text}` };
+    }
+
+    const newDeviceData = await newDeviceRes.json();
+    const newDeviceUserId = parseUserId(newDeviceData.token);
+
+    // Migrate local data from shell userId to new device userId
+    await migrateUserData(shellUserId, newDeviceUserId);
+
+    // Update stored identity with NEW device keys
+    const encrypted = await encryptKeys({ identityKeyPair: deviceIdentityKeyPair }, password);
+    encrypted.registrationId = deviceRegistrationId;
+    await store.storeEncryptedIdentity(encrypted);
+
+    // Cache new keys
+    keyCache.set({ identityKeyPair: deviceIdentityKeyPair, registrationId: deviceRegistrationId });
+
+    // Store new prekeys
+    await store.storeSignedPreKey(deviceSignedPreKey.keyId, deviceSignedPreKey.keyPair);
+    for (const pk of devicePreKeys) {
+      await store.storePreKey(pk.keyId, pk.keyPair);
+    }
+
+    // Update device identity
+    await store.storeDeviceIdentity({
+      deviceUsername: newDeviceUsername,
+      deviceUUID: storedIdentity.deviceUUID || generateDeviceUUID(),
+      coreUsername: username,
+      isFirstDevice: storedIdentity.isFirstDevice,
+      userId: newDeviceUserId,
+    });
+
+    console.log('[Auth] Migration complete:', { shellUserId, newDeviceUserId });
 
     return {
       status: 'ok',
       client: {
         store,
-        token: shellToken,
-        refreshToken: null,
-        userId,
+        token: newDeviceData.token,
+        refreshToken: newDeviceData.refreshToken,
+        userId: newDeviceUserId,
         username,
-        deviceUsername: storedIdentity.deviceUsername,
-        deviceUUID: storedIdentity.deviceUUID,
+        deviceUsername: newDeviceUsername,
+        deviceUUID: storedIdentity.deviceUUID || generateDeviceUUID(),
         deviceInfo: {
           deviceUUID: storedIdentity.deviceUUID,
-          serverUserId: userId,
+          serverUserId: newDeviceUserId,
           deviceName: detectDeviceName(),
-          signalIdentityKey: identityKeyPair ? new Uint8Array(identityKeyPair.pubKey) : null,
+          signalIdentityKey: new Uint8Array(deviceIdentityKeyPair.pubKey),
         },
       },
     };
@@ -232,15 +374,16 @@ export async function login(username, password, opts = {}) {
     await store.storePreKey(pk.keyId, pk.keyPair);
   }
 
-  // Store device identity
+  const userId = parseUserId(deviceData.token);
+
+  // Store device identity with userId for re-login
   await store.storeDeviceIdentity({
     deviceUsername,
     deviceUUID,
     coreUsername: username,
     isFirstDevice: false,
+    userId,  // Store for re-login
   });
-
-  const userId = parseUserId(deviceData.token);
 
   // Generate link code for existing device to scan
   // Use userId (UUID) for server communication, deviceUsername for display
@@ -378,6 +521,106 @@ function arrayBufferToBase64(buffer) {
     binary += String.fromCharCode(bytes[i]);
   }
   return btoa(binary);
+}
+
+/**
+ * Migrate user data from old userId to new userId
+ * Used when migrating from shell-only to shell+device model
+ */
+async function migrateUserData(oldUserId, newUserId) {
+  if (typeof indexedDB === 'undefined') {
+    console.warn('[Auth] IndexedDB not available, skipping data migration');
+    return;
+  }
+
+  console.log('[Auth] Migrating data:', { from: oldUserId, to: newUserId });
+
+  // Migrate friends database
+  await migrateDatabase(`obscura_friends_v2_${oldUserId}`, `obscura_friends_v2_${newUserId}`);
+
+  // Migrate messages database
+  await migrateDatabase(`obscura_messages_v2_${oldUserId}`, `obscura_messages_v2_${newUserId}`);
+
+  // Migrate attachments database
+  await migrateDatabase(`obscura_attachments_${oldUserId}`, `obscura_attachments_${newUserId}`);
+
+  console.log('[Auth] Data migration complete');
+}
+
+/**
+ * Copy all data from one IndexedDB database to another
+ */
+async function migrateDatabase(sourceDbName, targetDbName) {
+  try {
+    // Check if source exists by trying to open it
+    const sourceDb = await new Promise((resolve, reject) => {
+      const request = indexedDB.open(sourceDbName);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+
+    const storeNames = Array.from(sourceDb.objectStoreNames);
+    if (storeNames.length === 0) {
+      sourceDb.close();
+      return;
+    }
+
+    // Get version to create target with same schema
+    const version = sourceDb.version;
+
+    // Create target database with same schema
+    const targetDb = await new Promise((resolve, reject) => {
+      const request = indexedDB.open(targetDbName, version);
+      request.onerror = () => reject(request.error);
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        // Copy store schemas from source
+        for (const storeName of storeNames) {
+          if (!db.objectStoreNames.contains(storeName)) {
+            const sourceStore = sourceDb.transaction(storeName, 'readonly').objectStore(storeName);
+            const keyPath = sourceStore.keyPath;
+            if (keyPath) {
+              db.createObjectStore(storeName, { keyPath });
+            } else {
+              db.createObjectStore(storeName);
+            }
+          }
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+    });
+
+    // Copy data from each store
+    for (const storeName of storeNames) {
+      const sourceTx = sourceDb.transaction(storeName, 'readonly');
+      const sourceStore = sourceTx.objectStore(storeName);
+      const allData = await new Promise((resolve, reject) => {
+        const request = sourceStore.getAll();
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+      });
+
+      if (allData.length > 0) {
+        const targetTx = targetDb.transaction(storeName, 'readwrite');
+        const targetStore = targetTx.objectStore(storeName);
+        for (const item of allData) {
+          await new Promise((resolve, reject) => {
+            const request = targetStore.put(item);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve();
+          });
+        }
+      }
+    }
+
+    sourceDb.close();
+    targetDb.close();
+
+    console.log(`[Auth] Migrated ${sourceDbName} -> ${targetDbName}`);
+  } catch (err) {
+    // Source database might not exist, that's ok
+    console.log(`[Auth] Could not migrate ${sourceDbName}: ${err.message}`);
+  }
 }
 
 /**

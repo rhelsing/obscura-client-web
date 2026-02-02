@@ -13,12 +13,7 @@
  *   5.7 Link code replay rejected
  */
 import { test, expect } from '@playwright/test';
-
-const delay = (ms = 300) => new Promise(r => setTimeout(r, ms));
-
-function randomUsername() {
-  return 'test_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-}
+import { delay, randomUsername, waitForViewReady } from './helpers.js';
 
 test.describe('Scenario 5: Multi-Device Linking', () => {
 
@@ -47,6 +42,7 @@ test.describe('Scenario 5: Multi-Device Linking', () => {
     // ============================================================
     console.log('\n=== SETUP: Register Alice ===');
     await page.goto('/register');
+    await waitForViewReady(page);
     await page.waitForSelector('#username', { timeout: 30000 });
     await page.fill('#username', username);
     await page.fill('#password', password);
@@ -74,6 +70,7 @@ test.describe('Scenario 5: Multi-Device Linking', () => {
     // ============================================================
     console.log('\n=== SETUP: Register Bob ===');
     await bobPage.goto('/register');
+    await waitForViewReady(bobPage);
     await bobPage.waitForSelector('#username', { timeout: 30000 });
     await bobPage.fill('#username', bobUsername);
     await bobPage.fill('#password', password);
@@ -155,6 +152,7 @@ test.describe('Scenario 5: Multi-Device Linking', () => {
     bob2Page.on('console', msg => console.log('[bob2]', msg.text()));
 
     await bob2Page.goto('/login');
+    await waitForViewReady(bob2Page);
     await bob2Page.waitForSelector('#username', { timeout: 10000 });
     await bob2Page.fill('#username', bobUsername);
     await bob2Page.fill('#password', password);

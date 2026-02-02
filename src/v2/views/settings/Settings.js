@@ -250,8 +250,21 @@ export async function mount(container, client, router) {
       confirmUnlink.textContent = 'Unlinking...';
 
       try {
+        // 1. Close WebSocket
         client.disconnect();
+
+        // 2. Close all IndexedDB connections (so deletes aren't blocked)
+        if (client.store?.close) client.store.close();
+        if (client._friendStore?.close) client._friendStore.close();
+        if (client._deviceStore?.close) client._deviceStore.close();
+        if (client.messageStore?.close) client.messageStore.close();
+        if (client._attachmentStore?.close) client._attachmentStore.close();
+
+        // 3. Delete all user databases (now unblocked)
         await unlinkDevice(client.username, client.userId);
+
+        // 4. Clear session and navigate
+        ObscuraClient.clearSession();
         clearClient();
         navigate('/login');
       } catch (err) {

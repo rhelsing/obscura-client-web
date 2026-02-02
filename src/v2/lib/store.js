@@ -4,6 +4,7 @@
  */
 
 import { IndexedDBStore } from './IndexedDBStore.js';
+import { keyCache } from './keyCache.js';
 
 /**
  * Auto-detect environment and create appropriate store
@@ -27,6 +28,7 @@ export class InMemoryStore {
   constructor() {
     this.identityKeyPair = null;
     this.registrationId = null;
+    this._encryptedIdentity = null;  // Encrypted identity blob
     this.preKeys = new Map();
     this.signedPreKeys = new Map();
     this.sessions = new Map();
@@ -42,14 +44,23 @@ export class InMemoryStore {
   // === Signal Protocol Store Interface ===
 
   async getIdentityKeyPair() {
+    // Check cache first (populated after login decryption)
+    const cached = keyCache.getIdentityKeyPair();
+    if (cached) return cached;
+    // Fallback to direct storage (legacy/unencrypted)
     return this.identityKeyPair;
   }
 
   async storeIdentityKeyPair(keyPair) {
     this.identityKeyPair = keyPair;
+    // Also cache for immediate use
+    keyCache.set({ identityKeyPair: keyPair, registrationId: this.registrationId });
   }
 
   async getLocalRegistrationId() {
+    // Check cache first
+    const cached = keyCache.getRegistrationId();
+    if (cached) return cached;
     return this.registrationId;
   }
 
@@ -144,15 +155,65 @@ export class InMemoryStore {
     this.isFirstDevice = false;
   }
 
+  // === Encrypted Identity Storage (compatibility with IndexedDBStore) ===
+  // InMemoryStore stores encrypted blob but also keeps decrypted keys in memory
+  // since it's ephemeral anyway. This allows tests to exercise the encryption path.
+
+  async loadIdentityRecord() {
+    // Return in old unencrypted format if we have keys but no encrypted blob
+    if (this.identityKeyPair && !this._encryptedIdentity) {
+      return {
+        keyPair: this.identityKeyPair,
+        registrationId: this.registrationId,
+      };
+    }
+    // Return encrypted format if we have it
+    if (this._encryptedIdentity) {
+      return {
+        salt: this._encryptedIdentity.salt,
+        iv: this._encryptedIdentity.iv,
+        ciphertext: this._encryptedIdentity.ciphertext,
+        registrationId: this._encryptedIdentity.registrationId,
+      };
+    }
+    return null;
+  }
+
+  async storeEncryptedIdentity(encrypted) {
+    this._encryptedIdentity = {
+      salt: encrypted.salt,
+      iv: encrypted.iv,
+      ciphertext: encrypted.ciphertext,
+      registrationId: encrypted.registrationId,
+    };
+    // Clear old unencrypted storage
+    this.identityKeyPair = null;
+    this.registrationId = encrypted.registrationId;
+  }
+
+  async loadEncryptedIdentity() {
+    if (!this._encryptedIdentity) return null;
+    return {
+      salt: new Uint8Array(this._encryptedIdentity.salt),
+      iv: new Uint8Array(this._encryptedIdentity.iv),
+      ciphertext: new Uint8Array(this._encryptedIdentity.ciphertext),
+      registrationId: this._encryptedIdentity.registrationId,
+    };
+  }
+
   // === Helpers ===
 
   async hasIdentity() {
-    return this.identityKeyPair !== null;
+    // Check cache first
+    if (keyCache.isLoaded()) return true;
+    // Check for unencrypted or encrypted storage
+    return this.identityKeyPair !== null || this._encryptedIdentity !== null;
   }
 
   async clearAll() {
     this.identityKeyPair = null;
     this.registrationId = null;
+    this._encryptedIdentity = null;
     this.preKeys.clear();
     this.signedPreKeys.clear();
     this.sessions.clear();
@@ -161,6 +222,7 @@ export class InMemoryStore {
     this.deviceUUID = null;
     this.coreUsername = null;
     this.isFirstDevice = false;
+    keyCache.clear();
   }
 
   getPreKeyCount() {

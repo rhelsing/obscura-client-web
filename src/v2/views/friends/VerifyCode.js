@@ -47,7 +47,6 @@ export function render({ myCode = '----', theirCode = '----', username = 'friend
           </div>
         ` : `
           <div class="verification-result">
-            <button id="match-btn" class="success">Codes Match ✓</button>
             <button id="no-match-btn" class="danger">Codes Don't Match ✗</button>
           </div>
         `}
@@ -70,13 +69,6 @@ export async function mount(container, client, router, params) {
       const theirCode = req ? await req.getVerifyCode() : '----';
 
       container.innerHTML = render({ myCode, theirCode, username: displayName });
-
-      // Match button
-      container.querySelector('#match-btn').addEventListener('click', () => {
-        // Codes verified - could mark as verified in UI
-        delete window.__verifyRequest;
-        navigate('/friends');
-      });
 
       // No match button - show warning instead of alert
       container.querySelector('#no-match-btn').addEventListener('click', () => {

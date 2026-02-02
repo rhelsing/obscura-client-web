@@ -26,7 +26,7 @@ Sending messages requires active Signal sessions, not just keys. A session inclu
 
 These are stored in IndexedDB and bound to the specific device context. An attacker cannot extract keys and use them from another machine — they'd need to clone the entire browser state, at which point they ARE the device, not a separate "rogue" device.
 
-> **Note:** Key encryption at rest is planned but not yet implemented. See `docs/plans/encrypted-key-storage.md`. Once implemented, keys will be encrypted with the user's password and only decrypted into memory while the JWT is valid.
+> **Implemented:** Identity keys are encrypted at rest using AES-256-GCM with a key derived from the user's password via PBKDF2 (100k iterations). Keys are only decrypted into memory at login and cleared when the session ends.
 
 ### 2. Device Linking Requires Physical QR Ceremony
 
@@ -76,14 +76,12 @@ The recovery phrase is never stored on-device, so an attacker cannot forge revoc
 
 | Attack Vector | Mitigated By |
 |---------------|--------------|
-| Extract keys from IndexedDB | Session state is device-bound (keys alone are insufficient) |
-| Clone Signal sessions | Requires full browser state; attacker becomes the device |
+| Extract keys from IndexedDB | Password-encrypted (AES-256-GCM + PBKDF2) |
+| Clone Signal sessions | Requires full browser state + password; attacker becomes the device |
 | Forge DeviceAnnounce remotely | Requires active Signal session |
 | Bypass QR linking ceremony | No API exists; physical interaction required |
 | Prevent revocation | Recovery phrase is offline |
 | Persist after device wipe | Revocation replaces entire device list |
-
-> **Planned improvement:** Password-based encryption of keys at rest. See `docs/plans/encrypted-key-storage.md`.
 
 ---
 

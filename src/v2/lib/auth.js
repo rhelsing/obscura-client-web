@@ -9,6 +9,8 @@ import { generateDeviceUUID, generateDeviceUsername } from '../crypto/uuid.js';
 import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
 import { createStore, InMemoryStore } from './store.js';
 import { signLinkChallenge } from '../crypto/signatures.js';
+import { encryptKeys, decryptKeys, isEncryptedFormat, isUnencryptedFormat } from '../crypto/keyEncryption.js';
+import { keyCache } from './keyCache.js';
 
 /**
  * Register a new user (creates shell + device accounts internally)
@@ -46,9 +48,20 @@ export async function register(username, password, opts = {}) {
 
   const shellData = await shellRes.json();
 
-  // Store Signal keys
-  await store.storeIdentityKeyPair(keys.signal.identityKeyPair);
-  await store.storeLocalRegistrationId(keys.signal.registrationId);
+  // Encrypt and store identity keys
+  const encrypted = await encryptKeys({
+    identityKeyPair: keys.signal.identityKeyPair,
+  }, password);
+  encrypted.registrationId = keys.signal.registrationId;
+  await store.storeEncryptedIdentity(encrypted);
+
+  // Cache decrypted keys for this session
+  keyCache.set({
+    identityKeyPair: keys.signal.identityKeyPair,
+    registrationId: keys.signal.registrationId,
+  });
+
+  // Store prekeys (not encrypted - ephemeral and less sensitive)
   await store.storeSignedPreKey(keys.signal.signedPreKey.keyId, keys.signal.signedPreKey.keyPair);
   for (const pk of keys.signal.preKeys) {
     await store.storePreKey(pk.keyId, pk.keyPair);
@@ -139,8 +152,12 @@ export async function login(username, password, opts = {}) {
     // (In single-account mode, shell login IS the device login)
     const userId = parseUserId(shellToken);
 
-    // Load identity key from store to populate deviceInfo
-    const identityKeyPair = await store.getIdentityKeyPair();
+    // Load and decrypt identity keys (with migration for old format)
+    const identityKeyPair = await loadAndDecryptIdentity(store, password);
+
+    if (!identityKeyPair) {
+      return { status: 'error', reason: 'Could not decrypt local keys - try clearing data and re-linking' };
+    }
 
     return {
       status: 'ok',
@@ -201,9 +218,15 @@ export async function login(username, password, opts = {}) {
 
   const deviceData = await deviceRes.json();
 
-  // Store Signal keys
-  await store.storeIdentityKeyPair(identityKeyPair);
-  await store.storeLocalRegistrationId(registrationId);
+  // Encrypt and store identity keys
+  const encrypted = await encryptKeys({ identityKeyPair }, password);
+  encrypted.registrationId = registrationId;
+  await store.storeEncryptedIdentity(encrypted);
+
+  // Cache decrypted keys for this session
+  keyCache.set({ identityKeyPair, registrationId });
+
+  // Store prekeys (not encrypted)
   await store.storeSignedPreKey(signedPreKey.keyId, signedPreKey.keyPair);
   for (const pk of preKeys) {
     await store.storePreKey(pk.keyId, pk.keyPair);
@@ -244,6 +267,68 @@ export async function login(username, password, opts = {}) {
       },
     },
   };
+}
+
+/**
+ * Load and decrypt identity keys, with migration for old unencrypted format
+ * @param {object} store - IndexedDB store
+ * @param {string} password - User's password
+ * @returns {Promise<object|null>} Identity key pair or null if failed
+ */
+async function loadAndDecryptIdentity(store, password) {
+  // Check if keys are already in cache
+  if (keyCache.isLoaded()) {
+    return keyCache.getIdentityKeyPair();
+  }
+
+  // Load identity record from IndexedDB
+  const record = await store.loadIdentityRecord();
+  if (!record) return null;
+
+  // Case 1: Old unencrypted format - migrate to encrypted
+  if (isUnencryptedFormat(record)) {
+    console.log('Migrating keys to encrypted storage...');
+
+    const { keyPair, registrationId } = record;
+
+    // Encrypt with user's password
+    const encrypted = await encryptKeys({ identityKeyPair: keyPair }, password);
+    encrypted.registrationId = registrationId;
+
+    // Store encrypted version
+    await store.storeEncryptedIdentity(encrypted);
+
+    // Cache for this session
+    keyCache.set({ identityKeyPair: keyPair, registrationId });
+
+    console.log('Migration complete');
+    return keyPair;
+  }
+
+  // Case 2: New encrypted format - decrypt
+  if (isEncryptedFormat(record)) {
+    try {
+      const decrypted = await decryptKeys({
+        salt: new Uint8Array(record.salt),
+        iv: new Uint8Array(record.iv),
+        ciphertext: new Uint8Array(record.ciphertext),
+      }, password);
+
+      // Cache for this session
+      keyCache.set({
+        identityKeyPair: decrypted.identityKeyPair,
+        registrationId: record.registrationId,
+      });
+
+      return decrypted.identityKeyPair;
+    } catch (e) {
+      console.error('Failed to decrypt identity keys:', e.message);
+      return null;
+    }
+  }
+
+  // No valid identity found
+  return null;
 }
 
 // Helper: detect device name
@@ -296,6 +381,19 @@ function arrayBufferToBase64(buffer) {
 }
 
 /**
+ * Logout - clears in-memory keys but keeps encrypted data
+ * User can log back in with password to decrypt keys again
+ */
+export function logout() {
+  keyCache.clear();
+
+  // Clear localStorage session
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem('obscura_session');
+  }
+}
+
+/**
  * Unlink this device - wipes all local data for the user
  * After this, logging in again will treat it as a fresh device needing link approval
  *
@@ -304,6 +402,8 @@ function arrayBufferToBase64(buffer) {
  * @returns {Promise<void>}
  */
 export async function unlinkDevice(username, userId) {
+  // Clear in-memory keys first
+  keyCache.clear();
   if (typeof indexedDB === 'undefined') {
     throw new Error('IndexedDB not available');
   }

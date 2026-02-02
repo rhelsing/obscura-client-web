@@ -1,7 +1,12 @@
 /**
  * IndexedDB Signal Store
  * Same interface as InMemoryStore, but persists to IndexedDB
+ *
+ * Identity keys are encrypted at rest and only decrypted into memory
+ * via keyCache while the session is active.
  */
+
+import { keyCache } from './keyCache.js';
 
 const DB_NAME_PREFIX = 'obscura_signal_v2';
 const DB_VERSION = 1;
@@ -105,12 +110,25 @@ export class IndexedDBStore {
 
   // === Signal Protocol Store Interface ===
 
+  /**
+   * Get identity key pair from in-memory cache
+   * Keys are decrypted into cache at login time
+   */
   async getIdentityKeyPair() {
+    // Primary: use cached keys (decrypted at login)
+    const cached = keyCache.getIdentityKeyPair();
+    if (cached) return cached;
+
+    // Fallback: check IndexedDB for unencrypted keys (pre-migration)
     const store = await this._getStore(STORES.IDENTITY);
     const record = await this._promisify(store.get('identity'));
     return record?.keyPair || null;
   }
 
+  /**
+   * Store identity key pair (unencrypted - legacy method)
+   * New code should use storeEncryptedIdentity instead
+   */
   async storeIdentityKeyPair(keyPair) {
     const store = await this._getStore(STORES.IDENTITY, 'readwrite');
     const existing = await this._promisify(store.get('identity'));
@@ -119,14 +137,27 @@ export class IndexedDBStore {
       keyPair,
       registrationId: existing?.registrationId,
     }));
+    // Also cache for immediate use
+    keyCache.set({ identityKeyPair: keyPair, registrationId: existing?.registrationId });
   }
 
+  /**
+   * Get local registration ID from in-memory cache
+   */
   async getLocalRegistrationId() {
+    // Primary: use cached registration ID
+    const cached = keyCache.getRegistrationId();
+    if (cached) return cached;
+
+    // Fallback: check IndexedDB
     const store = await this._getStore(STORES.IDENTITY);
     const record = await this._promisify(store.get('identity'));
     return record?.registrationId || null;
   }
 
+  /**
+   * Store local registration ID (legacy method)
+   */
   async storeLocalRegistrationId(registrationId) {
     const store = await this._getStore(STORES.IDENTITY, 'readwrite');
     const existing = await this._promisify(store.get('identity'));
@@ -134,7 +165,75 @@ export class IndexedDBStore {
       id: 'identity',
       keyPair: existing?.keyPair,
       registrationId,
+      // Preserve encrypted fields if they exist
+      salt: existing?.salt,
+      iv: existing?.iv,
+      ciphertext: existing?.ciphertext,
     }));
+  }
+
+  // === Encrypted Identity Storage ===
+
+  /**
+   * Load raw identity record (for migration detection)
+   * @returns {object|null} Raw record with either keyPair or ciphertext
+   */
+  async loadIdentityRecord() {
+    const store = await this._getStore(STORES.IDENTITY);
+    const record = await this._promisify(store.get('identity'));
+    return record || null;
+  }
+
+  /**
+   * Store encrypted identity keys
+   * @param {object} encrypted - { salt, iv, ciphertext, registrationId }
+   */
+  async storeEncryptedIdentity(encrypted) {
+    const store = await this._getStore(STORES.IDENTITY, 'readwrite');
+    await this._promisify(store.put({
+      id: 'identity',
+      salt: encrypted.salt,
+      iv: encrypted.iv,
+      ciphertext: encrypted.ciphertext,
+      registrationId: encrypted.registrationId,
+      // Remove old unencrypted keyPair
+      keyPair: undefined,
+    }));
+  }
+
+  /**
+   * Load encrypted identity (for decryption at login)
+   * @returns {object|null} { salt, iv, ciphertext, registrationId }
+   */
+  async loadEncryptedIdentity() {
+    const store = await this._getStore(STORES.IDENTITY);
+    const record = await this._promisify(store.get('identity'));
+    if (!record || !record.ciphertext) return null;
+    return {
+      salt: new Uint8Array(record.salt),
+      iv: new Uint8Array(record.iv),
+      ciphertext: new Uint8Array(record.ciphertext),
+      registrationId: record.registrationId,
+    };
+  }
+
+  /**
+   * Delete unencrypted identity data (after migration)
+   */
+  async deleteUnencryptedIdentity() {
+    const store = await this._getStore(STORES.IDENTITY, 'readwrite');
+    const existing = await this._promisify(store.get('identity'));
+    if (existing) {
+      await this._promisify(store.put({
+        id: 'identity',
+        salt: existing.salt,
+        iv: existing.iv,
+        ciphertext: existing.ciphertext,
+        registrationId: existing.registrationId,
+        // Explicitly remove unencrypted keyPair
+        keyPair: undefined,
+      }));
+    }
   }
 
   async isTrustedIdentity(identifier, identityKey, direction) {
@@ -255,8 +354,12 @@ export class IndexedDBStore {
   // === Helpers ===
 
   async hasIdentity() {
-    const keyPair = await this.getIdentityKeyPair();
-    return keyPair !== null;
+    // Check cache first
+    if (keyCache.isLoaded()) return true;
+
+    // Check IndexedDB for either encrypted or unencrypted keys
+    const record = await this.loadIdentityRecord();
+    return record && (record.keyPair || record.ciphertext);
   }
 
   async clearAll() {

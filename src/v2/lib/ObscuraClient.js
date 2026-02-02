@@ -8,6 +8,7 @@ import { DeviceManager, parseLinkCode, buildLinkApproval } from './devices.js';
 import { Messenger, MessageType } from './messenger.js';
 import { AttachmentManager } from './attachments.js';
 import { createStore } from './store.js';
+import { keyCache } from './keyCache.js';
 import { createMessageStore } from '../store/messageStore.js';
 import { createFriendStore } from '../store/friendStore.js';
 import { createDeviceStore } from '../store/deviceStore.js';
@@ -155,9 +156,13 @@ export class ObscuraClient {
   }
 
   /**
-   * Clear session from localStorage
+   * Clear session from localStorage and in-memory key cache
    */
   static clearSession() {
+    // Clear in-memory decrypted keys
+    keyCache.clear();
+
+    // Clear localStorage session
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem('obscura_session');
     }

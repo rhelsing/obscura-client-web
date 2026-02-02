@@ -103,6 +103,7 @@ export class ObscuraClient {
       friendRequest: [],
       friendResponse: [],
       deviceAnnounce: [],
+      messagesMigrated: [],  // Emitted when messages are migrated to correct conversationId after DEVICE_ANNOUNCE
       linkApproval: [],
       sentSync: [],
       syncBlob: [],
@@ -1646,15 +1647,21 @@ export class ObscuraClient {
 
         // Migrate any messages that were stored under the raw serverUserId to the friend's username
         if (addedDeviceIds.length > 0 && self.messageStore) {
+          let totalMigrated = 0;
           for (const deviceId of addedDeviceIds) {
             const migrated = await self.messageStore.migrateMessages(deviceId, friend.username);
             if (migrated > 0) {
               console.log(`[DeviceAnnounce] Migrated ${migrated} messages from new device ${deviceId.slice(-8)} to ${friend.username}`);
+              totalMigrated += migrated;
               // Also update in-memory cache
               self.messages = self.messages.map(m =>
                 m.conversationId === deviceId ? { ...m, conversationId: friend.username } : m
               );
             }
+          }
+          // Notify UI to refresh the conversation if messages were migrated
+          if (totalMigrated > 0) {
+            self._emit('messagesMigrated', { conversationId: friend.username, count: totalMigrated });
           }
         }
 

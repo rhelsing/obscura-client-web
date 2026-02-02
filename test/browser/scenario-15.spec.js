@@ -104,21 +104,25 @@ test.describe('Scenario 15: Linked Device Data Persistence', () => {
     expect(bobWs).toBe(true);
     console.log('Bob registered and connected');
 
+    // Get Bob's userId for befriend call
+    const bobUserId = await bobPage.evaluate(() => window.__client.userId);
+
     // ============================================================
     // STEP 3: Alice1 and Bob become friends
     // ============================================================
     console.log('\n=== STEP 3: Alice1 and Bob become friends ===');
 
-    await alice1Page.evaluate(async (username) => {
-      await window.__client.sendFriendRequest(username);
-    }, bobUsername);
+    await alice1Page.evaluate(async ({ userId, username }) => {
+      await window.__client.befriend(userId, username);
+    }, { userId: bobUserId, username: bobUsername });
     console.log('Alice sent friend request to Bob');
 
     await delay(1000);
 
-    await bobPage.evaluate(async (username) => {
-      await window.__client.acceptFriendRequest(username);
-    }, aliceUsername);
+    // Bob accepts via UI
+    await bobPage.goto('/friends');
+    await bobPage.waitForSelector('.friend-item.pending', { timeout: 15000 });
+    await bobPage.click(`.accept-btn[data-username="${aliceUsername}"]`);
     console.log('Bob accepted friend request');
 
     await delay(1000);
@@ -136,18 +140,18 @@ test.describe('Scenario 15: Linked Device Data Persistence', () => {
 
     const testMessage = 'Hello from Alice1! ' + Date.now();
 
-    await alice1Page.evaluate(async (username, message) => {
+    await alice1Page.evaluate(async ({ username, message }) => {
       await window.__client.send(username, { text: message });
-    }, bobUsername, testMessage);
+    }, { username: bobUsername, message: testMessage });
     console.log('Alice1 sent message:', testMessage);
 
     await delay(1000);
 
     // Verify message is stored on Alice1
-    const alice1HasMessage = await alice1Page.evaluate(async (bobUsername, expectedText) => {
+    const alice1HasMessage = await alice1Page.evaluate(async ({ bobUsername, expectedText }) => {
       const messages = await window.__client.getMessages(bobUsername);
       return messages.some(m => m.content === expectedText || m.text === expectedText);
-    }, bobUsername, testMessage);
+    }, { bobUsername, expectedText: testMessage });
     expect(alice1HasMessage).toBe(true);
     console.log('Alice1 has the message stored');
 
@@ -192,11 +196,11 @@ test.describe('Scenario 15: Linked Device Data Persistence', () => {
 
     await delay(1000); // Give time for sync to complete
 
-    const alice2HasMessageBefore = await alice2Page.evaluate(async (bobUsername, expectedText) => {
+    const alice2HasMessageBefore = await alice2Page.evaluate(async ({ bobUsername, expectedText }) => {
       const messages = await window.__client.getMessages(bobUsername);
       console.log('Alice2 messages for Bob:', messages.length);
       return messages.some(m => m.content === expectedText || m.text === expectedText);
-    }, bobUsername, testMessage);
+    }, { bobUsername, expectedText: testMessage });
     expect(alice2HasMessageBefore).toBe(true);
     console.log('Alice2 can see the message after linking');
 
@@ -216,18 +220,12 @@ test.describe('Scenario 15: Linked Device Data Persistence', () => {
     await alice2Page.goto('/settings');
     await delay(500);
 
-    // Click logout in the drawer or settings
-    // First try the drawer approach
-    const hasDrawerLogout = await alice2Page.evaluate(() => {
-      const btn = document.querySelector('[data-action="logout"]');
-      if (btn) { btn.click(); return true; }
-      return false;
-    });
+    // Click "Log Out" button to open the confirmation modal
+    await alice2Page.click('button[modal="logout-modal"]');
+    await delay(300);
 
-    if (!hasDrawerLogout) {
-      // Try clicking a logout link/button directly
-      await alice2Page.click('a[href="/login"], button:has-text("Logout"), [data-navigo][href="/login"]');
-    }
+    // Click the confirm logout button in the modal
+    await alice2Page.click('#confirm-logout');
 
     await alice2Page.waitForURL('**/login', { timeout: 10000 });
     console.log('Alice2 logged out');
@@ -264,11 +262,11 @@ test.describe('Scenario 15: Linked Device Data Persistence', () => {
 
     await delay(1000);
 
-    const alice2HasMessageAfter = await alice2Page.evaluate(async (bobUsername, expectedText) => {
+    const alice2HasMessageAfter = await alice2Page.evaluate(async ({ bobUsername, expectedText }) => {
       const messages = await window.__client.getMessages(bobUsername);
       console.log('Alice2 messages for Bob after re-login:', messages.length);
       return messages.some(m => m.content === expectedText || m.text === expectedText);
-    }, bobUsername, testMessage);
+    }, { bobUsername, expectedText: testMessage });
     expect(alice2HasMessageAfter).toBe(true);
     console.log('Alice2 STILL has the message after logout/re-login');
 

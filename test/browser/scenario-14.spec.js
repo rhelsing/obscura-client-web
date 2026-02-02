@@ -99,24 +99,27 @@ test.describe('Scenario 14: Multi-Device Message Migration', () => {
     expect(bobWs).toBe(true);
     console.log('Bob registered and connected');
 
+    // Get Bob's userId for befriend call
+    const bobUserId = await bobPage.evaluate(() => window.__client.userId);
+
     // ============================================================
     // SETUP: Alice1 and Bob become friends
     // ============================================================
     console.log('\n=== SETUP: Alice1 and Bob become friends ===');
 
     // Alice sends friend request to Bob
-    await alice1Page.evaluate(async (username) => {
-      await window.__client.sendFriendRequest(username);
-    }, bobUsername);
+    await alice1Page.evaluate(async ({ userId, username }) => {
+      await window.__client.befriend(userId, username);
+    }, { userId: bobUserId, username: bobUsername });
     console.log('Alice sent friend request to Bob');
 
     // Wait for Bob to receive the request
     await delay(1000);
 
-    // Bob accepts the friend request
-    await bobPage.evaluate(async (username) => {
-      await window.__client.acceptFriendRequest(username);
-    }, aliceUsername);
+    // Bob accepts the friend request via UI
+    await bobPage.goto('/friends');
+    await bobPage.waitForSelector('.friend-item.pending', { timeout: 15000 });
+    await bobPage.click(`.accept-btn[data-username="${aliceUsername}"]`);
     console.log('Bob accepted friend request');
 
     await delay(1000);
@@ -183,25 +186,25 @@ test.describe('Scenario 14: Multi-Device Message Migration', () => {
     console.log('Confirmed: Bob does NOT know about Alice2 yet');
 
     // Alice2 sends message to Bob
-    await alice2Page.evaluate(async (username, message) => {
+    await alice2Page.evaluate(async ({ username, message }) => {
       await window.__client.send(username, { text: message });
-    }, bobUsername, testMessage);
+    }, { username: bobUsername, message: testMessage });
     console.log('Alice2 sent message to Bob');
 
     // Wait for message to arrive at Bob
     await delay(2000);
 
     // Check if message is stored under wrong conversationId (Alice2's serverUserId)
-    const messageUnderWrongId = await bobPage.evaluate(async (alice2Id, expectedText) => {
+    const messageUnderWrongId = await bobPage.evaluate(async ({ alice2Id, expectedText }) => {
       const messages = await window.__client.getMessages(alice2Id);
       return messages.some(m => m.content === expectedText || m.text === expectedText);
-    }, alice2UserId, testMessage);
+    }, { alice2Id: alice2UserId, expectedText: testMessage });
 
     // Check if message is under correct conversationId (alice's username)
-    const messageUnderCorrectId = await bobPage.evaluate(async (aliceUsername, expectedText) => {
+    const messageUnderCorrectId = await bobPage.evaluate(async ({ aliceUsername, expectedText }) => {
       const messages = await window.__client.getMessages(aliceUsername);
       return messages.some(m => m.content === expectedText || m.text === expectedText);
-    }, aliceUsername, testMessage);
+    }, { aliceUsername, expectedText: testMessage });
 
     console.log(`Message under wrong ID (${alice2UserId.slice(-8)}): ${messageUnderWrongId}`);
     console.log(`Message under correct ID (${aliceUsername}): ${messageUnderCorrectId}`);
@@ -259,18 +262,18 @@ test.describe('Scenario 14: Multi-Device Message Migration', () => {
     console.log('Bob now knows about Alice2');
 
     // Verify message is under Alice's username
-    const messageFoundCorrectly = await bobPage.evaluate(async (aliceUsername, expectedText) => {
+    const messageFoundCorrectly = await bobPage.evaluate(async ({ aliceUsername, expectedText }) => {
       const messages = await window.__client.getMessages(aliceUsername);
       return messages.some(m => m.content === expectedText || m.text === expectedText);
-    }, aliceUsername, testMessage);
+    }, { aliceUsername, expectedText: testMessage });
     expect(messageFoundCorrectly).toBe(true);
     console.log('Message is now under correct conversationId (Alice username)');
 
     // Verify message is NOT under Alice2's serverUserId anymore
-    const messageStillUnderWrongId = await bobPage.evaluate(async (alice2Id, expectedText) => {
+    const messageStillUnderWrongId = await bobPage.evaluate(async ({ alice2Id, expectedText }) => {
       const messages = await window.__client.getMessages(alice2Id);
       return messages.some(m => m.content === expectedText || m.text === expectedText);
-    }, alice2UserId, testMessage);
+    }, { alice2Id: alice2UserId, expectedText: testMessage });
     expect(messageStillUnderWrongId).toBe(false);
     console.log('Message is NOT under wrong conversationId anymore');
 

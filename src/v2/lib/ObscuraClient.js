@@ -1431,25 +1431,10 @@ export class ObscuraClient {
 
     return {
       ...approval,
-      async apply() {
+      apply() {
         // Apply the device list
         if (approval.ownDevices) {
           self.devices.setAll(approval.ownDevices);
-        }
-
-        // Mark device as approved in the store
-        // This prevents the pending device flow on next login
-        if (self.store) {
-          try {
-            const identity = await self.store.getDeviceIdentity();
-            if (identity) {
-              identity.linkStatus = 'approved';
-              await self.store.storeDeviceIdentity(identity);
-              console.log('[ObscuraClient] Device link status updated to approved');
-            }
-          } catch (err) {
-            console.warn('[ObscuraClient] Failed to update link status:', err);
-          }
         }
       },
     };

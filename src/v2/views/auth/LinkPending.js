@@ -111,14 +111,14 @@ export async function mount(container, _client, router) {
     await pendingClient.connect();
 
     // 3. Register BOTH handlers AFTER connect (they're live now)
-    approvalHandler = async (approval) => {
+    approvalHandler = (approval) => {
       // Don't re-render - avoids ry-field custom element lifecycle error
       // Just show visual feedback without replacing DOM
       const waitingDiv = container.querySelector('.waiting');
       if (waitingDiv) {
         waitingDiv.innerHTML = '<p>Approved! Syncing data...</p>';
       }
-      await approval.apply();  // Updates device list and marks link as approved
+      approval.apply();
     };
 
     syncHandler = async () => {

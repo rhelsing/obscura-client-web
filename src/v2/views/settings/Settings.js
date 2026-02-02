@@ -12,7 +12,7 @@ import { unlinkDevice } from '../../lib/auth.js';
 
 let cleanup = null;
 
-export function render({ settings = null, loading = false, saving = false } = {}) {
+export function render({ settings = null, loading = false, saving = false, isFirstDevice = false } = {}) {
   if (loading) {
     return `<div class="view settings"><div class="loading">Loading...</div></div>`;
   }
@@ -106,7 +106,7 @@ export function render({ settings = null, loading = false, saving = false } = {}
           <h2>Account</h2>
           <stack gap="sm">
             <button variant="danger" modal="logout-modal">Log Out</button>
-            <button variant="danger" modal="unlink-modal">Unlink Device</button>
+            ${!isFirstDevice ? '<button variant="danger" modal="unlink-modal">Unlink Device</button>' : ''}
           </stack>
         </section>
       </stack>
@@ -149,6 +149,10 @@ export async function mount(container, client, router) {
   let settingsId = null;
 
   try {
+    // Check if this is the first device (primary device cannot be unlinked)
+    const deviceIdentity = await client.store.getDeviceIdentity();
+    const isFirstDevice = deviceIdentity?.isFirstDevice ?? false;
+
     if (client.settings) {
       settings = await client.settings.where({}).first();
       if (settings) {
@@ -156,7 +160,7 @@ export async function mount(container, client, router) {
       }
     }
 
-    container.innerHTML = render({ settings });
+    container.innerHTML = render({ settings, isFirstDevice });
 
     // Notifications toggle - listen for ry:change event from switch
     const notifToggle = container.querySelector('#notifications-toggle');
@@ -243,9 +247,9 @@ export async function mount(container, client, router) {
       navigate('/login');
     });
 
-    // Unlink device - wipes all local data
+    // Unlink device - wipes all local data (only shown for non-first devices)
     const confirmUnlink = container.querySelector('#confirm-unlink');
-    confirmUnlink.addEventListener('click', async () => {
+    confirmUnlink?.addEventListener('click', async () => {
       confirmUnlink.disabled = true;
       confirmUnlink.textContent = 'Unlinking...';
 

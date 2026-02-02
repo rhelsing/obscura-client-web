@@ -9,6 +9,7 @@
  */
 import { setClient, navigate } from '../index.js';
 import { fullSchema } from '../../lib/schema.js';
+import QRCode from 'qrcode';
 
 let cleanup = null;
 let pendingClient = null;
@@ -27,21 +28,24 @@ export function render({ linkCode = '', waiting = true, error = null } = {}) {
   return `
     <div class="view link-pending">
       <h1>Link This Device</h1>
-      <p>Open Obscura on another device and enter this code to approve.</p>
+      <p>Open Obscura on another device and scan this code to approve.</p>
 
       <div class="link-code-section" style="margin: var(--ry-space-6) 0;">
-        <ry-field label="Link Code">
-          <div style="display: flex; gap: var(--ry-space-2);">
-            <input
-              type="text"
-              class="link-code"
-              value="${linkCode}"
-              readonly
-              style="font-family: monospace; font-size: 0.75rem;"
-            />
-            <button type="button" id="copy-btn" variant="secondary">Copy</button>
-          </div>
-        </ry-field>
+        <stack gap="md" style="align-items: center;">
+          <div id="qr-code" style="background: white; padding: 1rem; border-radius: 8px;"></div>
+          <ry-field label="Or enter code manually">
+            <div style="display: flex; gap: var(--ry-space-2);">
+              <input
+                type="text"
+                class="link-code"
+                value="${linkCode}"
+                readonly
+                style="font-family: monospace; font-size: 0.75rem;"
+              />
+              <button type="button" id="copy-btn" variant="secondary">Copy</button>
+            </div>
+          </ry-field>
+        </stack>
       </div>
 
       ${waiting ? `
@@ -70,6 +74,16 @@ export async function mount(container, _client, router) {
   }
 
   container.innerHTML = render({ linkCode: pendingClient.linkCode });
+
+  // Generate QR code
+  const qrContainer = container.querySelector('#qr-code');
+  if (qrContainer) {
+    QRCode.toCanvas(pendingClient.linkCode, { width: 200, margin: 1 }, (err, canvas) => {
+      if (!err && qrContainer) {
+        qrContainer.appendChild(canvas);
+      }
+    });
+  }
 
   // Copy button handler
   const copyBtn = container.querySelector('#copy-btn');

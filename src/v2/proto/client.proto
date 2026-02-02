@@ -66,6 +66,7 @@ message ClientMessage {
     SENT_SYNC = 24;      // Notify own devices of sent message
     CONTENT_REFERENCE = 25;  // E2E encrypted attachment key sharing
     SYNC_REQUEST = 26;   // Request full sync from another device
+    FRIEND_SYNC = 27;    // Sync friend changes to own devices
 
     // ORM Layer (30-39)
     MODEL_SYNC = 30;     // CRDT model operation (create/update/delete)
@@ -73,6 +74,9 @@ message ClientMessage {
 
   // ORM Layer payload
   ModelSync model_sync = 50;
+
+  // Friend sync payload
+  FriendSync friend_sync = 51;
 }
 
 // =============================================================================
@@ -141,6 +145,16 @@ message SentSync {
   string message_id = 2;            // Unique message ID
   uint64 timestamp = 3;             // When the message was sent
   bytes content = 4;                // The message content
+}
+
+// Sync friend list changes to own devices
+// Sent to all own devices when friend is added or removed
+message FriendSync {
+  string username = 1;              // Friend's username
+  string action = 2;                // "add" or "remove"
+  string status = 3;                // Friend status (pending, accepted)
+  repeated DeviceInfo devices = 4;  // Friend's devices (for fan-out)
+  uint64 timestamp = 5;             // When the change occurred
 }
 
 // =============================================================================

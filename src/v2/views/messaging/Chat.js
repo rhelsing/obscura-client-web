@@ -94,6 +94,48 @@ function blobToDataUrl(blob) {
   });
 }
 
+// Helper: Convert image to JPEG using canvas (handles HEIC and other formats)
+async function convertToJpeg(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+
+      canvas.toBlob(blob => {
+        URL.revokeObjectURL(url);
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error('Canvas toBlob failed'));
+        }
+      }, 'image/jpeg', 0.9);
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Failed to load image'));
+    };
+
+    img.src = url;
+  });
+}
+
+// Check if file needs conversion (HEIC or other non-web formats)
+function needsConversion(file) {
+  const type = file.type.toLowerCase();
+  return type === 'image/heic' ||
+         type === 'image/heif' ||
+         type === '' ||  // Some browsers don't report HEIC type
+         (file.name && /\.(heic|heif)$/i.test(file.name));
+}
+
 // Helper: Generate unique message ID
 function generateMsgId() {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -297,20 +339,32 @@ export async function mount(container, client, router, params) {
     const input = e.target;
     console.log('[Upload] Step 4: File input change event fired');
     const file = input.files[0];
-    console.log('[Upload] Step 5: Got file:', file ? `${file.name} (${file.size} bytes)` : 'NO FILE');
+    console.log('[Upload] Step 5: Got file:', file ? `${file.name} (${file.size} bytes, type: ${file.type})` : 'NO FILE');
     if (!file) {
       console.log('[Upload] ABORT: No file selected');
       return;
     }
 
     try {
-      console.log('[Upload] Step 6: Reading file as ArrayBuffer');
-      const buffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      console.log('[Upload] Step 7: File read complete:', bytes.length, 'bytes');
+      let blob;
+      let bytes;
+
+      // Convert HEIC/HEIF (iPhone camera photos) to JPEG
+      if (file.type.startsWith('image/') && needsConversion(file)) {
+        console.log('[Upload] Step 6: Converting HEIC/HEIF to JPEG');
+        blob = await convertToJpeg(file);
+        const buffer = await blob.arrayBuffer();
+        bytes = new Uint8Array(buffer);
+        console.log('[Upload] Step 7: Conversion complete:', bytes.length, 'bytes');
+      } else {
+        console.log('[Upload] Step 6: Reading file as ArrayBuffer');
+        const buffer = await file.arrayBuffer();
+        bytes = new Uint8Array(buffer);
+        blob = new Blob([bytes], { type: file.type || 'image/jpeg' });
+        console.log('[Upload] Step 7: File read complete:', bytes.length, 'bytes');
+      }
 
       // Convert to data URL for immediate display
-      const blob = new Blob([bytes], { type: file.type || 'image/jpeg' });
       const imageDataUrl = await blobToDataUrl(blob);
       console.log('[Upload] Step 8: Data URL created');
 

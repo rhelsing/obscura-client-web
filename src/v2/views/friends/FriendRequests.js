@@ -20,7 +20,11 @@ let currentClient = null;
  */
 function reconstructRequest(friend, client) {
   const devices = friend.devices || [];
-  const primaryDevice = devices[0];
+  // Sort by deviceUUID for deterministic "primary" device across all clients
+  const sortedDevices = [...devices].sort((a, b) =>
+    (a.deviceUUID || '').localeCompare(b.deviceUUID || '')
+  );
+  const primaryDevice = sortedDevices[0];
   const signalIdentityKey = primaryDevice?.signalIdentityKey;
 
   return {
@@ -35,6 +39,8 @@ function reconstructRequest(friend, client) {
 
     async accept() {
       client.friends.store(friend.username, devices, 'accepted');
+      // Sync to own devices
+      await client._syncFriendToOwnDevices(friend.username, 'add', devices, 'accepted');
       if (primaryDevice?.serverUserId) {
         await client._sendFriendResponse(primaryDevice.serverUserId, friend.username, true);
       }

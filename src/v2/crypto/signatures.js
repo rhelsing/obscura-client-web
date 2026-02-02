@@ -116,16 +116,68 @@ export function serializeAnnounceForSigning(announce) {
 }
 
 /**
+ * Normalize various key formats to Uint8Array
+ * Handles: Uint8Array, ArrayBuffer, Array, plain object (from JSON), base64 string
+ * @param {*} key - Key in various formats
+ * @returns {Uint8Array|null} Normalized key or null if invalid
+ */
+function normalizeKeyToUint8Array(key) {
+  if (!key) return null;
+
+  // Already Uint8Array
+  if (key instanceof Uint8Array) return key;
+
+  // ArrayBuffer
+  if (key instanceof ArrayBuffer) return new Uint8Array(key);
+
+  // Array of numbers
+  if (Array.isArray(key)) return new Uint8Array(key);
+
+  // Plain object from JSON.stringify(Uint8Array) -> {"0":5,"1":123,...}
+  if (typeof key === 'object' && key !== null) {
+    const keys = Object.keys(key);
+    // Check if keys are numeric indices
+    if (keys.length > 0 && keys.every(k => /^\d+$/.test(k))) {
+      const maxIndex = Math.max(...keys.map(Number));
+      const arr = new Uint8Array(maxIndex + 1);
+      for (const k of keys) {
+        arr[Number(k)] = key[k];
+      }
+      return arr;
+    }
+  }
+
+  // Base64 string
+  if (typeof key === 'string') {
+    try {
+      const binary = atob(key);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Generate a 4-digit verification code from a Signal identity key
  * Used for out-of-band verification during friend requests
  *
- * @param {Uint8Array|ArrayBuffer} signalIdentityKey - Signal identity public key (33 bytes)
+ * @param {Uint8Array|ArrayBuffer|Array|object|string} signalIdentityKey - Signal identity public key (33 bytes)
+ *        Accepts various formats: Uint8Array, ArrayBuffer, Array, JSON-serialized object, base64 string
  * @returns {Promise<string>} 4-digit code ("0000" - "9999")
  */
 export async function generateVerifyCode(signalIdentityKey) {
-  const keyBytes = signalIdentityKey instanceof ArrayBuffer
-    ? new Uint8Array(signalIdentityKey)
-    : signalIdentityKey;
+  const keyBytes = normalizeKeyToUint8Array(signalIdentityKey);
+
+  if (!keyBytes || keyBytes.length === 0) {
+    throw new Error('Invalid signalIdentityKey format');
+  }
 
   // SHA-256 hash of the key
   const hash = await crypto.subtle.digest('SHA-256', keyBytes);

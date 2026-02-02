@@ -61,7 +61,7 @@ export class DeviceManager {
    * Handles both proto field name (deviceUuid) and JS convention (deviceUUID)
    * @param {object} device - { serverUserId, deviceUUID?, deviceName, signalIdentityKey? }
    */
-  add(device) {
+  async add(device) {
     // Don't add self
     if (device.serverUserId === this.currentUserId) {
       return;
@@ -79,8 +79,8 @@ export class DeviceManager {
         deviceName,
         signalIdentityKey: device.signalIdentityKey,
       });
-      // Persist to IndexedDB
-      this._persistDevices();
+      // Persist to IndexedDB - await to ensure it completes before navigation
+      await this._persistDevices();
       logger.logDeviceAdd(device.serverUserId, deviceName, deviceUUID);
     }
   }
@@ -125,15 +125,15 @@ export class DeviceManager {
    * Remove a device (revocation)
    * @param {string} idOrUUID - serverUserId or deviceUUID
    */
-  remove(idOrUUID) {
+  async remove(idOrUUID) {
     const removed = this.ownDevices.find(d =>
       d.serverUserId === idOrUUID || d.deviceUUID === idOrUUID
     );
     this.ownDevices = this.ownDevices.filter(d =>
       d.serverUserId !== idOrUUID && d.deviceUUID !== idOrUUID
     );
-    // Persist to IndexedDB
-    this._persistDevices();
+    // Persist to IndexedDB - await to ensure it completes before navigation
+    await this._persistDevices();
     if (removed) {
       logger.logDeviceRemove(removed.serverUserId, removed.deviceUUID);
     }

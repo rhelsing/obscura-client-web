@@ -18,6 +18,7 @@ export const MessageType = {
   FRIEND_REQUEST: 2,
   FRIEND_RESPONSE: 3,
   SESSION_RESET: 4,
+  FRIEND_SYNC: 27,
   DEVICE_LINK_APPROVAL: 11,
   DEVICE_ANNOUNCE: 12,
   HISTORY_CHUNK: 20,
@@ -90,6 +91,7 @@ export class Messenger {
     this.SyncBlob = this.clientProto.lookupType('obscura.v2.SyncBlob');
     this.ContentReference = this.clientProto.lookupType('obscura.v2.ContentReference');
     this.ModelSync = this.clientProto.lookupType('obscura.v2.ModelSync');
+    this.FriendSync = this.clientProto.lookupType('obscura.v2.FriendSync');
     console.log('[Messenger] Proto loading complete. Types:', {
       WebSocketFrame: !!this.WebSocketFrame,
       ClientMessage: !!this.ClientMessage,
@@ -352,6 +354,21 @@ export class Messenger {
       });
     }
 
+    if (typeValue === MessageType.FRIEND_SYNC && opts.friendSync) {
+      msgData.friendSync = this.FriendSync.create({
+        username: opts.friendSync.username,
+        action: opts.friendSync.action,
+        status: opts.friendSync.status || 'accepted',
+        devices: (opts.friendSync.devices || []).map(d => this.DeviceInfo.create({
+          deviceUuid: d.deviceUUID || d.deviceUuid,
+          serverUserId: d.serverUserId,
+          deviceName: d.deviceName,
+          signalIdentityKey: d.signalIdentityKey,
+        })),
+        timestamp: opts.friendSync.timestamp || Date.now(),
+      });
+    }
+
     const msg = this.ClientMessage.create(msgData);
     return this.ClientMessage.encode(msg).finish();
   }
@@ -440,6 +457,21 @@ export class Messenger {
         data: msg.modelSync.data,
         signature: msg.modelSync.signature,
         authorDeviceId: msg.modelSync.authorDeviceId || '',
+      };
+    }
+
+    if (msg.friendSync) {
+      result.friendSync = {
+        username: msg.friendSync.username,
+        action: msg.friendSync.action,
+        status: msg.friendSync.status || 'accepted',
+        devices: (msg.friendSync.devices || []).map(d => ({
+          deviceUUID: d.deviceUuid,
+          serverUserId: d.serverUserId,
+          deviceName: d.deviceName,
+          signalIdentityKey: d.signalIdentityKey,
+        })),
+        timestamp: Number(msg.friendSync.timestamp) || 0,
       };
     }
 

@@ -263,7 +263,11 @@ export class FriendManager {
   processRequest(msg, sendFn) {
     const senderUsername = msg.username;
     const senderDevices = msg.deviceAnnounce?.devices || [];
-    const senderIdentityKey = senderDevices[0]?.signalIdentityKey;
+    // Sort by deviceUUID for deterministic "primary" device across all clients
+    const sortedDevices = [...senderDevices].sort((a, b) =>
+      (a.deviceUUID || '').localeCompare(b.deviceUUID || '')
+    );
+    const senderIdentityKey = sortedDevices[0]?.signalIdentityKey;
 
     this.store(senderUsername, senderDevices, 'pending_incoming');
     logger.logFriendRequestReceived(senderUsername, msg.sourceUserId, senderDevices.length).catch(() => {});

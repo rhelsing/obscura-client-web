@@ -8,6 +8,48 @@ import { navigate } from '../index.js';
 let cleanup = null;
 let pendingMedia = null; // { file, bytes }
 
+// Helper: Convert image to JPEG using canvas (handles HEIC and other formats)
+async function convertToJpeg(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+
+      canvas.toBlob(blob => {
+        URL.revokeObjectURL(url);
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error('Canvas toBlob failed'));
+        }
+      }, 'image/jpeg', 0.9);
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Failed to load image'));
+    };
+
+    img.src = url;
+  });
+}
+
+// Check if file needs conversion (HEIC or other non-web formats)
+function needsConversion(file) {
+  const type = file.type.toLowerCase();
+  return type === 'image/heic' ||
+         type === 'image/heif' ||
+         type === '' ||
+         (file.name && /\.(heic|heif)$/i.test(file.name));
+}
+
 export function render({ error = null, loading = false, mediaName = null } = {}) {
   return `
     <div class="view create-story">
@@ -66,12 +108,24 @@ export function mount(container, client, router) {
   mediaInput.addEventListener('change', async () => {
     const file = mediaInput.files[0];
     if (file) {
-      // Read file bytes for later upload
-      const buffer = await file.arrayBuffer();
+      let bytes;
+      let contentType = file.type;
+
+      // Convert HEIC/HEIF (iPhone camera photos) to JPEG
+      if (file.type.startsWith('image/') && needsConversion(file)) {
+        const blob = await convertToJpeg(file);
+        const buffer = await blob.arrayBuffer();
+        bytes = new Uint8Array(buffer);
+        contentType = 'image/jpeg';
+      } else {
+        const buffer = await file.arrayBuffer();
+        bytes = new Uint8Array(buffer);
+      }
+
       pendingMedia = {
         file,
-        bytes: new Uint8Array(buffer),
-        contentType: file.type,
+        bytes,
+        contentType,
       };
       mediaPreview.textContent = `📎 ${file.name}`;
       mediaPreview.classList.remove('hidden');

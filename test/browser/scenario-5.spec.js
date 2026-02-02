@@ -301,11 +301,119 @@ test.describe('Scenario 5: Multi-Device Linking', () => {
     expect(selfInFriends).toBeNull();
     console.log('Bob not in bob2 friend list (correct)');
 
+    // ============================================================
+    // 5.9: Multi-Device Verification Code Matrix
+    // Verify that verification codes are consistent across all devices
+    // ============================================================
+    console.log('\n--- 5.9: Multi-device verification code matrix ---');
+
+    // Link Alice's second device
+    console.log('Linking Alice2...');
+    const alice2Context = await browser.newContext();
+    const alice2Page = await alice2Context.newPage();
+    alice2Page.on('dialog', dialog => dialog.accept());
+    alice2Page.on('console', msg => console.log('[alice2]', msg.text()));
+
+    await alice2Page.goto('/login');
+    await waitForViewReady(alice2Page);
+    await alice2Page.waitForSelector('#username', { timeout: 10000 });
+    await alice2Page.fill('#username', username);
+    await alice2Page.fill('#password', password);
+    await alice2Page.click('button[type="submit"]');
+    await delay(300);
+
+    await alice2Page.waitForURL('**/link-pending', { timeout: 15000 });
+    await alice2Page.waitForSelector('.link-code', { timeout: 10000 });
+    const alice2LinkCode = await alice2Page.$eval('.link-code', el => el.value || el.textContent);
+    console.log('Alice2 link code captured');
+
+    // Alice1 approves Alice2
+    await page.evaluate(async (code) => {
+      await window.__client.approveLink(code);
+      await window.__client.announceDevices();
+    }, alice2LinkCode);
+    console.log('Alice approved alice2');
+
+    await alice2Page.waitForURL('**/stories', { timeout: 20000 });
+    let alice2Ws = false;
+    for (let i = 0; i < 10; i++) {
+      await delay(500);
+      alice2Ws = await alice2Page.evaluate(() => window.__client?.ws?.readyState === 1);
+      if (alice2Ws) break;
+    }
+    expect(alice2Ws).toBe(true);
+    console.log('Alice2 connected');
+
+    // Helper to get verify codes from a page
+    async function getVerifyCodes(testPage, friendUsername) {
+      await testPage.goto('/friends');
+      await testPage.waitForSelector(`.friend-item[data-username="${friendUsername}"] .verify-btn`, { timeout: 15000 });
+      await testPage.click(`.friend-item[data-username="${friendUsername}"] .verify-btn`);
+      await testPage.waitForURL('**/friends/verify/**', { timeout: 10000 });
+      await testPage.waitForSelector('.safety-code', { timeout: 10000 });
+      const codes = await testPage.$$eval('.safety-code', els => els.map(el => el.textContent));
+      // Go back
+      await testPage.click('#match-btn');
+      await testPage.waitForURL('**/friends', { timeout: 10000 });
+      return { myCode: codes[0], theirCode: codes[1] };
+    }
+
+    // Get verification codes from all 4 devices
+    console.log('Getting verification codes from all devices...');
+
+    const alice1Codes = await getVerifyCodes(page, bobUsername);
+    console.log('Alice1 codes:', alice1Codes);
+
+    const alice2Codes = await getVerifyCodes(alice2Page, bobUsername);
+    console.log('Alice2 codes:', alice2Codes);
+
+    const bob1Codes = await getVerifyCodes(bobPage, username);
+    console.log('Bob1 codes:', bob1Codes);
+
+    const bob2Codes = await getVerifyCodes(bob2Page, username);
+    console.log('Bob2 codes:', bob2Codes);
+
+    // Verify all codes are valid 4-digit numbers
+    expect(alice1Codes.myCode).toMatch(/^\d{4}$/);
+    expect(alice1Codes.theirCode).toMatch(/^\d{4}$/);
+    expect(alice2Codes.myCode).toMatch(/^\d{4}$/);
+    expect(alice2Codes.theirCode).toMatch(/^\d{4}$/);
+    expect(bob1Codes.myCode).toMatch(/^\d{4}$/);
+    expect(bob1Codes.theirCode).toMatch(/^\d{4}$/);
+    expect(bob2Codes.myCode).toMatch(/^\d{4}$/);
+    expect(bob2Codes.theirCode).toMatch(/^\d{4}$/);
+    console.log('All codes are valid 4-digit numbers ✓');
+
+    // KEY TEST: theirCode should be consistent across own devices
+    expect(bob1Codes.theirCode).toBe(bob2Codes.theirCode);
+    console.log('Bob1 and Bob2 see same theirCode for Alice ✓');
+
+    expect(alice1Codes.theirCode).toBe(alice2Codes.theirCode);
+    console.log('Alice1 and Alice2 see same theirCode for Bob ✓');
+
+    // KEY TEST: myCode should also be consistent across own devices
+    expect(alice1Codes.myCode).toBe(alice2Codes.myCode);
+    console.log('Alice1 and Alice2 see same myCode ✓');
+
+    expect(bob1Codes.myCode).toBe(bob2Codes.myCode);
+    console.log('Bob1 and Bob2 see same myCode ✓');
+
+    // Cross-check: Alice's theirCode for Bob should match Bob's myCode (symmetry)
+    expect(alice1Codes.theirCode).toBe(bob1Codes.myCode);
+    console.log('Alice sees Bob\'s myCode as theirCode ✓');
+
+    // Cross-check: Bob's theirCode for Alice should match Alice's myCode (symmetry)
+    expect(bob1Codes.theirCode).toBe(alice1Codes.myCode);
+    console.log('Bob sees Alice\'s myCode as theirCode ✓');
+
+    console.log('Full verification code matrix complete ✓');
+
     console.log('\n=== SCENARIO 5 COMPLETE ===\n');
 
     // ============================================================
     // CLEANUP
     // ============================================================
+    await alice2Context.close();
     await bob2Context.close();
     await aliceContext.close();
     await bobContext.close();

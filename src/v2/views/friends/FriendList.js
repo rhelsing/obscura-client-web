@@ -104,7 +104,11 @@ export async function mount(container, client, router) {
       const friend = client.friends.get(username);
       if (friend) {
         const devices = friend.devices || [];
-        const primaryDevice = devices[0];
+        // Sort by deviceUUID for deterministic "primary" device across all clients
+        const sortedDevices = [...devices].sort((a, b) =>
+          (a.deviceUUID || '').localeCompare(b.deviceUUID || '')
+        );
+        const primaryDevice = sortedDevices[0];
         const signalIdentityKey = primaryDevice?.signalIdentityKey;
 
         // Create request object for verify view
@@ -133,6 +137,8 @@ export async function mount(container, client, router) {
           const devices = friend.devices || [];
           const primaryDevice = devices[0];
           client.friends.store(username, devices, 'accepted');
+          // Sync to own devices
+          await client._syncFriendToOwnDevices(username, 'add', devices, 'accepted');
           if (primaryDevice?.serverUserId) {
             await client._sendFriendResponse(primaryDevice.serverUserId, username, true);
           }

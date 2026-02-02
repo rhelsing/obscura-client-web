@@ -270,10 +270,25 @@ export class ObscuraClient {
   /**
    * Get my 4-digit verify code for sharing with friends
    * They can use this to verify friend requests came from me
+   * Uses primary device (sorted by deviceUUID) for consistency across all own devices
    * @returns {Promise<string>} 4-digit code ("0000" - "9999")
    */
   async getMyVerifyCode() {
-    const identityKey = this.deviceInfo?.signalIdentityKey;
+    // Get all own devices including current
+    const allDevices = this.devices.buildFullList(this.deviceInfo || {
+      serverUserId: this.userId,
+      deviceUUID: this.deviceUUID,
+      deviceName: this.username,
+      signalIdentityKey: this.deviceInfo?.signalIdentityKey,
+    });
+
+    // Sort by deviceUUID for deterministic "primary" device
+    const sortedDevices = [...allDevices].sort((a, b) =>
+      (a.deviceUUID || '').localeCompare(b.deviceUUID || '')
+    );
+
+    const primaryDevice = sortedDevices[0];
+    const identityKey = primaryDevice?.signalIdentityKey;
     if (!identityKey) return null;
     return generateVerifyCode(identityKey);
   }
@@ -778,6 +793,10 @@ export class ObscuraClient {
 
       case 'FRIEND_RESPONSE':
         const response = this.friends.processResponse(msg);
+        // Sync friend to own devices if accepted - await to ensure it completes before continuing
+        if (response.accepted) {
+          await this._syncFriendToOwnDevices(response.username, 'add', response.devices, 'accepted');
+        }
         this._emit('friendResponse', response);
         break;
 
@@ -842,6 +861,12 @@ export class ObscuraClient {
           ...msg.modelSync,
           sourceUserId: msg.sourceUserId,
         });
+        break;
+
+      case 'FRIEND_SYNC':
+        // Sync friend changes from another own device
+        this._handleFriendSync(msg.friendSync);
+        this._emit('friendSync', msg.friendSync);
         break;
 
       case 'TEXT':
@@ -1074,7 +1099,7 @@ export class ObscuraClient {
       deviceName: parsed.deviceName || 'New Device',
       signalIdentityKey: parsed.signalIdentityKey,
     };
-    this.devices.add(newDeviceInfo);
+    await this.devices.add(newDeviceInfo);
 
     // Build approval with full device list (now includes new device)
     const approval = buildLinkApproval({
@@ -1673,6 +1698,46 @@ export class ObscuraClient {
       isSent: true,
       authorDeviceId: msg.sourceUserId, // Track which device sent this
     });
+  }
+
+  /**
+   * Handle incoming FRIEND_SYNC from another own device
+   */
+  _handleFriendSync(sync) {
+    console.log('[ObscuraClient] Friend sync:', sync.action, sync.username);
+    if (sync.action === 'add') {
+      this.friends.store(sync.username, sync.devices, sync.status);
+    } else if (sync.action === 'remove') {
+      this.friends.remove(sync.username);
+    }
+  }
+
+  /**
+   * Sync friend change to all own devices
+   * Called after friend is added or removed
+   */
+  async _syncFriendToOwnDevices(username, action, devices = [], status = 'accepted') {
+    const selfTargets = this.devices.getSelfSyncTargets();
+    if (selfTargets.length === 0) return;
+
+    console.log('[ObscuraClient] Syncing friend to own devices:', username, action);
+
+    for (const targetUserId of selfTargets) {
+      try {
+        await this.messenger.sendMessage(targetUserId, {
+          type: 'FRIEND_SYNC',
+          friendSync: {
+            username,
+            action,
+            status,
+            devices,
+            timestamp: Date.now(),
+          },
+        });
+      } catch (e) {
+        console.warn('[ObscuraClient] Failed to sync friend to device:', targetUserId, e.message);
+      }
+    }
   }
 
   /**

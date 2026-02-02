@@ -13,13 +13,7 @@
  *   - scenario-7.spec.js - Device Revocation
  */
 import { test, expect } from '@playwright/test';
-
-// Helper: 300ms delay between server requests (rate limiting)
-const delay = (ms = 300) => new Promise(r => setTimeout(r, ms));
-
-function randomUsername() {
-  return 'test_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-}
+import { delay, randomUsername, waitForViewReady } from './helpers.js';
 
 test.describe('Scenarios 1-4: Core Flow', () => {
 
@@ -54,6 +48,7 @@ test.describe('Scenarios 1-4: Core Flow', () => {
 
     // 1. Go to register page
     await page.goto('/register');
+    await waitForViewReady(page);
     await page.waitForSelector('#username', { timeout: 30000 });
     console.log('Register page loaded');
 
@@ -185,6 +180,7 @@ test.describe('Scenarios 1-4: Core Flow', () => {
     // --- Register Bob ---
     console.log('Registering Bob...');
     await bobPage.goto('/register');
+    await waitForViewReady(bobPage);
     await bobPage.waitForSelector('#username', { timeout: 30000 });
     await bobPage.fill('#username', bobUsername);
     await bobPage.fill('#password', password);

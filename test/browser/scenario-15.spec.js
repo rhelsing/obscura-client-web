@@ -15,12 +15,7 @@
  *   9. Alice2 should STILL see the message (data persisted)
  */
 import { test, expect } from '@playwright/test';
-
-const delay = (ms = 300) => new Promise(r => setTimeout(r, ms));
-
-function randomUsername() {
-  return 'test_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-}
+import { delay, randomUsername, waitForViewReady } from './helpers.js';
 
 test.describe('Scenario 15: Linked Device Data Persistence', () => {
 
@@ -55,6 +50,7 @@ test.describe('Scenario 15: Linked Device Data Persistence', () => {
     // ============================================================
     console.log('\n=== STEP 1: Register Alice1 ===');
     await alice1Page.goto('/register');
+    await waitForViewReady(alice1Page);
     await alice1Page.waitForSelector('#username', { timeout: 30000 });
     await alice1Page.fill('#username', aliceUsername);
     await alice1Page.fill('#password', password);
@@ -82,6 +78,7 @@ test.describe('Scenario 15: Linked Device Data Persistence', () => {
     // ============================================================
     console.log('\n=== STEP 2: Register Bob ===');
     await bobPage.goto('/register');
+    await waitForViewReady(bobPage);
     await bobPage.waitForSelector('#username', { timeout: 30000 });
     await bobPage.fill('#username', bobUsername);
     await bobPage.fill('#password', password);
@@ -161,6 +158,7 @@ test.describe('Scenario 15: Linked Device Data Persistence', () => {
     console.log('\n=== STEP 5: Alice2 links to Alice account ===');
 
     await alice2Page.goto('/login');
+    await waitForViewReady(alice2Page);
     await alice2Page.waitForSelector('#username', { timeout: 10000 });
     await alice2Page.fill('#username', aliceUsername);
     await alice2Page.fill('#password', password);
@@ -235,6 +233,7 @@ test.describe('Scenario 15: Linked Device Data Persistence', () => {
     // ============================================================
     console.log('\n=== STEP 8: Alice2 logs back in ===');
 
+    await waitForViewReady(alice2Page);
     await alice2Page.waitForSelector('#username', { timeout: 10000 });
     await alice2Page.fill('#username', aliceUsername);
     await alice2Page.fill('#password', password);

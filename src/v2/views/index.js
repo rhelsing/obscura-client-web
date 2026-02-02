@@ -206,6 +206,11 @@ function requireAuth(callback) {
 }
 
 function mountView(view, params = {}) {
+  // Reset ready flag before mounting (for tests)
+  if (typeof window !== 'undefined') {
+    window.__viewReady = false;
+  }
+
   // Unmount current view
   if (currentView && currentView.unmount) {
     currentView.unmount();
@@ -219,6 +224,11 @@ function mountView(view, params = {}) {
   } else {
     // Fallback: just render
     container.innerHTML = view.render ? view.render(params) : '';
+  }
+
+  // Set ready flag after mounting (for tests)
+  if (typeof window !== 'undefined') {
+    window.__viewReady = true;
   }
 }
 

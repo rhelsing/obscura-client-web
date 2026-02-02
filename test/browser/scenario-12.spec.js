@@ -7,12 +7,7 @@
 import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
-
-const delay = (ms = 300) => new Promise(r => setTimeout(r, ms));
-
-function randomUsername() {
-  return 'test_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-}
+import { delay, randomUsername, waitForViewReady } from './helpers.js';
 
 test.describe('Scenario 12: Logging', () => {
 
@@ -41,6 +36,7 @@ test.describe('Scenario 12: Logging', () => {
     // ============================================================
     console.log('\n=== SETUP: Register Alice ===');
     await page.goto('/register');
+    await waitForViewReady(page);
     await page.waitForSelector('#username', { timeout: 30000 });
     await page.fill('#username', username);
     await page.fill('#password', password);
@@ -62,6 +58,7 @@ test.describe('Scenario 12: Logging', () => {
     // ============================================================
     console.log('\n=== SETUP: Register Bob ===');
     await bobPage.goto('/register');
+    await waitForViewReady(bobPage);
     await bobPage.waitForSelector('#username', { timeout: 30000 });
     await bobPage.fill('#username', bobUsername);
     await bobPage.fill('#password', password);

@@ -13,12 +13,7 @@
  * Setup: Alice (2 devices) and Bob (1 device) are friends
  */
 import { test, expect } from '@playwright/test';
-
-const delay = (ms = 300) => new Promise(r => setTimeout(r, ms));
-
-function randomUsername() {
-  return 'test_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-}
+import { delay, randomUsername, waitForViewReady } from './helpers.js';
 
 test.describe('Scenario 14: Multi-Device Message Migration', () => {
 
@@ -53,6 +48,7 @@ test.describe('Scenario 14: Multi-Device Message Migration', () => {
     // ============================================================
     console.log('\n=== SETUP: Register Alice1 ===');
     await alice1Page.goto('/register');
+    await waitForViewReady(alice1Page);
     await alice1Page.waitForSelector('#username', { timeout: 30000 });
     await alice1Page.fill('#username', aliceUsername);
     await alice1Page.fill('#password', password);
@@ -77,6 +73,7 @@ test.describe('Scenario 14: Multi-Device Message Migration', () => {
 
     console.log('\n=== SETUP: Register Bob ===');
     await bobPage.goto('/register');
+    await waitForViewReady(bobPage);
     await bobPage.waitForSelector('#username', { timeout: 30000 });
     await bobPage.fill('#username', bobUsername);
     await bobPage.fill('#password', password);
@@ -137,6 +134,7 @@ test.describe('Scenario 14: Multi-Device Message Migration', () => {
     console.log('\n=== SETUP: Link Alice2 ===');
 
     await alice2Page.goto('/login');
+    await waitForViewReady(alice2Page);
     await alice2Page.waitForSelector('#username', { timeout: 10000 });
     await alice2Page.fill('#username', aliceUsername);
     await alice2Page.fill('#password', password);

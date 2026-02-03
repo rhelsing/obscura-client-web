@@ -905,13 +905,14 @@ export class ObscuraClient {
    * Send a friend request
    */
   async befriend(userId, username) {
+    // Include ALL linked devices so recipient knows about all our devices
     const myDeviceAnnounce = {
-      devices: [{
-        deviceUUID: this.deviceUUID,
+      devices: this.devices.buildFullList(this.deviceInfo || {
         serverUserId: this.userId,
+        deviceUUID: this.deviceUUID,
         deviceName: this.username,
         signalIdentityKey: this.deviceInfo?.signalIdentityKey || new Uint8Array(33),
-      }],
+      }),
       timestamp: Date.now(),
       isRevocation: false,
       signature: new Uint8Array(64),
@@ -930,13 +931,14 @@ export class ObscuraClient {
    * Send friend response (internal)
    */
   async _sendFriendResponse(userId, username, accepted) {
+    // Include ALL linked devices so requester knows about all our devices
     const myDeviceAnnounce = accepted ? {
-      devices: [{
-        deviceUUID: this.deviceUUID,
+      devices: this.devices.buildFullList(this.deviceInfo || {
         serverUserId: this.userId,
+        deviceUUID: this.deviceUUID,
         deviceName: this.username,
         signalIdentityKey: this.deviceInfo?.signalIdentityKey || new Uint8Array(33),
-      }],
+      }),
       timestamp: Date.now(),
       isRevocation: false,
       signature: new Uint8Array(64),

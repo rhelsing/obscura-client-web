@@ -205,30 +205,17 @@ export async function mount(container, client, router) {
       return;
     }
 
-    // Get all known device IDs (all own devices + friends)
-    const knownDeviceIds = new Set([client.deviceUUID]);
+    // Get all known usernames (own username + friend usernames)
+    const knownUsernames = new Set([client.username]);
 
-    // Add all own devices (for stories synced from other devices)
-    if (client.devices) {
-      client.devices.getAll().forEach(d => {
-        if (d.deviceUUID) knownDeviceIds.add(d.deviceUUID);
-        if (d.serverUserId) knownDeviceIds.add(d.serverUserId);
-      });
-    }
-
-    // Add all friend devices
+    // Add all friend usernames
     if (client.friends && client.friends.friends) {
-      for (const [, data] of client.friends.friends) {
-        if (data.devices) {
-          data.devices.forEach(d => {
-            if (d.deviceUUID) knownDeviceIds.add(d.deviceUUID);
-            if (d.serverUserId) knownDeviceIds.add(d.serverUserId);
-          });
-        }
+      for (const [username] of client.friends.friends) {
+        knownUsernames.add(username);
       }
     }
 
-    // Query all stories then filter to known devices and non-expired (24h TTL)
+    // Query all stories then filter to known usernames and non-expired (24h TTL)
     const allStories = await client.story.where({})
       .orderBy('timestamp', 'desc')
       .exec();
@@ -236,7 +223,7 @@ export async function mount(container, client, router) {
     const now = Date.now();
     const ttl24h = 24 * 60 * 60 * 1000;
     const stories = allStories
-      .filter(s => knownDeviceIds.has(s.authorDeviceId))
+      .filter(s => knownUsernames.has(s.data?.authorUsername))
       .filter(s => (now - s.timestamp) < ttl24h);
 
     // Batch load comments and reactions

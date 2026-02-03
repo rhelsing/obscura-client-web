@@ -103,6 +103,7 @@ export class ObscuraClient {
       friendRequest: [],
       friendResponse: [],
       deviceAnnounce: [],
+      deviceRevoked: [],  // Emitted when this device is revoked by another device
       messagesMigrated: [],  // Emitted when messages are migrated to correct conversationId after DEVICE_ANNOUNCE
       linkApproval: [],
       sentSync: [],
@@ -1572,8 +1573,13 @@ export class ObscuraClient {
     }
 
     // Also send to own devices so they delete the revoked device's messages too
+    // Include the revoked device so it can self-brick
     const selfTargets = this.devices.getSelfSyncTargets();
-    for (const targetUserId of selfTargets) {
+    const allOwnDeviceTargets = [...selfTargets];
+    if (revokedServerUserId && !allOwnDeviceTargets.includes(revokedServerUserId)) {
+      allOwnDeviceTargets.push(revokedServerUserId);
+    }
+    for (const targetUserId of allOwnDeviceTargets) {
       await this.messenger.sendMessage(targetUserId, {
         type: 'DEVICE_ANNOUNCE',
         deviceAnnounce: announce,

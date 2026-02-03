@@ -168,6 +168,22 @@ test.describe('Scenario 7: Device Revocation', () => {
     expect(bob2Ws).toBe(true);
     console.log('Bob2 linked and connected');
 
+    // Wait for friends to sync via SYNC_BLOB (with devices)
+    await bob2Page.waitForFunction(
+      () => {
+        const friends = window.__client?.friends?.getAll();
+        if (!friends || friends.length === 0) return false;
+        // Make sure at least one friend has devices
+        return friends.some(f => f.devices && f.devices.length > 0);
+      },
+      { timeout: 10000 }
+    );
+    const bob2FriendInfo = await bob2Page.evaluate(() => {
+      const friends = window.__client.friends.getAll();
+      return friends.map(f => ({ username: f.username, deviceCount: f.devices?.length || 0, status: f.status }));
+    });
+    console.log('Bob2 friends synced:', JSON.stringify(bob2FriendInfo));
+
     // ============================================================
     // SCENARIO 7: Device Revocation
     // ============================================================
@@ -262,12 +278,59 @@ test.describe('Scenario 7: Device Revocation', () => {
     await bob2Page.waitForURL('**/login', { timeout: 15000 });
     console.log('Bob2 redirected to login page (self-bricked)');
 
-    // Verify Bob2's IndexedDB was wiped by checking that client is gone
-    const bob2ClientGone = await bob2Page.evaluate(() => {
-      return window.__client === null || window.__client === undefined;
+    // Verify Bob2's data was wiped - check localStorage and IndexedDB
+    const bob2DataWiped = await bob2Page.evaluate(async () => {
+      // Check localStorage session is gone
+      const session = localStorage.getItem('obscura_session');
+      if (session) {
+        return { wiped: false, reason: 'localStorage session still exists' };
+      }
+
+      // Check that Signal keys database is deleted or empty
+      // The database name format is: obscura_signal_v2_{username}
+      const databases = await indexedDB.databases();
+      const signalDbs = databases.filter(db => db.name?.startsWith('obscura_signal_v2_'));
+
+      // If any Signal DB exists for this user, check if it has keys
+      for (const db of signalDbs) {
+        try {
+          const openReq = indexedDB.open(db.name);
+          const hasKeys = await new Promise((resolve) => {
+            openReq.onsuccess = () => {
+              const idb = openReq.result;
+              // Check if identityKey store has data
+              if (!idb.objectStoreNames.contains('identityKey')) {
+                idb.close();
+                resolve(false);
+                return;
+              }
+              const tx = idb.transaction('identityKey', 'readonly');
+              const store = tx.objectStore('identityKey');
+              const countReq = store.count();
+              countReq.onsuccess = () => {
+                idb.close();
+                resolve(countReq.result > 0);
+              };
+              countReq.onerror = () => {
+                idb.close();
+                resolve(false);
+              };
+            };
+            openReq.onerror = () => resolve(false);
+          });
+          if (hasKeys) {
+            return { wiped: false, reason: `Signal DB ${db.name} still has keys` };
+          }
+        } catch (e) {
+          // DB access failed, that's fine
+        }
+      }
+
+      return { wiped: true };
     });
-    expect(bob2ClientGone).toBe(true);
-    console.log('Bob2 client wiped');
+    console.log('Bob2 data wipe check:', JSON.stringify(bob2DataWiped));
+    expect(bob2DataWiped.wiped).toBe(true);
+    console.log('Bob2 data wiped (session and keys)');
 
     await delay(500);
 

@@ -8,6 +8,7 @@
  *   7.2 Bob1 revokes bob2 using recovery phrase
  *   7.3 Everyone notified (revocation announce)
  *   7.4 Bob2's messages disappear
+ *   7.5 Bob2 self-bricks (wipes data, redirects to login)
  */
 import { test, expect } from '@playwright/test';
 import { delay, randomUsername, waitForViewReady } from './helpers.js';
@@ -252,6 +253,21 @@ test.describe('Scenario 7: Device Revocation', () => {
     // Alice should receive device announce with revocation
     await aliceRevokeAnnouncePromise;
     console.log('Alice received revocation announce');
+
+    // --- 7.5: Verify Bob2 self-bricks ---
+    console.log('--- 7.5: Verify Bob2 self-bricks ---');
+
+    // Bob2 should receive the revocation and be redirected to login
+    // The deviceRevoked event triggers data wipe and redirect
+    await bob2Page.waitForURL('**/login', { timeout: 15000 });
+    console.log('Bob2 redirected to login page (self-bricked)');
+
+    // Verify Bob2's IndexedDB was wiped by checking that client is gone
+    const bob2ClientGone = await bob2Page.evaluate(() => {
+      return window.__client === null || window.__client === undefined;
+    });
+    expect(bob2ClientGone).toBe(true);
+    console.log('Bob2 client wiped');
 
     await delay(500);
 

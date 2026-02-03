@@ -2,6 +2,7 @@
  * V2 Views - Router and View Management
  */
 import Navigo from 'navigo';
+import { updatePixBadge, updateChatsBadge } from './components/Nav.js';
 
 /**
  * Get the API URL - uses proxy in dev to avoid CORS
@@ -57,6 +58,7 @@ let router = null;
 let currentView = null;
 let container = null;
 let client = null;
+let badgeCounts = { pix: 0, chats: 0 };
 
 /**
  * Initialize the router and views
@@ -195,6 +197,13 @@ export function getRouter() {
   return router;
 }
 
+/**
+ * Get current badge counts for nav
+ */
+export function getBadgeCounts() {
+  return badgeCounts;
+}
+
 // --- Private helpers ---
 
 function requireAuth(callback) {
@@ -232,8 +241,102 @@ function mountView(view, params = {}) {
   }
 }
 
+/**
+ * Refresh the pix badge count
+ */
+export async function refreshPixBadge() {
+  if (!client?.pix) return;
+  try {
+    const allPix = await client.pix.all();
+    const unviewedCount = allPix.filter(p =>
+      p.data?.recipientUsername === client.username &&
+      !p.data?.viewedAt &&
+      !p.data?._deleted
+    ).length;
+    badgeCounts.pix = unviewedCount;
+    updatePixBadge(unviewedCount);
+    // Retry if nav wasn't ready
+    if (!document.querySelector('.bottom-nav') && unviewedCount > 0) {
+      setTimeout(() => updatePixBadge(unviewedCount), 500);
+    }
+  } catch (err) {
+    console.error('[Global] Failed to refresh pix badge:', err);
+  }
+}
+
+/**
+ * Get last read timestamp for a conversation
+ */
+function getLastRead(conversationId) {
+  const key = `lastRead_${client?.username}_${conversationId}`;
+  const val = localStorage.getItem(key);
+  return val ? parseInt(val, 10) : 0;
+}
+
+/**
+ * Mark a conversation as read (call when opening a chat)
+ */
+export function markConversationRead(conversationId) {
+  if (!client?.username) return;
+  const key = `lastRead_${client.username}_${conversationId}`;
+  localStorage.setItem(key, Date.now().toString());
+  refreshChatsBadge();
+}
+
+/**
+ * Check if a conversation has unread messages
+ */
+export async function hasUnreadMessages(conversationId) {
+  if (!client?.getMessages) return false;
+  try {
+    const lastRead = getLastRead(conversationId);
+    const messages = await client.getMessages(conversationId);
+    return messages.some(m => m.timestamp > lastRead && !m.isSent);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Refresh the chats badge count
+ */
+export async function refreshChatsBadge() {
+  if (!client?.getMessages) return;
+  try {
+    // Get all conversations from friends
+    const friends = client.friends.getAll();
+    let unreadConversations = 0;
+
+    for (const friend of friends) {
+      if (friend.status !== 'accepted') continue;
+      const conversationId = friend.username;
+      const lastRead = getLastRead(conversationId);
+      const messages = await client.getMessages(conversationId);
+
+      // Check if any message is newer than lastRead and not from us
+      const hasUnread = messages.some(m =>
+        m.timestamp > lastRead && !m.isSent
+      );
+      if (hasUnread) unreadConversations++;
+    }
+
+    badgeCounts.chats = unreadConversations;
+    updateChatsBadge(unreadConversations);
+    // Retry if nav wasn't ready
+    if (!document.querySelector('.bottom-nav') && unreadConversations > 0) {
+      setTimeout(() => updateChatsBadge(unreadConversations), 500);
+    }
+  } catch (err) {
+    console.error('[Global] Failed to refresh chats badge:', err);
+  }
+}
+
 function setupGlobalEventHandlers() {
   if (!client) return;
+
+  // Initial badge refresh
+  refreshPixBadge();
+  refreshChatsBadge();
 
   // Friend request notification
   // Note: FriendManager.processRequest() already stores the request
@@ -257,9 +360,14 @@ function setupGlobalEventHandlers() {
     }
   });
 
-  // Incoming message - just log, views handle their own display
+  // Incoming message
   client.on('message', (msg) => {
     console.log('[Global] Message from:', msg.sourceUserId || msg.from);
+    if (typeof RyToast !== 'undefined') {
+      const from = msg.conversationId || client.friends.getUsernameFromServerId(msg.sourceUserId) || msg.sourceUserId;
+      RyToast.info(`New message from ${from}`);
+    }
+    refreshChatsBadge();
   });
 
   // Device announce - auto-apply to update friend device lists
@@ -273,9 +381,39 @@ function setupGlobalEventHandlers() {
     }
   });
 
-  // Model sync - just log, ORM handles via _ormSyncManager
+  // Model sync - show toasts for relevant models
   client.on('modelSync', (sync) => {
     console.log('[Global] Model sync:', sync.model, sync.id);
+    if (typeof RyToast !== 'undefined') {
+      // Skip self-syncs (from own devices)
+      if (sync.sourceUserId === client.userId) return;
+
+      switch (sync.model) {
+        case 'story':
+          const storyAuthor = client.friends.getUsernameFromServerId(sync.sourceUserId) || sync.sourceUserId;
+          RyToast.info(`New story from ${storyAuthor}`);
+          break;
+        case 'pix':
+          const pixSender = client.friends.getUsernameFromServerId(sync.sourceUserId) || sync.sourceUserId;
+          RyToast.info(`New pix from ${pixSender}`);
+          refreshPixBadge();
+          break;
+        case 'groupMessage':
+          const groupMsgSender = client.friends.getUsernameFromServerId(sync.sourceUserId) || sync.sourceUserId;
+          // Look up group name
+          if (sync.data?.groupId && client.group) {
+            client.group.find(sync.data.groupId).then(group => {
+              const groupName = group?.data?.name || 'group';
+              RyToast.info(`${groupMsgSender} in ${groupName}`);
+            }).catch(() => {
+              RyToast.info(`New group message from ${groupMsgSender}`);
+            });
+          } else {
+            RyToast.info(`New group message from ${groupMsgSender}`);
+          }
+          break;
+      }
+    }
   });
 
   // Sent sync - log when messages are synced from other devices

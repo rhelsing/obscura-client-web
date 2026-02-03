@@ -3,7 +3,7 @@
  * - List all groups
  * - Create new group button
  */
-import { navigate, clearClient } from '../index.js';
+import { navigate, clearClient, getBadgeCounts } from '../index.js';
 import { renderNav, initNav } from '../components/Nav.js';
 import { ObscuraClient } from '../../lib/ObscuraClient.js';
 
@@ -45,7 +45,7 @@ export function render({ groups = [], loading = false } = {}) {
 
       <a href="/groups/new" data-navigo class="fab">+</a>
 
-      ${renderNav('groups')}
+      ${renderNav('groups', getBadgeCounts())}
     </div>
   `;
 }

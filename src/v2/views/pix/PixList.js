@@ -3,7 +3,7 @@
  * Shows incoming pix grouped by sender
  * Tap on a sender's pix to view them
  */
-import { navigate, clearClient } from '../index.js';
+import { navigate, clearClient, getBadgeCounts } from '../index.js';
 import { renderNav, initNav } from '../components/Nav.js';
 import { ObscuraClient } from '../../lib/ObscuraClient.js';
 import { renderPixIndicator, renderPixIndicatorOpened, renderPixIndicatorSent, renderPixIndicatorSentOpened } from '../components/PixIndicator.js';
@@ -92,7 +92,7 @@ export function render({ pixFriends = [] } = {}) {
         </ry-stack>
       `}
 
-      ${renderNav('pix')}
+      ${renderNav('pix', getBadgeCounts())}
     </div>
   `;
 }

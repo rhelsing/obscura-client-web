@@ -5,7 +5,7 @@
  * - Link to devices
  * - Logout
  */
-import { navigate, clearClient } from '../index.js';
+import { navigate, clearClient, getBadgeCounts } from '../index.js';
 import { renderNav, initNav } from '../components/Nav.js';
 import { ObscuraClient } from '../../lib/ObscuraClient.js';
 import { unlinkDevice } from '../../lib/auth.js';
@@ -137,7 +137,7 @@ export function render({ settings = null, loading = false, saving = false, isFir
         </actions>
       </ry-modal>
 
-      ${renderNav('more')}
+      ${renderNav('more', getBadgeCounts())}
     </div>
   `;
 }

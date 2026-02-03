@@ -1,7 +1,7 @@
 /**
  * Logs View - displays all message send/receive events
  */
-import { navigate, clearClient } from '../index.js';
+import { navigate, clearClient, getBadgeCounts } from '../index.js';
 import { renderNav, initNav } from '../components/Nav.js';
 import { ObscuraClient } from '../../lib/ObscuraClient.js';
 import { logger } from '../../lib/logger.js';
@@ -209,7 +209,7 @@ export function render({ events = [], expandedEvent = null } = {}) {
         ` : events.map(event => renderEvent(event, expandedEvent)).join('')}
       </ry-stack>
 
-      ${renderNav('more')}
+      ${renderNav('more', getBadgeCounts())}
     </div>
   `;
 }

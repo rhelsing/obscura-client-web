@@ -7,7 +7,7 @@
  * IMPORTANT: Loads existing messages from client.messages on mount.
  * Also handles sentSync for messages sent from other devices.
  */
-import { navigate } from '../index.js';
+import { navigate, markConversationRead } from '../index.js';
 import { parseMediaUrl, createMediaUrl } from '../../lib/attachmentUtils.js';
 
 let cleanup = null;
@@ -143,6 +143,9 @@ function generateMsgId() {
 
 export async function mount(container, client, router, params) {
   const username = params.username;
+
+  // Mark conversation as read
+  markConversationRead(username);
 
   // Look up displayName from profiles
   let displayName = null;

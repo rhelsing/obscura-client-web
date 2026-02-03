@@ -4,7 +4,7 @@
  * - Show username, status
  * - Tap → Chat view
  */
-import { navigate, clearClient } from '../index.js';
+import { navigate, clearClient, getBadgeCounts } from '../index.js';
 import { renderNav, initNav } from '../components/Nav.js';
 import { ObscuraClient } from '../../lib/ObscuraClient.js';
 import { generateVerifyCode } from '../../crypto/signatures.js';
@@ -60,7 +60,7 @@ export function render({ friends = [], pendingCount = 0 } = {}) {
 
       <a href="/friends/add" data-navigo class="fab">+</a>
 
-      ${renderNav('friends')}
+      ${renderNav('friends', getBadgeCounts())}
     </div>
   `;
 }

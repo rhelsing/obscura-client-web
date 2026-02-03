@@ -3,7 +3,7 @@
  * - List stories from friends (ephemeral, 24h)
  * - Batch load comments + reactions
  */
-import { navigate, clearClient } from '../index.js';
+import { navigate, clearClient, getBadgeCounts } from '../index.js';
 import { renderNav, initNav } from '../components/Nav.js';
 import { ObscuraClient } from '../../lib/ObscuraClient.js';
 
@@ -58,7 +58,7 @@ export function render({ stories = [], loading = false } = {}) {
 
       <a href="/stories/new" data-navigo class="fab">+</a>
 
-      ${renderNav('stories')}
+      ${renderNav('stories', getBadgeCounts())}
     </div>
   `;
 }

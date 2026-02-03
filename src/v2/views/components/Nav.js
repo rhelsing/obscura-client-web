@@ -3,15 +3,20 @@
  * 3-item nav: Pix | Chats | Stories + More drawer
  */
 
-export function renderNav(active = 'pix') {
+export function renderNav(active = 'pix', badges = {}) {
+  const pixBadge = badges.pix ? `<span class="nav-badge">${badges.pix > 99 ? '99+' : badges.pix}</span>` : '';
+  const chatsBadge = badges.chats ? `<span class="nav-badge">${badges.chats > 99 ? '99+' : badges.chats}</span>` : '';
+
   return `
     <nav class="bottom-nav">
-      <a href="/pix" data-navigo class="${active === 'pix' ? 'active' : ''}">
+      <a href="/pix" data-navigo class="${active === 'pix' ? 'active' : ''}" style="position: relative;">
         <ry-icon name="star"></ry-icon>
+        ${pixBadge}
         <span class="label">Pix</span>
       </a>
-      <a href="/chats" data-navigo class="${active === 'chats' ? 'active' : ''}">
+      <a href="/chats" data-navigo class="${active === 'chats' ? 'active' : ''}" style="position: relative;">
         <ry-icon name="edit"></ry-icon>
+        ${chatsBadge}
         <span class="label">Chats</span>
       </a>
       <a href="/stories" data-navigo class="${active === 'stories' ? 'active' : ''}">
@@ -78,5 +83,47 @@ export function initNav(container, onLogout) {
       if (drawer?.close) drawer.close();
       onLogout();
     });
+  }
+}
+
+/**
+ * Update pix badge count
+ * @param {number} count - Number of unviewed pix
+ */
+export function updatePixBadge(count) {
+  const pixLink = document.querySelector('.bottom-nav a[href="/pix"]');
+  if (!pixLink) return;
+
+  // Remove existing badge
+  const existingBadge = pixLink.querySelector('.nav-badge');
+  if (existingBadge) existingBadge.remove();
+
+  // Add new badge if count > 0
+  if (count > 0) {
+    const badge = document.createElement('span');
+    badge.className = 'nav-badge';
+    badge.textContent = count > 99 ? '99+' : count;
+    pixLink.insertBefore(badge, pixLink.querySelector('.label'));
+  }
+}
+
+/**
+ * Update chats badge count
+ * @param {number} count - Number of unread conversations
+ */
+export function updateChatsBadge(count) {
+  const chatsLink = document.querySelector('.bottom-nav a[href="/chats"]');
+  if (!chatsLink) return;
+
+  // Remove existing badge
+  const existingBadge = chatsLink.querySelector('.nav-badge');
+  if (existingBadge) existingBadge.remove();
+
+  // Add new badge if count > 0
+  if (count > 0) {
+    const badge = document.createElement('span');
+    badge.className = 'nav-badge';
+    badge.textContent = count > 99 ? '99+' : count;
+    chatsLink.insertBefore(badge, chatsLink.querySelector('.label'));
   }
 }

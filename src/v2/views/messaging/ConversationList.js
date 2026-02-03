@@ -4,7 +4,7 @@
  * - Show last message preview (if available)
  * - Tap → Chat view
  */
-import { navigate, clearClient } from '../index.js';
+import { navigate, clearClient, getBadgeCounts, hasUnreadMessages } from '../index.js';
 import { renderNav, initNav } from '../components/Nav.js';
 import { ObscuraClient } from '../../lib/ObscuraClient.js';
 
@@ -38,7 +38,7 @@ export function render({ conversations = [], pendingRequests = 0 } = {}) {
       ` : `
         <stack gap="sm" class="conversation-items">
           ${conversations.map(c => `
-            <card class="conversation-item" data-username="${c.username}" data-type="${c.type || 'dm'}" data-group-id="${c.groupId || ''}">
+            <card class="conversation-item" data-username="${c.username}" data-type="${c.type || 'dm'}" data-group-id="${c.groupId || ''}" style="position: relative;">
               <cluster>
                 <ry-icon name="${c.type === 'group' ? 'star' : 'user'}"></ry-icon>
                 <stack gap="none" style="flex: 1">
@@ -49,15 +49,15 @@ export function render({ conversations = [], pendingRequests = 0 } = {}) {
                     <span style="color: var(--ry-color-text-muted); font-size: var(--ry-text-sm); font-style: italic">No messages yet</span>
                   `}
                 </stack>
-                ${c.unread ? `<badge variant="primary">${c.unread}</badge>` : ''}
                 <ry-icon name="chevron-right"></ry-icon>
               </cluster>
+              ${c.unread ? `<span class="unread-dot"></span>` : ''}
             </card>
           `).join('')}
         </stack>
       `}
 
-      ${renderNav('chats')}
+      ${renderNav('chats', getBadgeCounts())}
     </div>
   `;
 }
@@ -114,12 +114,15 @@ export async function mount(container, client, router) {
           }
         }
 
+        // Check for unread messages
+        const unread = await hasUnreadMessages(username);
+
         conversations.push({
           username,
           displayName,
           lastMessage,
           type: 'dm',
-          unread: 0 // TODO: Track unread count
+          unread
         });
       } else if (data.status === 'pending_incoming') {
         pendingRequests++;

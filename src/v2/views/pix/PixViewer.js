@@ -2,7 +2,7 @@
  * PixViewer View
  * Full-screen viewer for received pix with auto-countdown timer
  */
-import { navigate } from '../index.js';
+import { navigate, refreshPixBadge } from '../index.js';
 
 let cleanup = null;
 
@@ -140,6 +140,7 @@ export async function mount(container, client, router, params = {}) {
         ...pix.data,
         viewedAt: Date.now()
       });
+      refreshPixBadge();
     } catch (err) {
       console.error('Failed to mark pix as viewed:', err);
     }

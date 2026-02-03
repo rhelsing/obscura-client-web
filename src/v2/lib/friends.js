@@ -4,7 +4,7 @@
  * Now with IndexedDB persistence via friendStore
  */
 
-import { generateVerifyCode } from '../crypto/signatures.js';
+import { generateVerifyCodeFromDevices } from '../crypto/signatures.js';
 import { logger } from './logger.js';
 
 export class FriendManager {
@@ -289,11 +289,12 @@ export class FriendManager {
 
       /**
        * Get the 4-digit verify code for out-of-band verification
+       * Concatenates all device keys (sorted) and hashes for the code
        * @returns {Promise<string>} 4-digit code ("0000" - "9999")
        */
       async getVerifyCode() {
-        if (!senderIdentityKey) return null;
-        return generateVerifyCode(senderIdentityKey);
+        if (!senderDevices || senderDevices.length === 0) return null;
+        return generateVerifyCodeFromDevices(senderDevices);
       },
 
       async accept() {

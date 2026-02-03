@@ -8,7 +8,7 @@
  * The server dumps queued messages on connect, so requests may already exist.
  */
 import { navigate } from '../index.js';
-import { generateVerifyCode } from '../../crypto/signatures.js';
+import { generateVerifyCodeFromDevices } from '../../crypto/signatures.js';
 
 let cleanup = null;
 let pendingRequests = [];
@@ -25,7 +25,6 @@ function reconstructRequest(friend, client) {
     (a.deviceUUID || '').localeCompare(b.deviceUUID || '')
   );
   const primaryDevice = sortedDevices[0];
-  const signalIdentityKey = primaryDevice?.signalIdentityKey;
 
   return {
     username: friend.username,
@@ -33,8 +32,8 @@ function reconstructRequest(friend, client) {
     sourceUserId: primaryDevice?.serverUserId,
 
     async getVerifyCode() {
-      if (!signalIdentityKey) return null;
-      return generateVerifyCode(signalIdentityKey);
+      if (!devices || devices.length === 0) return null;
+      return generateVerifyCodeFromDevices(devices);
     },
 
     async accept() {

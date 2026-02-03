@@ -438,4 +438,38 @@ function setupGlobalEventHandlers() {
   client.on('error', (err) => {
     console.error('[Global] Client error:', err);
   });
+
+  // Device revocation (self-brick)
+  client.on('deviceRevoked', async ({ revokedBy, reason }) => {
+    console.warn('[Global] This device has been revoked:', reason);
+
+    // Import unlinkDevice dynamically to avoid circular imports
+    const { unlinkDevice } = await import('../lib/auth.js');
+    const { ObscuraClient } = await import('../lib/ObscuraClient.js');
+
+    // Store username/userId before disconnect
+    const username = client.username;
+    const userId = client.userId;
+
+    // Disconnect WebSocket
+    client.disconnect();
+
+    // Close all IndexedDB connections
+    if (client.store?.close) client.store.close();
+    if (client._friendStore?.close) client._friendStore.close();
+    if (client._deviceStore?.close) client._deviceStore.close();
+    if (client.messageStore?.close) client.messageStore.close();
+    if (client._attachmentStore?.close) client._attachmentStore.close();
+
+    // Wipe all local data
+    await unlinkDevice(username, userId);
+
+    // Clear session
+    ObscuraClient.clearSession();
+    clearClient();
+
+    // Show alert and redirect
+    alert('This device has been revoked. All local data has been erased.');
+    navigate('/login');
+  });
 }

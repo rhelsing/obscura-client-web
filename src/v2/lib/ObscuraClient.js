@@ -1604,6 +1604,24 @@ export class ObscuraClient {
         if (isFromOwnDevice) {
           // Self-sync: another of our devices sent this
           if (announce.isRevocation) {
+            // Check if THIS device is being revoked (self-brick)
+            const newDeviceUUIDs = new Set(announce.devices.map(d => d.deviceUUID));
+            const thisDeviceRevoked = !newDeviceUUIDs.has(self.deviceUUID);
+
+            if (thisDeviceRevoked) {
+              console.warn('[REVOKED] This device has been revoked by another device. Wiping local data...');
+              await logger.logDeviceRevoke(self.userId, 0, true); // true = self-revoked
+
+              // Emit revoked event - UI should handle wipe and redirect
+              self._emit('deviceRevoked', {
+                revokedBy: msg.sourceUserId,
+                reason: 'Another device revoked this device',
+              });
+
+              // Don't process further - let the UI handle cleanup
+              return;
+            }
+
             // Find devices that were revoked (in old list but not in new)
             const oldDeviceIds = new Set([self.userId, ...self.devices.getAll().map(d => d.serverUserId)]);
             const newDeviceIds = new Set(announce.devices.map(d => d.serverUserId));

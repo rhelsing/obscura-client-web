@@ -390,12 +390,18 @@ function setupGlobalEventHandlers() {
 
       switch (sync.model) {
         case 'story':
-          const storyAuthor = client.friends.getUsernameFromServerId(sync.sourceUserId) || sync.sourceUserId;
-          RyToast.info(`New story from ${storyAuthor}`);
+          // Only toast for new stories (op=0 is create), not updates/deletes
+          if (sync.op === 0 && !sync.data?._deleted) {
+            const storyAuthor = client.friends.getUsernameFromServerId(sync.sourceUserId) || sync.sourceUserId;
+            RyToast.info(`New story from ${storyAuthor}`);
+          }
           break;
         case 'pix':
-          const pixSender = client.friends.getUsernameFromServerId(sync.sourceUserId) || sync.sourceUserId;
-          RyToast.info(`New pix from ${pixSender}`);
+          // Only toast for new pix where I'm the recipient (not view updates)
+          if (sync.data?.recipientUsername === client.username && !sync.data?.viewedAt) {
+            const pixSender = client.friends.getUsernameFromServerId(sync.sourceUserId) || sync.sourceUserId;
+            RyToast.info(`New pix from ${pixSender}`);
+          }
           refreshPixBadge();
           break;
         case 'groupMessage':

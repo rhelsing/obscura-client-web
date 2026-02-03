@@ -7,7 +7,7 @@
 import { navigate, clearClient, getBadgeCounts } from '../index.js';
 import { renderNav, initNav } from '../components/Nav.js';
 import { ObscuraClient } from '../../lib/ObscuraClient.js';
-import { generateVerifyCode } from '../../crypto/signatures.js';
+import { generateVerifyCodeFromDevices } from '../../crypto/signatures.js';
 
 let cleanup = null;
 
@@ -104,19 +104,13 @@ export async function mount(container, client, router) {
       const friend = client.friends.get(username);
       if (friend) {
         const devices = friend.devices || [];
-        // Sort by deviceUUID for deterministic "primary" device across all clients
-        const sortedDevices = [...devices].sort((a, b) =>
-          (a.deviceUUID || '').localeCompare(b.deviceUUID || '')
-        );
-        const primaryDevice = sortedDevices[0];
-        const signalIdentityKey = primaryDevice?.signalIdentityKey;
 
         // Create request object for verify view
         window.__verifyRequest = {
           username,
           async getVerifyCode() {
-            if (!signalIdentityKey) return '----';
-            return generateVerifyCode(signalIdentityKey);
+            if (!devices || devices.length === 0) return '----';
+            return generateVerifyCodeFromDevices(devices);
           },
         };
         navigate(`/friends/verify/${username}`);

@@ -315,10 +315,11 @@ class Logger {
     });
   }
 
-  async logDeviceRevoke(revokedDeviceId, deletedMessageCount) {
+  async logDeviceRevoke(revokedDeviceId, deletedMessageCount, selfRevoked = false) {
     return this.log(LogEventType.DEVICE_REVOKE, {
       revokedDeviceId,
       deletedMessageCount,
+      selfRevoked,
     });
   }
 

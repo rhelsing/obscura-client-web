@@ -109,12 +109,13 @@ test.describe('Scenarios 1-4: Core Flow', () => {
 
     // 10. Navigate to settings and logout (has modal confirmation)
     await page.goto('/settings');
-    await page.waitForSelector('button[modal="logout-modal"]', { timeout: 10000 });
-    await page.click('button[modal="logout-modal"]');
+    const logoutBtn = page.locator('button[modal="logout-modal"]');
+    await logoutBtn.scrollIntoViewIfNeeded();
+    await logoutBtn.click();
     await delay(300);
 
     // 10b. Confirm logout in modal
-    await page.waitForSelector('#confirm-logout', { timeout: 5000 });
+    await page.waitForSelector('#confirm-logout', { state: 'visible', timeout: 5000 });
     await page.click('#confirm-logout');
     await delay(300);
 

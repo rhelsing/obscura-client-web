@@ -8,6 +8,7 @@ import { LoginScenario, detectScenario } from '../auth/scenarios.js';
 import { generateDeviceUUID, generateDeviceUsername } from '../crypto/uuid.js';
 import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
 import { createStore, InMemoryStore } from './store.js';
+import { createDeviceStore } from '../store/deviceStore.js';
 import { signLinkChallenge } from '../crypto/signatures.js';
 import { encryptKeys, decryptKeys, isEncryptedFormat, isUnencryptedFormat } from '../crypto/keyEncryption.js';
 import { keyCache } from './keyCache.js';
@@ -114,6 +115,18 @@ export async function register(username, password, opts = {}) {
     userId,
   });
 
+  // Store full identity to deviceStore (includes recoveryPublicKey for backup)
+  const deviceStore = createDeviceStore(username);
+  await deviceStore.storeIdentity({
+    coreUsername: username,
+    deviceUsername,
+    deviceUUID: keys.deviceUUID,
+    p2pPublicKey: keys.p2pIdentity.publicKey,
+    p2pPrivateKey: keys.p2pIdentity.privateKey,
+    recoveryPublicKey: keys.recoveryKeypair.publicKey,
+  });
+  deviceStore.close();
+
   // Recovery phrase - one-time access
   let recoveryPhrase = keys.recoveryPhrase;
 
@@ -205,6 +218,11 @@ export async function login(username, password, opts = {}) {
         return { status: 'error', reason: 'Could not decrypt local keys - try clearing data and re-linking' };
       }
 
+      // Load recoveryPublicKey and p2pIdentity from device store
+      const deviceStore = createDeviceStore(username);
+      const deviceIdentity = await deviceStore.getIdentity();
+      deviceStore.close();
+
       return {
         status: 'ok',
         client: {
@@ -215,6 +233,11 @@ export async function login(username, password, opts = {}) {
           username,
           deviceUsername: storedIdentity.deviceUsername,
           deviceUUID: storedIdentity.deviceUUID,
+          recoveryPublicKey: deviceIdentity?.recoveryPublicKey,
+          p2pIdentity: deviceIdentity ? {
+            publicKey: deviceIdentity.p2pPublicKey,
+            privateKey: deviceIdentity.p2pPrivateKey,
+          } : null,
           deviceInfo: {
             deviceUUID: storedIdentity.deviceUUID,
             serverUserId: userId,
@@ -688,8 +711,198 @@ export async function unlinkDevice(username, userId) {
     console.warn('Some databases failed to delete:', errors);
   }
 
-  // Also clear localStorage session
+  // Also clear localStorage session and lastRead timestamps
   if (typeof localStorage !== 'undefined') {
     localStorage.removeItem('obscura_session');
+
+    // Clear lastRead timestamps for this user's conversations
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(`lastRead_${username}_`)) {
+        keysToRemove.push(key);
+      }
+    }
+    for (const key of keysToRemove) {
+      localStorage.removeItem(key);
+    }
   }
+}
+
+/**
+ * Recover account from encrypted backup
+ * Creates new device, restores data, prepares for recovery announcement
+ *
+ * @param {string} username - Username from backup
+ * @param {string} password - Password for new device
+ * @param {object} backupData - Decrypted backup data
+ * @param {string} recoveryPhrase - 12-word recovery phrase
+ * @param {object} opts - { apiUrl, revokeOthers }
+ * @returns {Promise<{client: ObscuraClient}>} Client ready to use
+ */
+export async function recoverAccount(username, password, backupData, recoveryPhrase, opts = {}) {
+  const { apiUrl, revokeOthers = false } = opts;
+  const store = createStore(username);
+
+  // Import recovery key derivation
+  const { deriveRecoveryKeypair } = await import('../crypto/signatures.js');
+  const recoveryKeypair = await deriveRecoveryKeypair(recoveryPhrase);
+
+  // Generate new device keys
+  const deviceUUID = generateDeviceUUID();
+  const deviceUsername = generateDeviceUsername();
+  const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
+  const registrationId = KeyHelper.generateRegistrationId();
+  const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
+
+  const preKeys = [];
+  for (let i = 1; i <= 100; i++) {
+    preKeys.push(await KeyHelper.generatePreKey(i));
+  }
+
+  const signalKeys = formatSignalKeysForServer({
+    identityKeyPair,
+    registrationId,
+    signedPreKey,
+    preKeys,
+  });
+
+  // Register new device account (shell account already exists)
+  const deviceRes = await fetch(`${apiUrl}/v1/users`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: deviceUsername,
+      password,
+      ...signalKeys,
+    }),
+  });
+
+  if (!deviceRes.ok) {
+    const text = await deviceRes.text();
+    throw new Error(`Failed to register recovery device: ${text}`);
+  }
+
+  const deviceData = await deviceRes.json();
+  const userId = parseUserId(deviceData.token);
+
+  // Store encrypted keys
+  const encrypted = await encryptKeys({ identityKeyPair }, password);
+  encrypted.registrationId = registrationId;
+  await store.storeEncryptedIdentity(encrypted);
+
+  // Cache keys for this session
+  keyCache.set({ identityKeyPair, registrationId });
+
+  // Store prekeys
+  await store.storeSignedPreKey(signedPreKey.keyId, signedPreKey.keyPair);
+  for (const pk of preKeys) {
+    await store.storePreKey(pk.keyId, pk.keyPair);
+  }
+
+  // Store device identity (Signal store)
+  await store.storeDeviceIdentity({
+    deviceUsername,
+    deviceUUID,
+    coreUsername: username,
+    isFirstDevice: false,
+    isRecoveryDevice: true,
+    userId,
+  });
+
+  // Store full identity to deviceStore (includes recoveryPublicKey for future backups)
+  const deviceStore = createDeviceStore(username);
+  await deviceStore.storeIdentity({
+    coreUsername: username,
+    deviceUsername,
+    deviceUUID,
+    p2pPublicKey: backupData.deviceIdentity?.p2pPublicKey || recoveryKeypair.publicKey,
+    p2pPrivateKey: backupData.deviceIdentity?.p2pPrivateKey,
+    recoveryPublicKey: recoveryKeypair.publicKey,
+  });
+  deviceStore.close();
+
+  // Import backup data (friends, messages, etc.)
+  await restoreBackupData(username, userId, backupData, store);
+
+  // Build client
+  const { ObscuraClient } = await import('./ObscuraClient.js');
+  const client = new ObscuraClient({
+    apiUrl,
+    store,
+    token: deviceData.token,
+    refreshToken: deviceData.refreshToken,
+    userId,
+    username,
+    deviceUsername,
+    deviceUUID,
+    p2pIdentity: {
+      publicKey: backupData.deviceIdentity?.p2pPublicKey || recoveryKeypair.publicKey,
+      privateKey: backupData.deviceIdentity?.p2pPrivateKey,
+    },
+    recoveryPublicKey: recoveryKeypair.publicKey,
+    deviceInfo: {
+      deviceUUID,
+      serverUserId: userId,
+      deviceName: detectDeviceName(),
+      signalIdentityKey: new Uint8Array(identityKeyPair.pubKey),
+    },
+  });
+
+  // Zero out recovery private key (we only need it for signing recovery announcement)
+  // The announceRecovery() method will re-derive it from the phrase
+  recoveryKeypair.privateKey.fill(0);
+
+  return { client, revokeOthers };
+}
+
+/**
+ * Restore backup data to local stores
+ * @private
+ */
+async function restoreBackupData(username, userId, backupData, signalStore) {
+  // Import stores
+  const { createFriendStore } = await import('../store/friendStore.js');
+  const { createMessageStore } = await import('../store/messageStore.js');
+
+  // Restore friends
+  if (backupData.friends) {
+    const friendStore = createFriendStore(userId);
+    for (const friend of backupData.friends) {
+      await friendStore.addFriend(
+        friend.devices?.[0]?.serverUserId || friend.username,
+        friend.username,
+        friend.status || 'accepted',
+        { devices: friend.devices }
+      );
+    }
+    friendStore.close();
+  }
+
+  // Restore messages
+  if (backupData.messages && typeof indexedDB !== 'undefined') {
+    const messageStore = createMessageStore(username);
+    await messageStore.importMessages(backupData.messages);
+    messageStore.close();
+  }
+
+  // Restore Signal identity if available
+  if (backupData.signalIdentity) {
+    const signalId = backupData.signalIdentity;
+
+    // If we have encrypted data, store it directly
+    if (signalId.ciphertext && signalId.salt && signalId.iv) {
+      await signalStore.storeEncryptedIdentity({
+        salt: signalId.salt instanceof Uint8Array ? signalId.salt : new Uint8Array(Object.values(signalId.salt)),
+        iv: signalId.iv instanceof Uint8Array ? signalId.iv : new Uint8Array(Object.values(signalId.iv)),
+        ciphertext: signalId.ciphertext instanceof Uint8Array ? signalId.ciphertext : new Uint8Array(Object.values(signalId.ciphertext)),
+        registrationId: signalId.registrationId,
+      });
+    }
+  }
+
+  // Note: We don't restore Signal sessions from backup because:
+  // 1. Sessions are ephemeral and will be re-established via PreKey
+  // 2. Restoring old sessions could cause message decryption failures
+  // The recovery device will establish fresh sessions with all contacts
 }

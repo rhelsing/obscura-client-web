@@ -215,15 +215,37 @@ export async function mount(container, client, router) {
       }
     }
 
-    // Query all stories then filter to known usernames and non-expired (24h TTL)
+    // Query all stories then filter to known usernames/devices and non-expired (24h TTL)
     const allStories = await client.story.where({})
       .orderBy('timestamp', 'desc')
       .exec();
 
+    // Build set of known device IDs (own devices + friend devices)
+    const knownDeviceIds = new Set([client.deviceUUID]);
+    if (client.devices) {
+      for (const d of client.devices.getAll()) {
+        knownDeviceIds.add(d.deviceUUID);
+        knownDeviceIds.add(d.serverUserId);
+      }
+    }
+    if (client.friends && client.friends.friends) {
+      for (const [, data] of client.friends.friends) {
+        if (data.devices) {
+          for (const device of data.devices) {
+            knownDeviceIds.add(device.deviceUUID);
+            knownDeviceIds.add(device.serverUserId);
+          }
+        }
+      }
+    }
+
     const now = Date.now();
     const ttl24h = 24 * 60 * 60 * 1000;
     const stories = allStories
-      .filter(s => knownUsernames.has(s.data?.authorUsername))
+      .filter(s => {
+        // Filter by authorUsername OR authorDeviceId (fallback for legacy/test data)
+        return knownUsernames.has(s.data?.authorUsername) || knownDeviceIds.has(s.authorDeviceId);
+      })
       .filter(s => (now - s.timestamp) < ttl24h);
 
     // Batch load comments and reactions

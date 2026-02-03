@@ -103,6 +103,8 @@ export class ObscuraClient {
       friendRequest: [],
       friendResponse: [],
       deviceAnnounce: [],
+      deviceRecoveryAnnounce: [],  // Emitted when a friend recovers their account
+      deviceRevoked: [],  // Emitted when this device is revoked by another device
       messagesMigrated: [],  // Emitted when messages are migrated to correct conversationId after DEVICE_ANNOUNCE
       linkApproval: [],
       sentSync: [],
@@ -221,7 +223,7 @@ export class ObscuraClient {
         signalIdentityKey: session.deviceInfo.signalIdentityKey ? new Uint8Array(session.deviceInfo.signalIdentityKey) : null,
       } : null;
 
-      return new ObscuraClient({
+      const client = new ObscuraClient({
         apiUrl: session.apiUrl,
         store,
         token: session.token,
@@ -232,9 +234,43 @@ export class ObscuraClient {
         deviceUUID: session.deviceUUID,
         deviceInfo,
       });
+
+      // Load recoveryPublicKey and p2pIdentity from deviceStore asynchronously
+      // We can't make this method async, so we load it in the background
+      client._loadIdentityKeys();
+
+      return client;
     } catch (e) {
       console.warn('Failed to restore session:', e);
       return null;
+    }
+  }
+
+  /**
+   * Load identity keys (recoveryPublicKey, p2pIdentity) from deviceStore
+   * Called during session restore
+   * @private
+   */
+  async _loadIdentityKeys() {
+    if (!this._deviceStore) return;
+
+    try {
+      const identity = await this._deviceStore.getIdentity();
+      if (identity) {
+        if (identity.recoveryPublicKey) {
+          this.recoveryPublicKey = identity.recoveryPublicKey instanceof Uint8Array
+            ? identity.recoveryPublicKey
+            : new Uint8Array(Object.values(identity.recoveryPublicKey));
+        }
+        if (identity.p2pPublicKey || identity.p2pPrivateKey) {
+          this.p2pIdentity = {
+            publicKey: identity.p2pPublicKey,
+            privateKey: identity.p2pPrivateKey,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('[ObscuraClient] Failed to load identity keys:', e);
     }
   }
 
@@ -803,6 +839,12 @@ export class ObscuraClient {
         this._emit('linkApproval', approval);
         break;
 
+      case 'DEVICE_RECOVERY_ANNOUNCE':
+        console.log('[ws] Message: DEVICE_RECOVERY_ANNOUNCE from:', msg.sourceUserId?.slice(-8));
+        await this._processRecoveryAnnounce(msg);
+        this._emit('deviceRecoveryAnnounce', msg.deviceRecoveryAnnounce);
+        break;
+
       case 'SENT_SYNC':
         this._processSentSync(msg);
         this._emit('sentSync', msg.sentSync);
@@ -909,6 +951,7 @@ export class ObscuraClient {
       timestamp: Date.now(),
       isRevocation: false,
       signature: new Uint8Array(64),
+      recoveryPublicKey: this.recoveryPublicKey || new Uint8Array(0),
     };
 
     await this.messenger.sendMessage(userId, {
@@ -935,6 +978,7 @@ export class ObscuraClient {
       timestamp: Date.now(),
       isRevocation: false,
       signature: new Uint8Array(64),
+      recoveryPublicKey: this.recoveryPublicKey || new Uint8Array(0),
     } : null;
 
     await this.messenger.sendMessage(userId, {
@@ -1061,6 +1105,11 @@ export class ObscuraClient {
    * - Signature verification (proves code came from device with that key)
    */
   async approveLink(linkCode) {
+    // Ensure identity keys are loaded from deviceStore
+    if (!this.recoveryPublicKey && this._deviceStore) {
+      await this._loadIdentityKeys();
+    }
+
     const parsed = parseLinkCode(linkCode);
 
     // Check expiry (if present - for backwards compat)
@@ -1247,6 +1296,9 @@ export class ObscuraClient {
 
         console.log(`[ObscuraClient] Imported ${entries.length} ${name} entries`);
         await logger.logOrmSyncReceive(name, null, 'import', entries.length);
+
+        // Emit modelSync event so views refresh (e.g., StoryFeed listens for 'story' syncs)
+        this._emit('modelSync', { model: name, id: null, op: 'bulk_import', count: entries.length });
       } catch (e) {
         console.warn(`[ObscuraClient] Failed to import ORM model ${name}:`, e.message);
         await logger.logOrmSyncError(name, e, 'import');
@@ -1460,6 +1512,31 @@ export class ObscuraClient {
           self.devices.setAll(approval.ownDevices);
         }
 
+        // Store recoveryPublicKey for backup export
+        if (approval.recoveryPublicKey && self._deviceStore) {
+          const existingIdentity = await self._deviceStore.getIdentity();
+          if (existingIdentity) {
+            // Update existing identity
+            await self._deviceStore.updateIdentity({
+              recoveryPublicKey: approval.recoveryPublicKey,
+              p2pPublicKey: approval.p2pPublicKey,
+            });
+          } else {
+            // Create new identity (new device case)
+            await self._deviceStore.storeIdentity({
+              coreUsername: self.username,
+              deviceUsername: self.deviceUsername,
+              deviceUUID: self.deviceUUID,
+              recoveryPublicKey: approval.recoveryPublicKey,
+              p2pPublicKey: approval.p2pPublicKey,
+            });
+          }
+          // Also set on client instance for immediate use
+          self.recoveryPublicKey = approval.recoveryPublicKey;
+          self.p2pIdentity = self.p2pIdentity || {};
+          self.p2pIdentity.publicKey = approval.p2pPublicKey;
+        }
+
         // Announce ourselves to all other own devices
         // This provides redundancy - both approver and new device announce
         const selfTargets = self.devices.getSelfSyncTargets();
@@ -1509,6 +1586,58 @@ export class ObscuraClient {
         });
       }
     }
+  }
+
+  /**
+   * Announce account recovery to all friends
+   * Signed with recovery key to prove legitimacy
+   *
+   * @param {string} recoveryPhrase - 12-word phrase (needed to sign)
+   * @param {boolean} revokeOthers - If true, tells friends to replace all old devices
+   */
+  async announceRecovery(recoveryPhrase, revokeOthers = false) {
+    const announce = {
+      newDevices: [{
+        deviceUUID: this.deviceUUID,
+        serverUserId: this.userId,
+        deviceName: this.deviceInfo?.deviceName || 'Recovery Device',
+        signalIdentityKey: this.deviceInfo?.signalIdentityKey,
+      }],
+      timestamp: Date.now(),
+      isFullRecovery: revokeOthers,
+      recoveryPublicKey: this.recoveryPublicKey,
+    };
+
+    // Sign with recovery key
+    const dataToSign = new TextEncoder().encode(JSON.stringify({
+      devices: announce.newDevices.map(d => ({
+        deviceUUID: d.deviceUUID,
+        serverUserId: d.serverUserId,
+      })),
+      timestamp: announce.timestamp,
+      isFullRecovery: announce.isFullRecovery,
+    }));
+
+    announce.signature = await signWithRecoveryPhrase(recoveryPhrase, dataToSign);
+
+    // Broadcast to all friends
+    let friendCount = 0;
+    for (const friend of this.friends.getAll()) {
+      for (const device of friend.devices) {
+        try {
+          await this.messenger.sendMessage(device.serverUserId, {
+            type: 'DEVICE_RECOVERY_ANNOUNCE',
+            deviceRecoveryAnnounce: announce,
+          });
+          friendCount++;
+        } catch (e) {
+          console.warn(`[Recovery] Failed to announce to ${device.serverUserId?.slice(-8)}:`, e.message);
+        }
+      }
+    }
+
+    console.log(`[Recovery] Announced recovery to ${friendCount} friend device(s), revokeOthers=${revokeOthers}`);
+    await logger.logDeviceAnnounce(1, false, this.userId, 'recovery');
   }
 
   /**
@@ -1565,8 +1694,13 @@ export class ObscuraClient {
     }
 
     // Also send to own devices so they delete the revoked device's messages too
+    // Include the revoked device so it can self-brick
     const selfTargets = this.devices.getSelfSyncTargets();
-    for (const targetUserId of selfTargets) {
+    const allOwnDeviceTargets = [...selfTargets];
+    if (revokedServerUserId && !allOwnDeviceTargets.includes(revokedServerUserId)) {
+      allOwnDeviceTargets.push(revokedServerUserId);
+    }
+    for (const targetUserId of allOwnDeviceTargets) {
       await this.messenger.sendMessage(targetUserId, {
         type: 'DEVICE_ANNOUNCE',
         deviceAnnounce: announce,
@@ -1597,6 +1731,24 @@ export class ObscuraClient {
         if (isFromOwnDevice) {
           // Self-sync: another of our devices sent this
           if (announce.isRevocation) {
+            // Check if THIS device is being revoked (self-brick)
+            const newDeviceUUIDs = new Set(announce.devices.map(d => d.deviceUUID));
+            const thisDeviceRevoked = !newDeviceUUIDs.has(self.deviceUUID);
+
+            if (thisDeviceRevoked) {
+              console.warn('[REVOKED] This device has been revoked by another device. Wiping local data...');
+              await logger.logDeviceRevoke(self.userId, 0, true); // true = self-revoked
+
+              // Emit revoked event - UI should handle wipe and redirect
+              self._emit('deviceRevoked', {
+                revokedBy: msg.sourceUserId,
+                reason: 'Another device revoked this device',
+              });
+
+              // Don't process further - let the UI handle cleanup
+              return;
+            }
+
             // Find devices that were revoked (in old list but not in new)
             const oldDeviceIds = new Set([self.userId, ...self.devices.getAll().map(d => d.serverUserId)]);
             const newDeviceIds = new Set(announce.devices.map(d => d.serverUserId));
@@ -1701,6 +1853,100 @@ export class ObscuraClient {
         self.friends.setDevices(friend.username, announce.devices);
       },
     };
+  }
+
+  /**
+   * Process incoming DEVICE_RECOVERY_ANNOUNCE
+   * Verifies signature, updates friend's device list
+   */
+  async _processRecoveryAnnounce(msg) {
+    const announce = msg.deviceRecoveryAnnounce;
+    if (!announce) {
+      console.warn('[Recovery] Received empty recovery announce');
+      return;
+    }
+
+    // Find which friend sent this - first try by device, then by recovery key
+    let friend = null;
+    for (const f of this.friends.getAll()) {
+      // Check if sender is a known device
+      if (f.devices?.some(d => d.serverUserId === msg.sourceUserId)) {
+        friend = f;
+        break;
+      }
+      // Check if recovery public key matches (for new recovery devices)
+      if (announce.recoveryPublicKey && f.recoveryPublicKey) {
+        try {
+          const announcedKey = announce.recoveryPublicKey instanceof Uint8Array
+            ? announce.recoveryPublicKey
+            : new Uint8Array(Object.values(announce.recoveryPublicKey));
+          const storedKey = f.recoveryPublicKey instanceof Uint8Array
+            ? f.recoveryPublicKey
+            : new Uint8Array(Object.values(f.recoveryPublicKey));
+          if (announcedKey.length === storedKey.length &&
+              announcedKey.every((b, i) => b === storedKey[i])) {
+            friend = f;
+            console.log(`[Recovery] Matched friend ${f.username} by recovery public key`);
+            break;
+          }
+        } catch (e) {
+          console.warn(`[Recovery] Error comparing keys for ${f.username}:`, e.message);
+        }
+      }
+    }
+
+    if (!friend) {
+      console.warn('[Recovery] Received recovery announce from unknown sender:', msg.sourceUserId?.slice(-8));
+      return;
+    }
+
+    // Verify signature with friend's stored recovery public key
+    const recoveryKey = friend.recoveryPublicKey || announce.recoveryPublicKey;
+    if (recoveryKey && announce.signature) {
+      const dataToSign = new TextEncoder().encode(JSON.stringify({
+        devices: announce.newDevices.map(d => ({
+          deviceUUID: d.deviceUUID,
+          serverUserId: d.serverUserId,
+        })),
+        timestamp: announce.timestamp,
+        isFullRecovery: announce.isFullRecovery,
+      }));
+
+      const valid = await verifyRecoverySignature(
+        recoveryKey,
+        dataToSign,
+        announce.signature
+      );
+
+      if (!valid) {
+        console.warn(`[Recovery] Invalid recovery signature from ${friend.username}, ignoring`);
+        await logger.logOrmSyncError('recovery', new Error(`Invalid recovery signature from ${friend.username}`), 'receive');
+        return;
+      }
+    }
+
+    // If full recovery, delete all sessions with old devices
+    if (announce.isFullRecovery) {
+      for (const oldDevice of friend.devices) {
+        const address = `${oldDevice.serverUserId}.1`;
+        await this.store.removeSession(address);
+        console.log(`[Recovery] Deleted session with old device ${oldDevice.serverUserId?.slice(-8)}`);
+      }
+    }
+
+    // Update device list with new recovery device(s)
+    this.friends.setDevices(friend.username, announce.newDevices);
+
+    // Store recovery public key if provided
+    if (announce.recoveryPublicKey && this._friendStore) {
+      const userId = announce.newDevices[0]?.serverUserId || friend.username;
+      await this._friendStore.setFriendRecoveryKey(userId, announce.recoveryPublicKey).catch(e => {
+        console.warn('Failed to update friend recovery key:', e.message);
+      });
+    }
+
+    console.log(`[Recovery] ${friend.username} recovered with ${announce.newDevices.length} new device(s), fullRecovery=${announce.isFullRecovery}`);
+    await logger.logDeviceAnnounce(announce.newDevices.length, false, msg.sourceUserId, 'recovery');
   }
 
   /**

@@ -3,12 +3,14 @@
  * - Theme toggle
  * - Notifications toggle
  * - Link to devices
+ * - Backup & Recovery
  * - Logout
  */
 import { navigate, clearClient, getBadgeCounts } from '../index.js';
 import { renderNav, initNav } from '../components/Nav.js';
 import { ObscuraClient } from '../../lib/ObscuraClient.js';
 import { unlinkDevice } from '../../lib/auth.js';
+import { createBackupManager } from '../../backup/BackupManager.js';
 
 let cleanup = null;
 
@@ -55,7 +57,7 @@ export function render({ settings = null, loading = false, saving = false, isFir
               </a>
             </card>
             <card>
-              <button id="request-sync" variant="ghost">
+              <button id="request-sync" variant="ghost" style="display: none;">
                 <cluster>
                   <span>Request Full Sync</span>
                   <ry-icon name="refresh-cw"></ry-icon>
@@ -88,10 +90,34 @@ export function render({ settings = null, loading = false, saving = false, isFir
         </section>
 
         <section class="settings-group">
+          <h2>Backup & Recovery</h2>
+          <stack gap="sm">
+            <card>
+              <button id="export-backup" variant="ghost">
+                <cluster>
+                  <span>Export Backup</span>
+                  <ry-icon name="download"></ry-icon>
+                </cluster>
+              </button>
+              <p class="hint">Download an encrypted backup of your account. You'll need your 12-word recovery phrase to restore it.</p>
+            </card>
+            <card>
+              <button id="import-backup" variant="ghost" modal="import-backup-modal" style="display: none;">
+                <cluster>
+                  <span>Restore from Backup</span>
+                  <ry-icon name="upload"></ry-icon>
+                </cluster>
+              </button>
+              <p class="hint">Restore your account from a backup file using your recovery phrase.</p>
+            </card>
+          </stack>
+        </section>
+
+        <section class="settings-group">
           <h2>Security</h2>
           <stack gap="sm">
             <card>
-              <button id="reset-sessions" variant="ghost">
+              <button id="reset-sessions" variant="ghost" style="display: none;">
                 <cluster>
                   <span>Reset All Sessions</span>
                   <ry-icon name="refresh-cw"></ry-icon>
@@ -134,6 +160,29 @@ export function render({ settings = null, loading = false, saving = false, isFir
         <actions slot="footer">
           <button variant="ghost" close>Cancel</button>
           <button variant="danger" id="confirm-unlink">Unlink</button>
+        </actions>
+      </ry-modal>
+
+      <ry-modal id="import-backup-modal" title="Restore from Backup">
+        <stack gap="md">
+          <div>
+            <label for="backup-file">Backup File</label>
+            <input type="file" id="backup-file" accept=".obscura" />
+          </div>
+          <div>
+            <label for="recovery-phrase">Recovery Phrase (12 words)</label>
+            <textarea id="recovery-phrase" rows="3" placeholder="Enter your 12-word recovery phrase..."></textarea>
+          </div>
+          <div>
+            <label for="restore-password">Account Password</label>
+            <input type="password" id="restore-password" placeholder="Your account password" />
+          </div>
+          <p class="hint">This will replace all local data with the backup contents.</p>
+          <p id="import-error" class="error" style="display: none;"></p>
+        </stack>
+        <actions slot="footer">
+          <button variant="ghost" close>Cancel</button>
+          <button variant="primary" id="confirm-import">Restore Backup</button>
         </actions>
       </ry-modal>
 
@@ -202,6 +251,102 @@ export async function mount(container, client, router) {
           requestSyncBtn.querySelector('span').textContent = 'Request Full Sync';
           requestSyncBtn.disabled = false;
         }, 3000);
+      }
+    });
+
+    // Export backup button
+    const exportBackupBtn = container.querySelector('#export-backup');
+    exportBackupBtn.addEventListener('click', async () => {
+      exportBackupBtn.disabled = true;
+      exportBackupBtn.querySelector('span').textContent = 'Exporting...';
+
+      try {
+        const backupManager = createBackupManager(client.username, client.userId);
+        const { blob, filename } = await backupManager.exportBackup();
+        backupManager.close();
+
+        // Trigger download
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        exportBackupBtn.querySelector('span').textContent = 'Backup Downloaded';
+        setTimeout(() => {
+          exportBackupBtn.querySelector('span').textContent = 'Export Backup';
+          exportBackupBtn.disabled = false;
+        }, 3000);
+      } catch (err) {
+        console.error('Failed to export backup:', err);
+        exportBackupBtn.querySelector('span').textContent = 'Export Failed';
+        setTimeout(() => {
+          exportBackupBtn.querySelector('span').textContent = 'Export Backup';
+          exportBackupBtn.disabled = false;
+        }, 3000);
+      }
+    });
+
+    // Import backup modal
+    const importBackupModal = container.querySelector('#import-backup-modal');
+    const confirmImportBtn = container.querySelector('#confirm-import');
+    const backupFileInput = container.querySelector('#backup-file');
+    const recoveryPhraseInput = container.querySelector('#recovery-phrase');
+    const restorePasswordInput = container.querySelector('#restore-password');
+    const importError = container.querySelector('#import-error');
+
+    confirmImportBtn.addEventListener('click', async () => {
+      importError.style.display = 'none';
+
+      const file = backupFileInput.files[0];
+      const phrase = recoveryPhraseInput.value.trim();
+      const password = restorePasswordInput.value;
+
+      if (!file) {
+        importError.textContent = 'Please select a backup file';
+        importError.style.display = 'block';
+        return;
+      }
+
+      if (!phrase) {
+        importError.textContent = 'Please enter your recovery phrase';
+        importError.style.display = 'block';
+        return;
+      }
+
+      if (!password) {
+        importError.textContent = 'Please enter your account password';
+        importError.style.display = 'block';
+        return;
+      }
+
+      confirmImportBtn.disabled = true;
+      confirmImportBtn.textContent = 'Restoring...';
+
+      try {
+        const fileData = await file.arrayBuffer();
+        const backupManager = createBackupManager(client.username, client.userId);
+        const result = await backupManager.importBackup(new Uint8Array(fileData), phrase, password);
+        backupManager.close();
+
+        importBackupModal.close();
+        alert(`Backup restored successfully!\n\nDevices: ${result.deviceCount}\nFriends: ${result.friendCount}\nMessages: ${result.messageCount}\n\nPlease log in again to use your restored account.`);
+
+        // Disconnect and redirect to login
+        client.disconnect();
+        ObscuraClient.clearSession();
+        clearClient();
+        navigate('/login');
+      } catch (err) {
+        console.error('Failed to import backup:', err);
+        importError.textContent = err.message || 'Failed to restore backup';
+        importError.style.display = 'block';
+      } finally {
+        confirmImportBtn.disabled = false;
+        confirmImportBtn.textContent = 'Restore Backup';
       }
     });
 

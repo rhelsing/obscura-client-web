@@ -8,6 +8,7 @@
  *   7.2 Bob1 revokes bob2 using recovery phrase
  *   7.3 Everyone notified (revocation announce)
  *   7.4 Bob2's messages disappear
+ *   7.5 Bob2 self-bricks (wipes data, redirects to login)
  */
 import { test, expect } from '@playwright/test';
 import { delay, randomUsername, waitForViewReady } from './helpers.js';
@@ -167,6 +168,31 @@ test.describe('Scenario 7: Device Revocation', () => {
     expect(bob2Ws).toBe(true);
     console.log('Bob2 linked and connected');
 
+    // Wait for friends to sync via SYNC_BLOB (with devices)
+    await bob2Page.waitForFunction(
+      () => {
+        const friends = window.__client?.friends?.getAll();
+        if (!friends || friends.length === 0) return false;
+        // Make sure at least one friend has devices
+        return friends.some(f => f.devices && f.devices.length > 0);
+      },
+      { timeout: 10000 }
+    );
+    const bob2FriendInfo = await bob2Page.evaluate(() => {
+      const friends = window.__client.friends.getAll();
+      return friends.map(f => ({
+        username: f.username,
+        deviceCount: f.devices?.length || 0,
+        status: f.status,
+        devices: f.devices?.map(d => ({ serverUserId: d.serverUserId?.slice(-8), deviceUUID: d.deviceUUID?.slice(-8) }))
+      }));
+    });
+    console.log('Bob2 friends synced:', JSON.stringify(bob2FriendInfo));
+
+    // Also log Alice's actual serverUserId for comparison
+    const aliceUserId = await page.evaluate(() => window.__client.userId);
+    console.log('Alice serverUserId:', aliceUserId);
+
     // ============================================================
     // SCENARIO 7: Device Revocation
     // ============================================================
@@ -195,14 +221,36 @@ test.describe('Scenario 7: Device Revocation', () => {
     await delay(500);
     console.log('Bob1 sent message');
 
+    // Log what targets Bob2 will send to
+    const bob2SendTargets = await bob2Page.evaluate((aliceUsername) => {
+      const targets = window.__client.friends.getFanOutTargets(aliceUsername);
+      return targets;
+    }, username);
+    console.log('Bob2 send targets for Alice:', bob2SendTargets);
+
     // Bob2 sends message (this should disappear after revocation)
     await bob2Page.fill('#message-text', 'Hello from Bob2!');
     await bob2Page.click('button[type="submit"]');
     await delay(500);
     console.log('Bob2 sent message');
 
-    // Wait for messages to propagate
-    await delay(1000);
+    // Poll until Alice has 3 messages or timeout
+    let aliceMessageCount = 0;
+    for (let i = 0; i < 20; i++) {
+      await delay(500);
+      aliceMessageCount = await page.evaluate(() => window.__client.messages.length);
+      if (aliceMessageCount >= 3) break;
+    }
+    console.log(`Alice has ${aliceMessageCount} messages after polling`);
+
+    const aliceInMemoryMessages = await page.evaluate(() => {
+      return window.__client.messages.map(m => ({
+        text: m.text?.substring(0, 30),
+        from: m.from?.slice(-8),
+        isSent: m.isSent,
+      }));
+    });
+    console.log('Alice in-memory messages:', JSON.stringify(aliceInMemoryMessages));
 
     // Verify all messages are visible to Alice
     await page.goto(`/messages/${bobUsername}`);
@@ -252,6 +300,68 @@ test.describe('Scenario 7: Device Revocation', () => {
     // Alice should receive device announce with revocation
     await aliceRevokeAnnouncePromise;
     console.log('Alice received revocation announce');
+
+    // --- 7.5: Verify Bob2 self-bricks ---
+    console.log('--- 7.5: Verify Bob2 self-bricks ---');
+
+    // Bob2 should receive the revocation and be redirected to login
+    // The deviceRevoked event triggers data wipe and redirect
+    await bob2Page.waitForURL('**/login', { timeout: 15000 });
+    console.log('Bob2 redirected to login page (self-bricked)');
+
+    // Verify Bob2's data was wiped - check localStorage and IndexedDB
+    const bob2DataWiped = await bob2Page.evaluate(async () => {
+      // Check localStorage session is gone
+      const session = localStorage.getItem('obscura_session');
+      if (session) {
+        return { wiped: false, reason: 'localStorage session still exists' };
+      }
+
+      // Check that Signal keys database is deleted or empty
+      // The database name format is: obscura_signal_v2_{username}
+      const databases = await indexedDB.databases();
+      const signalDbs = databases.filter(db => db.name?.startsWith('obscura_signal_v2_'));
+
+      // If any Signal DB exists for this user, check if it has keys
+      for (const db of signalDbs) {
+        try {
+          const openReq = indexedDB.open(db.name);
+          const hasKeys = await new Promise((resolve) => {
+            openReq.onsuccess = () => {
+              const idb = openReq.result;
+              // Check if identityKey store has data
+              if (!idb.objectStoreNames.contains('identityKey')) {
+                idb.close();
+                resolve(false);
+                return;
+              }
+              const tx = idb.transaction('identityKey', 'readonly');
+              const store = tx.objectStore('identityKey');
+              const countReq = store.count();
+              countReq.onsuccess = () => {
+                idb.close();
+                resolve(countReq.result > 0);
+              };
+              countReq.onerror = () => {
+                idb.close();
+                resolve(false);
+              };
+            };
+            openReq.onerror = () => resolve(false);
+          });
+          if (hasKeys) {
+            return { wiped: false, reason: `Signal DB ${db.name} still has keys` };
+          }
+        } catch (e) {
+          // DB access failed, that's fine
+        }
+      }
+
+      return { wiped: true };
+    });
+    console.log('Bob2 data wipe check:', JSON.stringify(bob2DataWiped));
+    expect(bob2DataWiped.wiped).toBe(true);
+    console.log('Bob2 data wiped (session and keys)');
 
     await delay(500);
 

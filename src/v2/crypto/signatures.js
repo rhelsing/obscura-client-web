@@ -187,3 +187,52 @@ export async function generateVerifyCode(signalIdentityKey) {
   const code = ((bytes[0] << 8) | bytes[1]) % 10000;
   return code.toString().padStart(4, '0');
 }
+
+/**
+ * Generate a 4-digit verification code from an array of devices
+ * Concatenates all device identity keys (sorted by deviceUUID) and hashes the result
+ * This ensures the code reflects ALL devices, changing if any device is added/removed
+ *
+ * @param {Array} devices - Array of device objects with deviceUUID and signalIdentityKey
+ * @returns {Promise<string>} 4-digit code ("0000" - "9999")
+ */
+export async function generateVerifyCodeFromDevices(devices) {
+  if (!devices || devices.length === 0) {
+    throw new Error('No devices provided');
+  }
+
+  // Sort devices by deviceUUID for deterministic ordering
+  const sortedDevices = [...devices].sort((a, b) =>
+    (a.deviceUUID || '').localeCompare(b.deviceUUID || '')
+  );
+
+  // Collect all normalized keys
+  const keyParts = [];
+  for (const device of sortedDevices) {
+    const keyBytes = normalizeKeyToUint8Array(device.signalIdentityKey);
+    if (keyBytes && keyBytes.length > 0) {
+      keyParts.push(keyBytes);
+    }
+  }
+
+  if (keyParts.length === 0) {
+    throw new Error('No valid identity keys found in devices');
+  }
+
+  // Concatenate all keys
+  const totalLength = keyParts.reduce((sum, k) => sum + k.length, 0);
+  const concatenated = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const key of keyParts) {
+    concatenated.set(key, offset);
+    offset += key.length;
+  }
+
+  // SHA-256 hash of concatenated keys
+  const hash = await crypto.subtle.digest('SHA-256', concatenated);
+  const bytes = new Uint8Array(hash);
+
+  // Take first 2 bytes as uint16, mod 10000 for 4-digit code
+  const code = ((bytes[0] << 8) | bytes[1]) % 10000;
+  return code.toString().padStart(4, '0');
+}

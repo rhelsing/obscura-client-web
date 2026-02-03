@@ -19,7 +19,7 @@ import {
   verifyRecoverySignature,
   verifyLinkChallenge,
   serializeAnnounceForSigning,
-  generateVerifyCode,
+  generateVerifyCodeFromDevices,
 } from '../crypto/signatures.js';
 import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
 import { createSchema } from '../orm/index.js';
@@ -270,7 +270,7 @@ export class ObscuraClient {
   /**
    * Get my 4-digit verify code for sharing with friends
    * They can use this to verify friend requests came from me
-   * Uses primary device (sorted by deviceUUID) for consistency across all own devices
+   * Concatenates all device keys (sorted by deviceUUID) and hashes for consistency
    * @returns {Promise<string>} 4-digit code ("0000" - "9999")
    */
   async getMyVerifyCode() {
@@ -282,15 +282,8 @@ export class ObscuraClient {
       signalIdentityKey: this.deviceInfo?.signalIdentityKey,
     });
 
-    // Sort by deviceUUID for deterministic "primary" device
-    const sortedDevices = [...allDevices].sort((a, b) =>
-      (a.deviceUUID || '').localeCompare(b.deviceUUID || '')
-    );
-
-    const primaryDevice = sortedDevices[0];
-    const identityKey = primaryDevice?.signalIdentityKey;
-    if (!identityKey) return null;
-    return generateVerifyCode(identityKey);
+    if (!allDevices || allDevices.length === 0) return null;
+    return generateVerifyCodeFromDevices(allDevices);
   }
 
   // === Message Persistence ===

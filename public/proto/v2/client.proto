@@ -34,6 +34,7 @@ message ClientMessage {
   // Device management payloads
   DeviceLinkApproval device_link_approval = 30;
   DeviceAnnounce device_announce = 31;
+  DeviceRecoveryAnnounce device_recovery_announce = 32;
 
   // Sync payloads (for new device onboarding)
   HistoryChunk history_chunk = 40;
@@ -57,6 +58,7 @@ message ClientMessage {
     // Note: 10 intentionally skipped - link "request" is out-of-band (QR/link code)
     DEVICE_LINK_APPROVAL = 11;
     DEVICE_ANNOUNCE = 12;
+    DEVICE_RECOVERY_ANNOUNCE = 13;  // Account recovery - replaces all old devices
 
     // Sync (20-29)
     HISTORY_CHUNK = 20;
@@ -111,6 +113,18 @@ message DeviceAnnounce {
   uint64 timestamp = 2;             // For LWW merge (latest wins)
   bool is_revocation = 3;           // True if this removes a device
   bytes signature = 4;              // Signed with device key (add) or recovery key (revoke)
+  bytes recovery_public_key = 5;    // For friend to verify future revocation signatures
+}
+
+// Account recovery announcement
+// Sent to friends when recovering from backup
+// Signed with recovery key to prove legitimacy
+message DeviceRecoveryAnnounce {
+  repeated DeviceInfo new_devices = 1;  // New device list (just the recovery device)
+  uint64 timestamp = 2;
+  bytes signature = 3;                  // Signed with recovery key
+  bool is_full_recovery = 4;            // True if replacing all old devices
+  bytes recovery_public_key = 5;        // Recovery public key for verification
 }
 
 // =============================================================================

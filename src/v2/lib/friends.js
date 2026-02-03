@@ -33,6 +33,7 @@ export class FriendManager {
           devices: f.devices || [],
           status,
           addedAt: f.createdAt,
+          recoveryPublicKey: f.recoveryPublicKey || null,
         });
       }
       console.log(`[FriendManager] Loaded ${friends.length} friends from IndexedDB`);
@@ -69,7 +70,10 @@ export class FriendManager {
         await this._store.removeFriend(existingByUsername.userId);
       }
 
-      await this._store.addFriend(userId, f.username, storeStatus, { devices: f.devices });
+      await this._store.addFriend(userId, f.username, storeStatus, {
+        devices: f.devices,
+        recoveryPublicKey: f.recoveryPublicKey,
+      });
     } catch (e) {
       console.warn('[FriendManager] Failed to persist friend:', e.message);
     }
@@ -95,8 +99,9 @@ export class FriendManager {
    * @param {string} username - Friend's display username
    * @param {Array} devices - Array of device info objects
    * @param {string} status - 'pending_outgoing' | 'pending_incoming' | 'accepted'
+   * @param {Uint8Array} [recoveryPublicKey] - Friend's recovery public key for verifying revocation
    */
-  store(username, devices, status = 'accepted') {
+  store(username, devices, status = 'accepted', recoveryPublicKey = null) {
     // Check if friend already exists - preserve devices if new ones are empty
     const existing = this.friends.get(username);
     const newDevices = devices.map(d => ({
@@ -114,6 +119,7 @@ export class FriendManager {
       devices: finalDevices,
       status,
       addedAt: existing?.addedAt || Date.now(),
+      recoveryPublicKey: recoveryPublicKey || existing?.recoveryPublicKey || null,
     });
     // Persist to IndexedDB (fire-and-forget but logged)
     this._persistFriend(username);
@@ -263,13 +269,15 @@ export class FriendManager {
   processRequest(msg, sendFn) {
     const senderUsername = msg.username;
     const senderDevices = msg.deviceAnnounce?.devices || [];
+    const senderRecoveryKey = msg.deviceAnnounce?.recoveryPublicKey;
     // Sort by deviceUUID for deterministic "primary" device across all clients
     const sortedDevices = [...senderDevices].sort((a, b) =>
       (a.deviceUUID || '').localeCompare(b.deviceUUID || '')
     );
     const senderIdentityKey = sortedDevices[0]?.signalIdentityKey;
 
-    this.store(senderUsername, senderDevices, 'pending_incoming');
+    // Store recovery key with pending request so it survives page reloads
+    this.store(senderUsername, senderDevices, 'pending_incoming', senderRecoveryKey);
     logger.logFriendRequestReceived(senderUsername, msg.sourceUserId, senderDevices.length).catch(() => {});
 
     const self = this;
@@ -277,6 +285,7 @@ export class FriendManager {
       username: senderUsername,
       devices: senderDevices,
       sourceUserId: msg.sourceUserId,
+      recoveryPublicKey: senderRecoveryKey,
 
       /**
        * Get the 4-digit verify code for out-of-band verification
@@ -288,7 +297,14 @@ export class FriendManager {
       },
 
       async accept() {
-        self.store(senderUsername, senderDevices, 'accepted');
+        self.store(senderUsername, senderDevices, 'accepted', senderRecoveryKey);
+        // Store friend's recovery key for verifying revocation signatures
+        if (senderRecoveryKey && self._store) {
+          const userId = senderDevices[0]?.serverUserId || senderUsername;
+          self._store.setFriendRecoveryKey(userId, senderRecoveryKey).catch(e => {
+            console.warn('Failed to store friend recovery key:', e.message);
+          });
+        }
         // Send response - logging happens in ObscuraClient._sendFriendResponse
         return sendFn(senderDevices[0]?.serverUserId, senderUsername, true);
       },
@@ -310,9 +326,17 @@ export class FriendManager {
     const senderUsername = msg.username;
     const accepted = msg.accepted;
     const senderDevices = msg.deviceAnnounce?.devices || [];
+    const senderRecoveryKey = msg.deviceAnnounce?.recoveryPublicKey;
 
     if (accepted) {
-      this.store(senderUsername, senderDevices, 'accepted');
+      this.store(senderUsername, senderDevices, 'accepted', senderRecoveryKey);
+      // Store friend's recovery key for verifying revocation signatures
+      if (senderRecoveryKey && this._store) {
+        const userId = senderDevices[0]?.serverUserId || senderUsername;
+        this._store.setFriendRecoveryKey(userId, senderRecoveryKey).catch(e => {
+          console.warn('Failed to store friend recovery key:', e.message);
+        });
+      }
     } else {
       this.remove(senderUsername);
     }
@@ -321,6 +345,7 @@ export class FriendManager {
       username: senderUsername,
       accepted,
       devices: senderDevices,
+      recoveryPublicKey: senderRecoveryKey,
     };
   }
 }

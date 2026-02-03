@@ -43,7 +43,7 @@ export function render({ devices = [], currentDeviceId = '', loading = false } =
                   <cluster>
                     <ry-icon name="settings"></ry-icon>
                     <span style="font-family: monospace; flex: 1">${d.deviceUUID.slice(0, 8)}...</span>
-                    <button size="sm" class="sync-btn" data-server-id="${d.serverUserId}">Push History</button>
+                    <button size="sm" class="sync-btn" data-server-id="${d.serverUserId}" style="display: none;">Push History</button>
                     <button variant="danger" size="sm" class="revoke-btn" data-device-id="${d.deviceUUID}">Revoke</button>
                   </cluster>
                 </card>

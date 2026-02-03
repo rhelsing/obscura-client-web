@@ -24,7 +24,7 @@ export async function deriveRecoveryKeypair(phrase) {
   const seed = await mnemonicToSeed(phrase);
 
   // Use first 32 bytes as private key seed
-  const privateKey = seed.slice(0, 32);
+  const privateKeySeed = seed.slice(0, 32);
 
   // Derive public key from private key using curve25519
   const curve25519 = await import('@privacyresearch/curve25519-typescript');
@@ -32,13 +32,16 @@ export async function deriveRecoveryKeypair(phrase) {
   const curve = new AsyncCurve25519Wrapper();
 
   // keyPair takes a 32-byte seed and returns { pubKey, privKey }
-  const keyPair = await curve.keyPair(privateKey.buffer);
+  const keyPair = await curve.keyPair(privateKeySeed.buffer);
+
+  const publicKey = new Uint8Array(keyPair.pubKey);
+  const privateKey = new Uint8Array(keyPair.privKey);
 
   return {
     // Public key with 0x05 prefix (33 bytes) for compatibility with Signal
-    publicKey: new Uint8Array(keyPair.pubKey),
+    publicKey,
     // Private key is 32 bytes
-    privateKey: new Uint8Array(keyPair.privKey),
+    privateKey,
   };
 }
 

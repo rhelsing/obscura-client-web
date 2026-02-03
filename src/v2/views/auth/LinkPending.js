@@ -59,7 +59,16 @@ export function render({ linkCode = '', waiting = true, error = null } = {}) {
         </div>
       `}
 
-      <p class="link" style="text-align: center;"><a href="/login" data-navigo>Cancel</a></p>
+      <div class="alternatives" style="margin-top: var(--ry-space-8); padding-top: var(--ry-space-4); border-top: 1px solid var(--ry-color-border);">
+        <p style="text-align: center; color: var(--ry-color-text-muted); margin-bottom: var(--ry-space-2);">
+          Can't approve from another device?
+        </p>
+        <p class="link" style="text-align: center;">
+          <a href="/recover" data-navigo>Recover from backup</a>
+        </p>
+      </div>
+
+      <p class="link" style="text-align: center; margin-top: var(--ry-space-4);"><a href="/login" data-navigo>Cancel</a></p>
     </div>
   `;
 }

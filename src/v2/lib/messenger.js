@@ -21,6 +21,7 @@ export const MessageType = {
   FRIEND_SYNC: 27,
   DEVICE_LINK_APPROVAL: 11,
   DEVICE_ANNOUNCE: 12,
+  DEVICE_RECOVERY_ANNOUNCE: 13,
   HISTORY_CHUNK: 20,
   SETTINGS_SYNC: 21,
   READ_SYNC: 22,
@@ -87,6 +88,12 @@ export class Messenger {
     this.DeviceInfo = this.clientProto.lookupType('obscura.v2.DeviceInfo');
     this.DeviceLinkApproval = this.clientProto.lookupType('obscura.v2.DeviceLinkApproval');
     this.DeviceAnnounce = this.clientProto.lookupType('obscura.v2.DeviceAnnounce');
+    try {
+      this.DeviceRecoveryAnnounce = this.clientProto.lookupType('obscura.v2.DeviceRecoveryAnnounce');
+    } catch (e) {
+      console.warn('[Messenger] DeviceRecoveryAnnounce not found in proto, recovery announce disabled');
+      this.DeviceRecoveryAnnounce = null;
+    }
     this.SentSync = this.clientProto.lookupType('obscura.v2.SentSync');
     this.SyncBlob = this.clientProto.lookupType('obscura.v2.SyncBlob');
     this.ContentReference = this.clientProto.lookupType('obscura.v2.ContentReference');
@@ -307,6 +314,22 @@ export class Messenger {
         timestamp: opts.deviceAnnounce.timestamp || Date.now(),
         isRevocation: opts.deviceAnnounce.isRevocation || false,
         signature: opts.deviceAnnounce.signature || new Uint8Array(0),
+        recoveryPublicKey: opts.deviceAnnounce.recoveryPublicKey || new Uint8Array(0),
+      });
+    }
+
+    if (typeValue === MessageType.DEVICE_RECOVERY_ANNOUNCE && opts.deviceRecoveryAnnounce && this.DeviceRecoveryAnnounce) {
+      msgData.deviceRecoveryAnnounce = this.DeviceRecoveryAnnounce.create({
+        newDevices: (opts.deviceRecoveryAnnounce.newDevices || []).map(d => this.DeviceInfo.create({
+          deviceUuid: d.deviceUUID || d.deviceUuid,
+          serverUserId: d.serverUserId,
+          deviceName: d.deviceName,
+          signalIdentityKey: d.signalIdentityKey,
+        })),
+        timestamp: opts.deviceRecoveryAnnounce.timestamp || Date.now(),
+        isFullRecovery: opts.deviceRecoveryAnnounce.isFullRecovery || false,
+        signature: opts.deviceRecoveryAnnounce.signature || new Uint8Array(0),
+        recoveryPublicKey: opts.deviceRecoveryAnnounce.recoveryPublicKey || new Uint8Array(0),
       });
     }
 
@@ -419,6 +442,22 @@ export class Messenger {
         timestamp: Number(msg.deviceAnnounce.timestamp) || 0,
         isRevocation: msg.deviceAnnounce.isRevocation || false,
         signature: msg.deviceAnnounce.signature,
+        recoveryPublicKey: msg.deviceAnnounce.recoveryPublicKey,
+      };
+    }
+
+    if (msg.deviceRecoveryAnnounce) {
+      result.deviceRecoveryAnnounce = {
+        newDevices: (msg.deviceRecoveryAnnounce.newDevices || []).map(d => ({
+          deviceUUID: d.deviceUuid,
+          serverUserId: d.serverUserId,
+          deviceName: d.deviceName,
+          signalIdentityKey: d.signalIdentityKey,
+        })),
+        timestamp: Number(msg.deviceRecoveryAnnounce.timestamp) || 0,
+        isFullRecovery: msg.deviceRecoveryAnnounce.isFullRecovery || false,
+        signature: msg.deviceRecoveryAnnounce.signature,
+        recoveryPublicKey: msg.deviceRecoveryAnnounce.recoveryPublicKey,
       };
     }
 

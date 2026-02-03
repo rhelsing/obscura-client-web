@@ -21,6 +21,7 @@ export function getWsUrl() {
 // View imports
 import * as Register from './auth/Register.js';
 import * as Login from './auth/Login.js';
+import * as Recover from './auth/Recover.js';
 import * as LinkPending from './auth/LinkPending.js';
 import * as LinkNewDevice from './auth/LinkNewDevice.js';
 
@@ -80,6 +81,7 @@ export function init(appContainer, obscuraClient = null) {
   // Auth routes (no client required)
   router.on('/register', () => mountView(Register));
   router.on('/login', () => mountView(Login));
+  router.on('/recover', () => mountView(Recover));
   router.on('/link-pending', () => mountView(LinkPending));
   router.on('/link-device', () => requireAuth(() => mountView(LinkNewDevice)));
 

@@ -66,6 +66,8 @@ export const Obscura = {
           deviceUsername: result.client.deviceUsername,
           deviceUUID: result.client.deviceUUID,
           deviceInfo: result.client.deviceInfo,
+          recoveryPublicKey: result.client.recoveryPublicKey,
+          p2pIdentity: result.client.p2pIdentity,
         }),
       };
     }

@@ -26,7 +26,7 @@ export function createBackupManager(username, userId) {
   const signalStore = new IndexedDBStore(username);
   const deviceStore = createDeviceStore(username);
   const friendStore = createFriendStore(userId);
-  const messageStore = createMessageStore(userId);
+  const messageStore = createMessageStore(username);
 
   return {
     /**
@@ -101,6 +101,10 @@ export function createBackupManager(username, userId) {
 
       // Message store data
       const messages = await messageStore.exportAll();
+      console.log('[BackupManager] Exporting messages:', {
+        count: messages.length,
+        messageIds: messages.map(m => m.messageId).slice(0, 5),
+      });
 
       return {
         version: 1,

@@ -38,8 +38,17 @@ async function ecdh(privateKey, publicKey) {
     ? publicKey.slice(1)
     : publicKey;
 
+  // Convert to proper Uint8Array to ensure buffer alignment
+  // This is necessary because Uint8Array.buffer may contain more data than the view
+  const privKeyArr = new Uint8Array(privateKey);
+  const pubKeyArr = new Uint8Array(pubKeyBytes);
+
+  // Extract only the relevant portion of the buffer
+  const privKeyBuffer = privKeyArr.buffer.slice(privKeyArr.byteOffset, privKeyArr.byteOffset + privKeyArr.byteLength);
+  const pubKeyBuffer = pubKeyArr.buffer.slice(pubKeyArr.byteOffset, pubKeyArr.byteOffset + pubKeyArr.byteLength);
+
   // sharedSecret returns ArrayBuffer
-  const shared = await curve.sharedSecret(pubKeyBytes.buffer, privateKey.buffer);
+  const shared = await curve.sharedSecret(pubKeyBuffer, privKeyBuffer);
   return new Uint8Array(shared);
 }
 

@@ -70,9 +70,12 @@ export async function verify(data, signature, publicKey) {
   // Handle both 33-byte (with prefix) and 32-byte (raw) public keys
   let keyBytes = publicKey instanceof ArrayBuffer ? new Uint8Array(publicKey) : publicKey;
 
-  if (keyBytes.length === 33 && keyBytes[0] === 0x05) {
-    // Keep 33-byte key as-is for verify (it expects the prefix)
-    // Actually, let's check what the verify method expects
+  // If key is 32 bytes (raw Curve25519), add 0x05 prefix for libsignal compatibility
+  if (keyBytes.length === 32) {
+    const prefixedKey = new Uint8Array(33);
+    prefixedKey[0] = 0x05;
+    prefixedKey.set(keyBytes, 1);
+    keyBytes = prefixedKey;
   }
 
   try {

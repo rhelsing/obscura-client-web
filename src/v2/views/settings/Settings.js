@@ -57,7 +57,7 @@ export function render({ settings = null, loading = false, saving = false, isFir
               </a>
             </card>
             <card>
-              <button id="request-sync" variant="ghost">
+              <button id="request-sync" variant="ghost" style="display: none;">
                 <cluster>
                   <span>Request Full Sync</span>
                   <ry-icon name="refresh-cw"></ry-icon>
@@ -102,7 +102,7 @@ export function render({ settings = null, loading = false, saving = false, isFir
               <p class="hint">Download an encrypted backup of your account. You'll need your 12-word recovery phrase to restore it.</p>
             </card>
             <card>
-              <button id="import-backup" variant="ghost" modal="import-backup-modal">
+              <button id="import-backup" variant="ghost" modal="import-backup-modal" style="display: none;">
                 <cluster>
                   <span>Restore from Backup</span>
                   <ry-icon name="upload"></ry-icon>
@@ -117,7 +117,7 @@ export function render({ settings = null, loading = false, saving = false, isFir
           <h2>Security</h2>
           <stack gap="sm">
             <card>
-              <button id="reset-sessions" variant="ghost">
+              <button id="reset-sessions" variant="ghost" style="display: none;">
                 <cluster>
                   <span>Reset All Sessions</span>
                   <ry-icon name="refresh-cw"></ry-icon>

@@ -688,8 +688,20 @@ export async function unlinkDevice(username, userId) {
     console.warn('Some databases failed to delete:', errors);
   }
 
-  // Also clear localStorage session
+  // Also clear localStorage session and lastRead timestamps
   if (typeof localStorage !== 'undefined') {
     localStorage.removeItem('obscura_session');
+
+    // Clear lastRead timestamps for this user's conversations
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(`lastRead_${username}_`)) {
+        keysToRemove.push(key);
+      }
+    }
+    for (const key of keysToRemove) {
+      localStorage.removeItem(key);
+    }
   }
 }

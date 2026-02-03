@@ -180,9 +180,18 @@ test.describe('Scenario 7: Device Revocation', () => {
     );
     const bob2FriendInfo = await bob2Page.evaluate(() => {
       const friends = window.__client.friends.getAll();
-      return friends.map(f => ({ username: f.username, deviceCount: f.devices?.length || 0, status: f.status }));
+      return friends.map(f => ({
+        username: f.username,
+        deviceCount: f.devices?.length || 0,
+        status: f.status,
+        devices: f.devices?.map(d => ({ serverUserId: d.serverUserId?.slice(-8), deviceUUID: d.deviceUUID?.slice(-8) }))
+      }));
     });
     console.log('Bob2 friends synced:', JSON.stringify(bob2FriendInfo));
+
+    // Also log Alice's actual serverUserId for comparison
+    const aliceUserId = await page.evaluate(() => window.__client.userId);
+    console.log('Alice serverUserId:', aliceUserId);
 
     // ============================================================
     // SCENARIO 7: Device Revocation
@@ -212,14 +221,36 @@ test.describe('Scenario 7: Device Revocation', () => {
     await delay(500);
     console.log('Bob1 sent message');
 
+    // Log what targets Bob2 will send to
+    const bob2SendTargets = await bob2Page.evaluate((aliceUsername) => {
+      const targets = window.__client.friends.getFanOutTargets(aliceUsername);
+      return targets;
+    }, username);
+    console.log('Bob2 send targets for Alice:', bob2SendTargets);
+
     // Bob2 sends message (this should disappear after revocation)
     await bob2Page.fill('#message-text', 'Hello from Bob2!');
     await bob2Page.click('button[type="submit"]');
     await delay(500);
     console.log('Bob2 sent message');
 
-    // Wait for messages to propagate
-    await delay(1000);
+    // Poll until Alice has 3 messages or timeout
+    let aliceMessageCount = 0;
+    for (let i = 0; i < 20; i++) {
+      await delay(500);
+      aliceMessageCount = await page.evaluate(() => window.__client.messages.length);
+      if (aliceMessageCount >= 3) break;
+    }
+    console.log(`Alice has ${aliceMessageCount} messages after polling`);
+
+    const aliceInMemoryMessages = await page.evaluate(() => {
+      return window.__client.messages.map(m => ({
+        text: m.text?.substring(0, 30),
+        from: m.from?.slice(-8),
+        isSent: m.isSent,
+      }));
+    });
+    console.log('Alice in-memory messages:', JSON.stringify(aliceInMemoryMessages));
 
     // Verify all messages are visible to Alice
     await page.goto(`/messages/${bobUsername}`);

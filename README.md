@@ -93,7 +93,7 @@ git submodule update --remote proto
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│              WEBSOCKET CONNECT                       │
+│              WEBSOCKET CONNECT                      │
 ├─────────────────────────────────────────────────────┤
 │  1. Connect to /v1/gateway                          │
 │  2. Server pushes queued Envelopes                  │

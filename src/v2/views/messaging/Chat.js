@@ -56,7 +56,7 @@ export function render({ username = '', displayName = '', messages = [], sending
                     <img src="${m.imageDataUrl}" class="attachment-image" style="max-width: 100%; border-radius: 8px;" />
                   ` : m.fileDataUrl ? `
                     <div class="attachment-file">
-                      <a href="${m.fileDataUrl}" download="${m.fileName || 'file'}" class="file-download">
+                      <a href="#" class="file-download" data-dataurl="${m.fileDataUrl}" data-filename="${m.fileName || 'file'}">
                         📎 ${m.fileName || 'Download file'}
                       </a>
                     </div>
@@ -956,6 +956,45 @@ export async function mount(container, client, router, params) {
           attachListeners();
         } catch (err) {
           btn.textContent = 'Failed';
+        }
+      });
+    });
+
+    // File download click handlers (mobile-compatible)
+    container.querySelectorAll('.file-download').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const dataUrl = link.dataset.dataurl;
+        const filename = link.dataset.filename || 'file';
+
+        // Convert data URL to blob for mobile compatibility
+        try {
+          const [header, base64] = dataUrl.split(',');
+          const mimeMatch = header.match(/data:([^;]+)/);
+          const mimeType = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+          const binary = atob(base64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+          }
+          const blob = new Blob([bytes], { type: mimeType });
+          const blobUrl = URL.createObjectURL(blob);
+
+          // Create temporary link and click it
+          const tempLink = document.createElement('a');
+          tempLink.href = blobUrl;
+          tempLink.download = filename;
+          tempLink.style.display = 'none';
+          document.body.appendChild(tempLink);
+          tempLink.click();
+          document.body.removeChild(tempLink);
+
+          // Clean up blob URL after a delay
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+        } catch (err) {
+          console.error('[Chat] Download failed:', err);
+          // Fallback: try opening data URL directly
+          window.open(dataUrl, '_blank');
         }
       });
     });

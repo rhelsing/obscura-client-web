@@ -235,7 +235,7 @@ test.describe('Scenario 22: Chunked File Upload', () => {
     // Get the downloaded file data URL
     const fileDataUrl = await bobPage.evaluate(() => {
       const link = document.querySelector('.file-download');
-      return link?.href || null;
+      return link?.dataset?.dataurl || null;
     });
 
     expect(fileDataUrl).toBeTruthy();
@@ -319,7 +319,7 @@ test.describe('Scenario 22: Chunked File Upload', () => {
     // Verify integrity again after reload
     const reloadFileDataUrl = await bobPage.evaluate(() => {
       const link = document.querySelector('.file-download');
-      return link?.href || null;
+      return link?.dataset?.dataurl || null;
     });
 
     expect(reloadFileDataUrl).toBeTruthy();

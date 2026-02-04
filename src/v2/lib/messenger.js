@@ -28,6 +28,7 @@ export const MessageType = {
   SYNC_BLOB: 23,
   SENT_SYNC: 24,
   CONTENT_REFERENCE: 25,
+  CHUNKED_CONTENT_REFERENCE: 28,
   // ORM Layer
   MODEL_SYNC: 30,
 };
@@ -97,6 +98,8 @@ export class Messenger {
     this.SentSync = this.clientProto.lookupType('obscura.v2.SentSync');
     this.SyncBlob = this.clientProto.lookupType('obscura.v2.SyncBlob');
     this.ContentReference = this.clientProto.lookupType('obscura.v2.ContentReference');
+    this.ChunkedContentReference = this.clientProto.lookupType('obscura.v2.ChunkedContentReference');
+    this.ChunkInfo = this.clientProto.lookupType('obscura.v2.ChunkInfo');
     this.ModelSync = this.clientProto.lookupType('obscura.v2.ModelSync');
     this.FriendSync = this.clientProto.lookupType('obscura.v2.FriendSync');
     console.log('[Messenger] Proto loading complete. Types:', {
@@ -362,6 +365,24 @@ export class Messenger {
       });
     }
 
+    if (typeValue === MessageType.CHUNKED_CONTENT_REFERENCE && opts.chunkedContentReference) {
+      msgData.chunkedContentReference = this.ChunkedContentReference.create({
+        fileId: opts.chunkedContentReference.fileId,
+        chunks: opts.chunkedContentReference.chunks.map(c => this.ChunkInfo.create({
+          index: c.index,
+          attachmentId: c.attachmentId,
+          contentKey: c.contentKey,
+          nonce: c.nonce,
+          chunkHash: c.chunkHash,
+          sizeBytes: c.sizeBytes || 0,
+        })),
+        completeHash: opts.chunkedContentReference.completeHash,
+        contentType: opts.chunkedContentReference.contentType || '',
+        totalSizeBytes: opts.chunkedContentReference.totalSizeBytes || 0,
+        fileName: opts.chunkedContentReference.fileName || '',
+      });
+    }
+
     if (typeValue === MessageType.MODEL_SYNC && opts.modelSync) {
       msgData.modelSync = this.ModelSync.create({
         model: opts.modelSync.model,
@@ -486,6 +507,24 @@ export class Messenger {
         contentType: msg.contentReference.contentType || '',
         sizeBytes: Number(msg.contentReference.sizeBytes) || 0,
         fileName: msg.contentReference.fileName || '',
+      };
+    }
+
+    if (msg.chunkedContentReference) {
+      result.chunkedContentReference = {
+        fileId: msg.chunkedContentReference.fileId,
+        chunks: (msg.chunkedContentReference.chunks || []).map(c => ({
+          index: c.index,
+          attachmentId: c.attachmentId,
+          contentKey: c.contentKey,
+          nonce: c.nonce,
+          chunkHash: c.chunkHash,
+          sizeBytes: Number(c.sizeBytes) || 0,
+        })),
+        completeHash: msg.chunkedContentReference.completeHash,
+        contentType: msg.chunkedContentReference.contentType || '',
+        totalSizeBytes: Number(msg.chunkedContentReference.totalSizeBytes) || 0,
+        fileName: msg.chunkedContentReference.fileName || '',
       };
     }
 

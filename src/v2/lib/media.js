@@ -161,8 +161,10 @@ export function getMediaCategory(mimeType) {
   return 'file';
 }
 
-// File size limit (nginx limit is ~1MB)
-export const MAX_UPLOAD_SIZE = 950 * 1024; // 950KB - single source of truth
+// File size limits
+export const MAX_UPLOAD_SIZE = 950 * 1024;        // 950KB per chunk (nginx limit)
+export const MAX_FILE_SIZE = 100 * 1024 * 1024;   // 100MB max file size (chunked)
+export const CHUNK_RATE_LIMIT = 5;                // Max 5 requests per second
 
 // Image compression constants
 const MAX_IMAGE_SIZE = MAX_UPLOAD_SIZE;

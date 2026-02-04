@@ -10,7 +10,7 @@
  */
 import { navigate, markConversationRead } from '../index.js';
 import { parseMediaUrl, createMediaUrl } from '../../lib/attachmentUtils.js';
-import { AudioRecorder, getMediaCategory, compressImage, gzipCompress, maybeDecompress, MAX_UPLOAD_SIZE, convertHeicToJpeg, isHeic } from '../../lib/media.js';
+import { AudioRecorder, getMediaCategory, compressImage, gzipCompress, maybeDecompress, MAX_UPLOAD_SIZE, MAX_FILE_SIZE, convertHeicToJpeg, isHeic } from '../../lib/media.js';
 
 let cleanup = null;
 let messages = [];
@@ -41,8 +41,13 @@ export function render({ username = '', displayName = '', messages = [], sending
             <div class="message ${m.fromMe ? 'sent' : 'received'}">
               ${m.attachment ? `
                 <div class="attachment">
-                  ${m.downloading ? `
-                    <div class="attachment-loading">Loading...</div>
+                  ${m.uploadProgress !== undefined ? `
+                    <div class="attachment-progress">
+                      <div class="progress-bar" style="width: ${m.uploadProgress}%; background: var(--ry-color-primary); height: 4px; border-radius: 2px;"></div>
+                      <div class="progress-text">${m.attachmentPreview || `Uploading ${m.uploadProgress}%`}</div>
+                    </div>
+                  ` : m.downloading ? `
+                    <div class="attachment-loading">${m.attachmentPreview || 'Loading...'}</div>
                   ` : m.audioDataUrl ? `
                     <audio src="${m.audioDataUrl}" controls class="attachment-audio"></audio>
                   ` : m.videoDataUrl ? `
@@ -266,11 +271,27 @@ export async function mount(container, client, router, params) {
           m.downloading = false;
           return;
         }
-        let decrypted = await client.attachments.download(parsed.ref);
+
+        // Use smart download for both single and chunked attachments
+        const isChunked = parsed.isChunked;
+        const contentType = isChunked
+          ? (parsed.ref.contentType || 'application/octet-stream')
+          : (parsed.ref.contentType || 'image/jpeg');
+
+        // Progress callback for chunked downloads
+        const onProgress = isChunked ? (progress) => {
+          m.attachmentPreview = `Downloading ${progress.current}/${progress.total} chunks (${progress.percent}%)`;
+          rerender();
+        } : undefined;
+
+        let decrypted = await client.attachments.downloadSmart(
+          { isChunked, ref: parsed.ref },
+          { onProgress }
+        );
+
         // Auto-decompress if gzipped (detected via magic bytes)
         decrypted = await maybeDecompress(decrypted);
-        const contentType = parsed.ref.contentType || 'image/jpeg';
-        console.log('[Chat] Downloaded attachment, contentType:', contentType, 'from mediaUrl');
+        console.log('[Chat] Downloaded attachment, contentType:', contentType, isChunked ? '(chunked)' : '');
         const blob = new Blob([decrypted], { type: contentType });
         const dataUrl = await blobToDataUrl(blob);
 
@@ -291,6 +312,7 @@ export async function mount(container, client, router, params) {
         m.fileName = parsed.ref.fileName || m.fileName || 'file';
         m.downloading = false;
         m.downloaded = true;
+        m.attachmentPreview = undefined; // Clear progress
       } catch (err) {
         console.error('Failed to download attachment:', err);
         m.downloading = false;
@@ -384,7 +406,8 @@ export async function mount(container, client, router, params) {
           input.value = '';
           return;
         }
-      } else if (file.type.startsWith('image/')) {
+      } else {
+        // Read any file type (image, video, audio, generic file)
         console.log('[Upload] Reading file as ArrayBuffer');
         const buffer = await file.arrayBuffer();
         bytes = new Uint8Array(buffer);
@@ -403,35 +426,33 @@ export async function mount(container, client, router, params) {
         }
       }
 
-      // For non-images over limit, try gzip compression
-      // (Images use canvas compression only - no gzip)
-      if (!contentType.startsWith('image/') && bytes.length > MAX_UPLOAD_SIZE) {
+      // For non-images, try gzip compression if beneficial
+      if (!contentType.startsWith('image/') && bytes.length > MAX_UPLOAD_SIZE && bytes.length < MAX_UPLOAD_SIZE * 2) {
         console.log(`[Upload] Non-image file over ${MAX_UPLOAD_SIZE / 1024}KB, trying gzip...`);
         const { compressed, wasCompressed } = await gzipCompress(bytes);
         if (wasCompressed && compressed.length <= MAX_UPLOAD_SIZE) {
           bytes = compressed;
           console.log(`[Upload] Gzip succeeded: ${compressed.length} bytes`);
-        } else {
-          // Still too big after compression
-          const sizeMB = (bytes.length / (1024 * 1024)).toFixed(1);
-          const limitKB = Math.round(MAX_UPLOAD_SIZE / 1024);
-          alert(`File too large (${sizeMB}MB). Maximum size is ${limitKB}KB.`);
-          input.value = ''; // Reset file input
-          return;
         }
       }
 
-      // Final size check (catches images that couldn't compress enough)
-      if (bytes.length > MAX_UPLOAD_SIZE) {
+      // Check against max file size (100MB) - chunked upload handles large files
+      if (bytes.length > MAX_FILE_SIZE) {
         const sizeMB = (bytes.length / (1024 * 1024)).toFixed(1);
-        const limitKB = Math.round(MAX_UPLOAD_SIZE / 1024);
-        alert(`File too large (${sizeMB}MB). Maximum size is ${limitKB}KB.`);
-        input.value = ''; // Reset file input
+        const limitMB = Math.round(MAX_FILE_SIZE / 1024 / 1024);
+        alert(`File too large (${sizeMB}MB). Maximum size is ${limitMB}MB.`);
+        input.value = '';
         return;
       }
 
-      // Convert to data URL for immediate display
-      const dataUrl = await blobToDataUrl(blob);
+      // Track if this is a large file that will use chunked upload
+      const isLargeFile = bytes.length > MAX_UPLOAD_SIZE;
+
+      // Convert to data URL for immediate display (skip for very large files to save memory)
+      let dataUrl = null;
+      if (bytes.length < 10 * 1024 * 1024) { // Only create preview for files under 10MB
+        dataUrl = await blobToDataUrl(blob);
+      }
 
       const timestamp = Date.now();
       const msgId = generateMsgId();
@@ -444,45 +465,79 @@ export async function mount(container, client, router, params) {
         fromMe: true,
         timestamp,
         fileName: file.name,
+        uploadProgress: isLargeFile ? 0 : undefined, // Track progress for large files
       };
 
       // Set the appropriate data URL field based on category
-      if (category === 'audio') {
-        msg.audioDataUrl = dataUrl;
-      } else if (category === 'video') {
-        msg.videoDataUrl = dataUrl;
-      } else if (category === 'image') {
-        msg.imageDataUrl = dataUrl;
+      if (dataUrl) {
+        if (category === 'audio') {
+          msg.audioDataUrl = dataUrl;
+        } else if (category === 'video') {
+          msg.videoDataUrl = dataUrl;
+        } else if (category === 'image') {
+          msg.imageDataUrl = dataUrl;
+        } else {
+          msg.fileDataUrl = dataUrl;
+        }
       } else {
-        msg.fileDataUrl = dataUrl;
+        // Large file - show placeholder
+        msg.attachmentPreview = `Uploading ${file.name} (${(bytes.length / 1024 / 1024).toFixed(1)}MB)...`;
       }
 
       messages.push(msg);
-      console.log('[Upload] UI updated with', category, 'attachment');
+      console.log('[Upload] UI updated with', category, 'attachment', isLargeFile ? '(chunked)' : '');
       rerender();
       scrollToBottom();
       attachListeners();
 
+      // Progress callback for large files
+      const onProgress = isLargeFile ? (progress) => {
+        const targetMsg = messages.find(m => m.id === msgId);
+        if (targetMsg) {
+          targetMsg.uploadProgress = progress.percent;
+          targetMsg.attachmentPreview = `Uploading ${progress.current}/${progress.total} chunks (${progress.percent}%)`;
+          rerender();
+        }
+      } : undefined;
+
       // Send and get mediaUrl back (JSON string)
-      console.log('[Upload] Calling sendAttachment to', username);
-      const mediaUrl = await client.sendAttachment(username, bytes, { contentType, fileName: file.name });
+      console.log('[Upload] Calling sendAttachment to', username, isLargeFile ? '(chunked)' : '');
+      const mediaUrl = await client.sendAttachment(username, bytes, { contentType, fileName: file.name, onProgress });
 
       // Parse and add filename to the mediaUrl for persistence
       const parsed = parseMediaUrl(mediaUrl);
       if (parsed?.ref) {
         parsed.ref.fileName = file.name;
       }
-      const mediaUrlWithName = parsed ? JSON.stringify(parsed.ref) : mediaUrl;
-      console.log('[Upload] sendAttachment returned:', parsed?.ref?.attachmentId || 'NO REF');
 
-      // Store to IndexedDB with mediaUrl for persistence (find by ID, not index)
-      if (mediaUrlWithName && parsed?.ref?.attachmentId) {
+      // Handle both chunked and single attachments
+      const isChunked = parsed?.isChunked;
+      const refId = isChunked ? parsed?.ref?.fileId : parsed?.ref?.attachmentId;
+      const mediaUrlWithName = parsed ? (isChunked
+        ? JSON.stringify({ ...parsed.ref, fileName: file.name })
+        : JSON.stringify(parsed.ref)) : mediaUrl;
+
+      console.log('[Upload] sendAttachment returned:', refId || 'NO REF', isChunked ? '(chunked)' : '');
+
+      // Store to IndexedDB with mediaUrl for persistence
+      if (mediaUrlWithName && refId) {
         const targetMsg = messages.find(m => m.id === msgId);
         if (targetMsg) {
           targetMsg.mediaUrl = mediaUrlWithName;
+          targetMsg.uploadProgress = undefined; // Clear progress
+          targetMsg.attachmentPreview = undefined;
+          // Reload dataUrl if we skipped it earlier
+          if (!targetMsg.imageDataUrl && !targetMsg.videoDataUrl && !targetMsg.audioDataUrl && !targetMsg.fileDataUrl) {
+            const displayUrl = await blobToDataUrl(blob);
+            if (category === 'audio') targetMsg.audioDataUrl = displayUrl;
+            else if (category === 'video') targetMsg.videoDataUrl = displayUrl;
+            else if (category === 'image') targetMsg.imageDataUrl = displayUrl;
+            else targetMsg.fileDataUrl = displayUrl;
+          }
+          rerender();
         }
         await client.messageStore.addMessage(username, {
-          messageId: `att_${parsed.ref.attachmentId}`,
+          messageId: `att_${refId}`,
           content: '',
           mediaUrl: mediaUrlWithName,
           isSent: true,

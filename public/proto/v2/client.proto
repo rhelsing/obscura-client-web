@@ -46,6 +46,9 @@ message ClientMessage {
   // Attachment reference (E2E encrypted key sharing)
   ContentReference content_reference = 45;
 
+  // Chunked attachment reference (for large files)
+  ChunkedContentReference chunked_content_reference = 46;
+
   enum Type {
     // Base messaging (0-9)
     TEXT = 0;
@@ -72,6 +75,7 @@ message ClientMessage {
     CONTENT_REFERENCE = 25;  // E2E encrypted attachment key sharing
     SYNC_REQUEST = 26;   // Request full sync from another device
     FRIEND_SYNC = 27;    // Sync friend changes to own devices
+    CHUNKED_CONTENT_REFERENCE = 28;  // Large file (chunked attachment)
 
     // ORM Layer (30-39)
     MODEL_SYNC = 30;     // CRDT model operation (create/update/delete)
@@ -190,6 +194,27 @@ message ContentReference {
   string content_type = 5;          // MIME type (e.g., "image/jpeg")
   uint64 size_bytes = 6;            // Original size for progress/preview
   string file_name = 7;             // Original filename for file attachments
+}
+
+// Reference to a chunked large file (>950KB, up to 100MB)
+// Each chunk is encrypted separately with its own key
+message ChunkedContentReference {
+  string file_id = 1;               // Unique ID for the entire file
+  repeated ChunkInfo chunks = 2;    // Ordered list of chunk references
+  bytes complete_hash = 3;          // SHA-256 of reassembled plaintext
+  string content_type = 4;          // MIME type
+  uint64 total_size_bytes = 5;      // Total file size
+  string file_name = 6;             // Original filename
+}
+
+// Single chunk within a chunked file
+message ChunkInfo {
+  uint32 index = 1;                 // Chunk position (0-based)
+  string attachment_id = 2;         // Server attachment ID for this chunk
+  bytes content_key = 3;            // AES-256-GCM key (32 bytes)
+  bytes nonce = 4;                  // AES-GCM nonce (12 bytes)
+  bytes chunk_hash = 5;             // SHA-256 of this chunk's plaintext
+  uint64 size_bytes = 6;            // Size of this chunk
 }
 
 // =============================================================================

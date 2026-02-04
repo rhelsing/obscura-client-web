@@ -5,9 +5,9 @@
  */
 
 /**
- * Parse mediaUrl - could be a direct URL or a JSON attachment reference
+ * Parse mediaUrl - could be a direct URL, single attachment ref, or chunked ref
  * @param {string} mediaUrl - The stored mediaUrl value
- * @returns {object|null} - { isRef: true, ref: {...} } or { isRef: false, url: '...' } or null
+ * @returns {object|null} - { isRef: true, isChunked: false, ref: {...} } or { isRef: true, isChunked: true, ref: {...} } or { isRef: false, url: '...' } or null
  */
 export function parseMediaUrl(mediaUrl) {
   if (!mediaUrl) return null;
@@ -15,9 +15,35 @@ export function parseMediaUrl(mediaUrl) {
   // Try to parse as JSON (encrypted attachment format)
   try {
     const parsed = JSON.parse(mediaUrl);
+
+    // Chunked attachment (large file)
+    if (parsed.chunks && Array.isArray(parsed.chunks)) {
+      return {
+        isRef: true,
+        isChunked: true,
+        ref: {
+          fileId: parsed.fileId,
+          chunks: parsed.chunks.map(c => ({
+            index: c.index,
+            attachmentId: c.attachmentId,
+            contentKey: new Uint8Array(c.contentKey),
+            nonce: new Uint8Array(c.nonce),
+            chunkHash: c.chunkHash ? new Uint8Array(c.chunkHash) : undefined,
+            sizeBytes: c.sizeBytes,
+          })),
+          completeHash: parsed.completeHash ? new Uint8Array(parsed.completeHash) : undefined,
+          contentType: parsed.contentType || 'application/octet-stream',
+          totalSizeBytes: parsed.totalSizeBytes,
+          fileName: parsed.fileName,
+        },
+      };
+    }
+
+    // Single attachment
     if (parsed.attachmentId && parsed.contentKey) {
       return {
         isRef: true,
+        isChunked: false,
         ref: {
           attachmentId: parsed.attachmentId,
           contentKey: new Uint8Array(parsed.contentKey),
@@ -57,5 +83,30 @@ export function createMediaUrl(ref) {
     contentType: ref.contentType,
     sizeBytes: ref.sizeBytes,
     fileName: ref.fileName, // Preserve filename for file attachments
+  });
+}
+
+/**
+ * Create mediaUrl JSON string from chunkedContentReference object
+ * @param {object} ref - ChunkedContentReference with chunk array
+ * @returns {string} - JSON string safe for IndexedDB storage
+ */
+export function createChunkedMediaUrl(ref) {
+  if (!ref || !ref.chunks || ref.chunks.length === 0) return null;
+
+  return JSON.stringify({
+    fileId: ref.fileId,
+    chunks: ref.chunks.map(c => ({
+      index: c.index,
+      attachmentId: c.attachmentId,
+      contentKey: c.contentKey ? Array.from(c.contentKey) : undefined,
+      nonce: c.nonce ? Array.from(c.nonce) : undefined,
+      chunkHash: c.chunkHash ? Array.from(c.chunkHash) : undefined,
+      sizeBytes: c.sizeBytes,
+    })),
+    completeHash: ref.completeHash ? Array.from(ref.completeHash) : undefined,
+    contentType: ref.contentType,
+    totalSizeBytes: ref.totalSizeBytes,
+    fileName: ref.fileName,
   });
 }

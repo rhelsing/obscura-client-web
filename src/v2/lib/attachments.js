@@ -10,6 +10,8 @@
 
 import { encryptAttachment, decryptAttachment } from '../crypto/aes.js';
 import { logger } from './logger.js';
+import { ChunkedUploader } from './chunkedUpload.js';
+import { MAX_UPLOAD_SIZE } from './media.js';
 
 export class AttachmentManager {
   constructor(opts = {}) {
@@ -137,5 +139,63 @@ export class AttachmentManager {
     }
 
     return decrypted;
+  }
+
+  /**
+   * Smart upload - automatically uses chunked upload for large files
+   * @param {Blob|ArrayBuffer|Uint8Array} content - Content to upload
+   * @param {object} opts - { contentType, fileName, onProgress }
+   * @returns {Promise<ContentReference|ChunkedContentReference>}
+   */
+  async uploadSmart(content, opts = {}) {
+    // Get content size
+    let size;
+    if (content instanceof Uint8Array) {
+      size = content.length;
+    } else if (content instanceof ArrayBuffer) {
+      size = content.byteLength;
+    } else if (content instanceof Blob) {
+      size = content.size;
+    } else {
+      throw new Error('Invalid content type');
+    }
+
+    // Use chunked upload for large files
+    if (size > MAX_UPLOAD_SIZE) {
+      console.log(`[Attachments] Large file (${(size / 1024 / 1024).toFixed(1)}MB), using chunked upload`);
+      const chunked = new ChunkedUploader(this);
+      return {
+        isChunked: true,
+        ref: await chunked.upload(content, opts),
+      };
+    }
+
+    // Regular single upload
+    const ref = await this.upload(content);
+    if (opts.fileName) {
+      ref.fileName = opts.fileName;
+    }
+    return {
+      isChunked: false,
+      ref,
+    };
+  }
+
+  /**
+   * Smart download - handles both single and chunked attachments
+   * @param {object} refData - { isChunked, ref } from uploadSmart or parseMediaUrl
+   * @param {object} opts - { onProgress }
+   * @returns {Promise<Uint8Array>}
+   */
+  async downloadSmart(refData, opts = {}) {
+    if (refData.isChunked) {
+      console.log(`[Attachments] Chunked download: ${refData.ref.chunks.length} chunks`);
+      const chunked = new ChunkedUploader(this);
+      return chunked.download(refData.ref, opts);
+    }
+
+    // Regular single download
+    const result = await this.download(refData.ref);
+    return result instanceof Uint8Array ? result : new Uint8Array(result);
   }
 }

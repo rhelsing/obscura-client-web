@@ -24,7 +24,7 @@ import {
 import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
 import { createSchema } from '../orm/index.js';
 import { logger } from './logger.js';
-import { createMediaUrl } from './attachmentUtils.js';
+import { createMediaUrl, createChunkedMediaUrl } from './attachmentUtils.js';
 
 // Default reconnect settings
 const RECONNECT_DELAY_MS = 1000;
@@ -384,6 +384,7 @@ export class ObscuraClient {
         messageId: message.messageId || `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`,
         content: message.text || message.content,
         contentReference: message.contentReference, // For attachments
+        mediaUrl: message.mediaUrl, // For chunked attachments
         timestamp: message.timestamp || Date.now(),
         isSent: message.isSent || false,
         authorDeviceId: message.authorDeviceId || this.deviceUUID,
@@ -887,6 +888,27 @@ export class ObscuraClient {
         });
         break;
 
+      case 'CHUNKED_CONTENT_REFERENCE':
+        // Large file - convert chunked ref to mediaUrl for storage
+        const chunkedConversationId = this.friends.getUsernameFromServerId(msg.sourceUserId) || msg.sourceUserId;
+        const chunkedMediaUrl = createChunkedMediaUrl(msg.chunkedContentReference);
+        await this._persistMessage(chunkedConversationId, {
+          from: msg.sourceUserId,
+          conversationId: chunkedConversationId,
+          type: 'ATTACHMENT',
+          mediaUrl: chunkedMediaUrl, // Store as mediaUrl JSON string
+          timestamp: msg.timestamp,
+          isSent: false,
+          authorDeviceId: msg.sourceUserId,
+        });
+        this._emit('attachment', {
+          from: msg.sourceUserId,
+          conversationId: chunkedConversationId,
+          chunkedContentReference: msg.chunkedContentReference,
+          timestamp: msg.timestamp,
+        });
+        break;
+
       case 'MODEL_SYNC':
         // Route to ORM sync manager - await persistence before ACK
         if (this._ormSyncManager) {
@@ -1066,46 +1088,56 @@ export class ObscuraClient {
       console.log('[sendAttachment] Wrapped in Blob with type:', opts.contentType);
     }
 
-    // Upload and encrypt
-    const ref = await this.attachments.upload(uploadContent);
-    console.log('[sendAttachment] Upload returned ref.contentType:', ref.contentType);
+    // Upload using smart method (auto-detects large files for chunked upload)
+    const result = await this.attachments.uploadSmart(uploadContent, {
+      contentType: opts.contentType,
+      fileName: opts.fileName,
+      onProgress: opts.onProgress,
+    });
 
-    // Add fileName to ref if provided (for file attachments)
-    if (opts.fileName) {
-      ref.fileName = opts.fileName;
-    }
+    const { isChunked, ref } = result;
+    console.log('[sendAttachment] Upload complete, isChunked:', isChunked);
 
-    // Create mediaUrl JSON string for storage (no Uint8Array serialization issues)
-    const mediaUrl = createMediaUrl(ref);
+    // Create mediaUrl JSON string for storage
+    const mediaUrl = isChunked
+      ? createChunkedMediaUrl(ref)
+      : createMediaUrl(ref);
 
-    // Fan-out ContentReference to all friend devices (includes fileName now)
+    // Fan-out to all friend devices
     const targets = this.friends.getFanOutTargets(friendUsername);
     const timestamp = Date.now();
 
+    const messageType = isChunked ? 'CHUNKED_CONTENT_REFERENCE' : 'CONTENT_REFERENCE';
+    const messagePayload = isChunked
+      ? { chunkedContentReference: ref }
+      : { contentReference: ref };
+
     for (const targetUserId of targets) {
       await this.messenger.sendMessage(targetUserId, {
-        type: 'CONTENT_REFERENCE',
-        contentReference: ref,
+        type: messageType,
+        ...messagePayload,
         timestamp,
       });
     }
 
     // Self-sync to own devices (include mediaUrl for storage)
     const selfTargets = this.devices.getSelfSyncTargets();
+    const messageId = isChunked ? ref.fileId : ref.attachmentId;
+
     for (const targetUserId of selfTargets) {
       await this.messenger.sendMessage(targetUserId, {
         type: 'SENT_SYNC',
         sentSync: {
           conversationId: friendUsername,
-          messageId: ref.attachmentId,
+          messageId,
           timestamp,
-          mediaUrl, // JSON string instead of contentReference object
+          mediaUrl, // JSON string
           authorDeviceId: this.userId,
         },
       });
     }
 
-    return mediaUrl; // Return JSON string instead of ref object
+    return mediaUrl; // Return JSON string
   }
 
   /**

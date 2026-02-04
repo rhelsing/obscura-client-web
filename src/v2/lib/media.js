@@ -161,6 +161,88 @@ export function getMediaCategory(mimeType) {
   return 'file';
 }
 
+// Image compression constants
+const MAX_IMAGE_SIZE = 1 * 1024 * 1024; // 1MB
+const MAX_IMAGE_DIMENSION = 2048; // Max width/height in pixels
+
+/**
+ * Compress an image to fit within size and dimension limits
+ * - Scales down if either dimension > maxDimension
+ * - Iteratively reduces JPEG quality until under maxSizeBytes
+ *
+ * @param {Blob} blob - Image blob to compress
+ * @param {number} maxSizeBytes - Target max size (default 1MB)
+ * @param {number} maxDimension - Max width/height (default 2048px)
+ * @returns {Promise<Blob>} Compressed image blob (JPEG)
+ */
+export async function compressImage(blob, maxSizeBytes = MAX_IMAGE_SIZE, maxDimension = MAX_IMAGE_DIMENSION) {
+  // Skip non-images
+  if (!blob.type?.startsWith('image/')) return blob;
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(blob);
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+
+      // Calculate target dimensions (scale down if needed)
+      let { naturalWidth: w, naturalHeight: h } = img;
+      const needsResize = w > maxDimension || h > maxDimension;
+
+      if (needsResize) {
+        const scale = Math.min(maxDimension / w, maxDimension / h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+        console.log(`[Media] Resizing: ${img.naturalWidth}x${img.naturalHeight} → ${w}x${h}`);
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+
+      // Try progressively lower quality until under size limit
+      const qualities = [0.85, 0.7, 0.5, 0.3];
+
+      function tryCompress(qualityIndex) {
+        const quality = qualities[qualityIndex];
+        canvas.toBlob((result) => {
+          if (!result) {
+            console.warn('[Media] toBlob returned null');
+            resolve(blob);
+            return;
+          }
+          if (result.size <= maxSizeBytes || qualityIndex >= qualities.length - 1) {
+            console.log(`[Media] Compressed: ${(blob.size / 1024).toFixed(0)}KB → ${(result.size / 1024).toFixed(0)}KB (q=${quality})`);
+            resolve(result);
+          } else {
+            console.log(`[Media] Still too large at q=${quality}: ${(result.size / 1024).toFixed(0)}KB, trying lower...`);
+            tryCompress(qualityIndex + 1);
+          }
+        }, 'image/jpeg', quality);
+      }
+
+      // If already small enough and no resize needed, return original
+      if (blob.size <= maxSizeBytes && !needsResize) {
+        console.log(`[Media] Image already small enough: ${(blob.size / 1024).toFixed(0)}KB`);
+        resolve(blob);
+      } else {
+        tryCompress(0);
+      }
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      console.warn('[Media] Failed to load image for compression');
+      resolve(blob); // Return original on error
+    };
+
+    img.src = url;
+  });
+}
+
 /**
  * AudioRecorder - Simple wrapper around MediaRecorder for voice messages
  */

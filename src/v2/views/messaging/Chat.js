@@ -10,7 +10,7 @@
  */
 import { navigate, markConversationRead } from '../index.js';
 import { parseMediaUrl, createMediaUrl } from '../../lib/attachmentUtils.js';
-import { AudioRecorder, getMediaCategory } from '../../lib/media.js';
+import { AudioRecorder, getMediaCategory, compressImage } from '../../lib/media.js';
 
 let cleanup = null;
 let messages = [];
@@ -416,6 +416,17 @@ export async function mount(container, client, router, params) {
         blob = new Blob([bytes], { type: contentType });
       }
       console.log('[Upload] File ready:', bytes.length, 'bytes, type:', contentType);
+
+      // Compress images if too large (>1MB or >2048px dimension)
+      if (contentType.startsWith('image/')) {
+        const compressed = await compressImage(blob);
+        if (compressed !== blob) {
+          blob = compressed;
+          bytes = new Uint8Array(await compressed.arrayBuffer());
+          contentType = 'image/jpeg'; // compressImage outputs JPEG
+          console.log('[Upload] After compression:', bytes.length, 'bytes');
+        }
+      }
 
       // Convert to data URL for immediate display
       const dataUrl = await blobToDataUrl(blob);

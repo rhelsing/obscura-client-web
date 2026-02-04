@@ -6,7 +6,7 @@
  * - Hold capture button = video recording
  */
 import { navigate } from '../index.js';
-import { VideoRecorder } from '../../lib/media.js';
+import { VideoRecorder, compressImage } from '../../lib/media.js';
 
 let cleanup = null;
 const HOLD_THRESHOLD_MS = 300; // Hold for 300ms to start video
@@ -401,8 +401,14 @@ export async function mount(container, client, router) {
         renderPreviewMode();
 
         try {
+          // Compress photo if needed (skip for video)
+          let blobToUpload = capturedBlob;
+          if (capturedMediaType === 'photo') {
+            blobToUpload = await compressImage(capturedBlob);
+          }
+
           // Upload attachment ONCE (shared across all recipients)
-          const bytes = new Uint8Array(await capturedBlob.arrayBuffer());
+          const bytes = new Uint8Array(await blobToUpload.arrayBuffer());
           const ref = await client.attachments.upload(bytes);
 
           // Get caption

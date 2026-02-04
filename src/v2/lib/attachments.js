@@ -148,14 +148,18 @@ export class AttachmentManager {
    * @returns {Promise<ContentReference|ChunkedContentReference>}
    */
   async uploadSmart(content, opts = {}) {
-    // Get content size
+    // Get content size and bytes
     let size;
+    let bytes;
     if (content instanceof Uint8Array) {
       size = content.length;
+      bytes = content;
     } else if (content instanceof ArrayBuffer) {
       size = content.byteLength;
+      bytes = new Uint8Array(content);
     } else if (content instanceof Blob) {
       size = content.size;
+      bytes = new Uint8Array(await content.arrayBuffer());
     } else {
       throw new Error('Invalid content type');
     }
@@ -164,9 +168,26 @@ export class AttachmentManager {
     if (size > MAX_UPLOAD_SIZE) {
       console.log(`[Attachments] Large file (${(size / 1024 / 1024).toFixed(1)}MB), using chunked upload`);
       const chunked = new ChunkedUploader(this);
+      const ref = await chunked.upload(content, opts);
+
+      // Cache the FULL assembled file by fileId (sender doesn't need to re-download chunks)
+      if (this.cache && ref.fileId) {
+        await this.cache.put(ref.fileId, bytes, {
+          contentType: ref.contentType || opts.contentType,
+          sizeBytes: ref.totalSizeBytes,
+        });
+        console.log('[Attachments] Cached full file on upload:', ref.fileId.slice(0, 16));
+
+        // Delete individual chunk caches - we have the full file now
+        for (const chunk of ref.chunks) {
+          await this.cache.delete(chunk.attachmentId).catch(() => {});
+        }
+        console.log(`[Attachments] Deleted ${ref.chunks.length} chunk caches`);
+      }
+
       return {
         isChunked: true,
-        ref: await chunked.upload(content, opts),
+        ref,
       };
     }
 
@@ -189,9 +210,35 @@ export class AttachmentManager {
    */
   async downloadSmart(refData, opts = {}) {
     if (refData.isChunked) {
+      // Check if we have the full file cached (sender or previous download)
+      if (this.cache && refData.ref.fileId) {
+        const cached = await this.cache.get(refData.ref.fileId);
+        if (cached) {
+          console.log('[Attachments] Full file cache hit:', refData.ref.fileId.slice(0, 16));
+          return cached instanceof Uint8Array ? cached : new Uint8Array(cached);
+        }
+      }
+
       console.log(`[Attachments] Chunked download: ${refData.ref.chunks.length} chunks`);
       const chunked = new ChunkedUploader(this);
-      return chunked.download(refData.ref, opts);
+      const result = await chunked.download(refData.ref, opts);
+
+      // Cache the full assembled file by fileId for future access
+      if (this.cache && refData.ref.fileId) {
+        await this.cache.put(refData.ref.fileId, result, {
+          contentType: refData.ref.contentType,
+          sizeBytes: refData.ref.totalSizeBytes,
+        });
+        console.log('[Attachments] Cached full file after download:', refData.ref.fileId.slice(0, 16));
+
+        // Delete individual chunk caches - we have the full file now
+        for (const chunk of refData.ref.chunks) {
+          await this.cache.delete(chunk.attachmentId).catch(() => {});
+        }
+        console.log(`[Attachments] Deleted ${refData.ref.chunks.length} chunk caches`);
+      }
+
+      return result;
     }
 
     // Regular single download

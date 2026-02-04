@@ -275,11 +275,160 @@ test.describe('Scenario 22: Chunked File Upload', () => {
     expect(contentVerified.at1000).toBe(contentVerified.expectedAt1000);
     expect(contentVerified.last).toBe(contentVerified.expectedLast);
 
+    // --- Test 4: Bob refreshes and file is still there ---
+    console.log('\n=== Test 4: Bob refreshes page, file still loads ===');
+
+    await bobPage.reload();
+    await bobPage.waitForSelector('.chat', { timeout: 30000 });
+    await delay(2000);
+
+    // Wait for message to load from IndexedDB and download chunks
+    let reloadDownloadComplete = false;
+    for (let i = 0; i < 60; i++) {
+      await delay(1000);
+
+      const complete = await bobPage.evaluate(() => {
+        const msgs = document.querySelectorAll('.message.received');
+        for (const msg of msgs) {
+          const fileLink = msg.querySelector('.file-download');
+          const loading = msg.querySelector('.attachment-loading');
+          const error = msg.querySelector('.attachment-error');
+          if (error) return 'error';
+          if (fileLink && !loading) return true;
+        }
+        return false;
+      });
+      if (complete === 'error') {
+        console.log('ERROR: Attachment failed to load after refresh!');
+        break;
+      }
+      if (complete) {
+        reloadDownloadComplete = true;
+        break;
+      }
+      const progress = await bobPage.evaluate(() => {
+        const loadingEl = document.querySelector('.attachment-loading');
+        return loadingEl?.textContent || 'waiting...';
+      });
+      console.log('Reload download progress:', progress);
+    }
+
+    expect(reloadDownloadComplete).toBe(true);
+    console.log('File still loads after refresh!');
+
+    // Verify integrity again after reload
+    const reloadFileDataUrl = await bobPage.evaluate(() => {
+      const link = document.querySelector('.file-download');
+      return link?.href || null;
+    });
+
+    expect(reloadFileDataUrl).toBeTruthy();
+    const reloadFileSize = await bobPage.evaluate((dataUrl) => {
+      const base64 = dataUrl.split(',')[1];
+      const binary = atob(base64);
+      return binary.length;
+    }, reloadFileDataUrl);
+
+    console.log(`After reload - file size: ${reloadFileSize} bytes`);
+    expect(reloadFileSize).toBe(testFileSize);
+
+    // --- Test 5: Bob clicks download link ---
+    console.log('\n=== Test 5: Bob clicks download link ===');
+
+    // Set up download listener
+    const [download] = await Promise.all([
+      bobPage.waitForEvent('download'),
+      bobPage.click('.file-download'),
+    ]);
+
+    // Get the downloaded file content
+    const downloadPath = await download.path();
+    const downloadedFileName = download.suggestedFilename();
+    console.log(`Downloaded file: ${downloadedFileName}`);
+    expect(downloadedFileName).toBe('test-2mb.bin');
+
+    // Verify downloaded file size via stream
+    const downloadStream = await download.createReadStream();
+    const chunks = [];
+    for await (const chunk of downloadStream) {
+      chunks.push(chunk);
+    }
+    const downloadedContent = Buffer.concat(chunks);
+    console.log(`Downloaded content size: ${downloadedContent.length} bytes`);
+    expect(downloadedContent.length).toBe(testFileSize);
+    console.log('Bob download click: VERIFIED');
+
+    // --- Test 6: Alice (sender) refreshes and file still loads ---
+    console.log('\n=== Test 6: Alice refreshes page, sent file still loads ===');
+
+    await alicePage.reload();
+    await alicePage.waitForSelector('.chat', { timeout: 30000 });
+    await delay(2000);
+
+    let aliceReloadComplete = false;
+    for (let i = 0; i < 60; i++) {
+      await delay(1000);
+
+      const complete = await alicePage.evaluate(() => {
+        const msgs = document.querySelectorAll('.message.sent');
+        for (const msg of msgs) {
+          const fileLink = msg.querySelector('.file-download');
+          const loading = msg.querySelector('.attachment-loading');
+          const error = msg.querySelector('.attachment-error');
+          if (error) return 'error';
+          if (fileLink && !loading) return true;
+        }
+        return false;
+      });
+      if (complete === 'error') {
+        console.log('ERROR: Sender attachment failed to load after refresh!');
+        break;
+      }
+      if (complete) {
+        aliceReloadComplete = true;
+        break;
+      }
+      const progress = await alicePage.evaluate(() => {
+        const loadingEl = document.querySelector('.attachment-loading');
+        return loadingEl?.textContent || 'waiting...';
+      });
+      console.log('Alice reload progress:', progress);
+    }
+
+    expect(aliceReloadComplete).toBe(true);
+    console.log('Sender file still loads after refresh!');
+
+    // --- Test 7: Alice clicks download link ---
+    console.log('\n=== Test 7: Alice clicks download link ===');
+
+    const [aliceDownload] = await Promise.all([
+      alicePage.waitForEvent('download'),
+      alicePage.click('.file-download'),
+    ]);
+
+    const aliceDownloadedFileName = aliceDownload.suggestedFilename();
+    console.log(`Alice downloaded file: ${aliceDownloadedFileName}`);
+    expect(aliceDownloadedFileName).toBe('test-2mb.bin');
+
+    const aliceDownloadStream = await aliceDownload.createReadStream();
+    const aliceChunks = [];
+    for await (const chunk of aliceDownloadStream) {
+      aliceChunks.push(chunk);
+    }
+    const aliceDownloadedContent = Buffer.concat(aliceChunks);
+    console.log(`Alice downloaded content size: ${aliceDownloadedContent.length} bytes`);
+    expect(aliceDownloadedContent.length).toBe(testFileSize);
+    console.log('Alice download click: VERIFIED');
+
     console.log('\n=== SCENARIO 22 COMPLETE ===');
     console.log('Chunked upload/download verified:');
     console.log(`- File size: ${testFileSize} bytes (2MB)`);
     console.log(`- Chunks: ~${Math.ceil(testFileSize / (950 * 1024))}`);
     console.log('- Integrity: VERIFIED');
+    console.log('- Receiver reload: VERIFIED');
+    console.log('- Sender reload: VERIFIED');
+    console.log('- Receiver download click: VERIFIED');
+    console.log('- Sender download click: VERIFIED');
 
     await aliceContext.close();
     await bobContext.close();

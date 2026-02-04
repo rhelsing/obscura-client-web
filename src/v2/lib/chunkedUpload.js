@@ -294,6 +294,11 @@ export class ChunkedUploader {
         : new Uint8Array(ref.completeHash);
 
       if (!constantTimeCompare(actualHash, expectedHash)) {
+        // Debug logging for hash mismatches
+        console.error('[ChunkedDownload] Hash mismatch!');
+        console.error('[ChunkedDownload] Expected:', Array.from(expectedHash).map(b => b.toString(16).padStart(2, '0')).join(''));
+        console.error('[ChunkedDownload] Actual:', Array.from(actualHash).map(b => b.toString(16).padStart(2, '0')).join(''));
+        console.error('[ChunkedDownload] Reassembled size:', reassembled.length, 'Expected:', ref.totalSizeBytes);
         throw new Error('Complete file hash mismatch');
       }
     }

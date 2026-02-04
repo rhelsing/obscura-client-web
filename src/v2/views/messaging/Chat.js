@@ -10,7 +10,7 @@
  */
 import { navigate, markConversationRead } from '../index.js';
 import { parseMediaUrl, createMediaUrl } from '../../lib/attachmentUtils.js';
-import { AudioRecorder, getMediaCategory, compressImage, gzipCompress, maybeDecompress, MAX_UPLOAD_SIZE } from '../../lib/media.js';
+import { AudioRecorder, getMediaCategory, compressImage, gzipCompress, maybeDecompress, MAX_UPLOAD_SIZE, convertHeicToJpeg, isHeic } from '../../lib/media.js';
 
 let cleanup = null;
 let messages = [];
@@ -120,47 +120,6 @@ function blobToDataUrl(blob) {
   });
 }
 
-// Helper: Convert image to JPEG using canvas (handles HEIC and other formats)
-async function convertToJpeg(file) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-
-      canvas.toBlob(blob => {
-        URL.revokeObjectURL(url);
-        if (blob) {
-          resolve(blob);
-        } else {
-          reject(new Error('Canvas toBlob failed'));
-        }
-      }, 'image/jpeg', 0.9);
-    };
-
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error('Failed to load image'));
-    };
-
-    img.src = url;
-  });
-}
-
-// Check if file needs conversion (HEIC or other non-web formats)
-function needsConversion(file) {
-  const type = file.type.toLowerCase();
-  return type === 'image/heic' ||
-         type === 'image/heif' ||
-         type === '' ||  // Some browsers don't report HEIC type
-         (file.name && /\.(heic|heif)$/i.test(file.name));
-}
 
 // Helper: Generate unique message ID
 function generateMsgId() {
@@ -405,13 +364,27 @@ export async function mount(container, client, router, params) {
       let contentType = file.type || 'application/octet-stream';
 
       // Convert HEIC/HEIF (iPhone camera photos) to JPEG
-      if (file.type.startsWith('image/') && needsConversion(file)) {
+      if (isHeic(file)) {
         console.log('[Upload] Converting HEIC/HEIF to JPEG');
-        blob = await convertToJpeg(file);
-        const buffer = await blob.arrayBuffer();
-        bytes = new Uint8Array(buffer);
-        contentType = 'image/jpeg';
-      } else {
+        try {
+          const result = await convertHeicToJpeg(file);
+          blob = result.blob;
+          if (!result.converted) {
+            // Conversion failed - HEIC not supported on this browser
+            alert('HEIC images are not supported on this browser. Please convert to JPEG/PNG first, or use Safari.');
+            input.value = '';
+            return;
+          }
+          const buffer = await blob.arrayBuffer();
+          bytes = new Uint8Array(buffer);
+          contentType = 'image/jpeg';
+        } catch (err) {
+          console.error('[Upload] HEIC conversion failed:', err);
+          alert('Failed to convert HEIC image. Please convert to JPEG/PNG first.');
+          input.value = '';
+          return;
+        }
+      } else if (file.type.startsWith('image/')) {
         console.log('[Upload] Reading file as ArrayBuffer');
         const buffer = await file.arrayBuffer();
         bytes = new Uint8Array(buffer);

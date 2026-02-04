@@ -18,7 +18,7 @@ export function render({ mode = 'camera', capturedPreview = null, mediaType = 'p
       <div class="view pix-camera pix-camera--preview">
         <div class="pix-camera__preview-container">
           ${isVideo
-            ? `<video src="${capturedPreview}" class="pix-camera__preview-video" autoplay loop muted playsinline></video>`
+            ? `<video src="${capturedPreview}" class="pix-camera__preview-video" autoplay loop playsinline></video>`
             : `<img src="${capturedPreview}" alt="Captured" class="pix-camera__preview-image" />`
           }
           <input

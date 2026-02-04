@@ -25,7 +25,7 @@ export function render({ pix, mediaUrl, mediaType, progress, displayName } = {})
     if (mediaType === 'video') {
       // Video: autoplay, loop, muted for auto-start, with controls as fallback
       console.log('[PixViewer] Rendering VIDEO element');
-      mediaHtml = `<video src="${mediaUrl}" class="pix-viewer__video" autoplay loop muted playsinline preload="auto"></video>`;
+      mediaHtml = `<video src="${mediaUrl}" class="pix-viewer__video" autoplay loop playsinline preload="auto"></video>`;
     } else if (mediaType === 'audio') {
       mediaHtml = `<audio src="${mediaUrl}" class="pix-viewer__audio" controls autoplay></audio>`;
     } else {

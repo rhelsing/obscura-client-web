@@ -3,7 +3,7 @@
  * Full-screen viewer for received pix with auto-countdown timer
  */
 import { navigate, refreshPixBadge } from '../index.js';
-import { getMediaCategory } from '../../lib/media.js';
+import { getMediaCategory, maybeDecompress } from '../../lib/media.js';
 
 let cleanup = null;
 
@@ -144,8 +144,10 @@ export async function mount(container, client, router, params = {}) {
           contentType
         };
         console.log('[PixViewer] Downloading attachment...');
-        const bytes = await client.attachments.download(contentRef);
+        let bytes = await client.attachments.download(contentRef);
         console.log('[PixViewer] Downloaded bytes:', bytes.length);
+        // Auto-decompress if gzipped
+        bytes = await maybeDecompress(bytes);
         const blob = new Blob([bytes], { type: contentType });
         console.log('[PixViewer] Created blob:', blob.size, 'bytes, type:', blob.type);
         const url = URL.createObjectURL(blob);

@@ -161,9 +161,76 @@ export function getMediaCategory(mimeType) {
   return 'file';
 }
 
+// File size limit (nginx limit is ~1MB)
+export const MAX_UPLOAD_SIZE = 950 * 1024; // 950KB - single source of truth
+
 // Image compression constants
-const MAX_IMAGE_SIZE = 1 * 1024 * 1024; // 1MB
+const MAX_IMAGE_SIZE = MAX_UPLOAD_SIZE;
 const MAX_IMAGE_DIMENSION = 2048; // Max width/height in pixels
+
+/**
+ * Compress arbitrary data using gzip
+ * @param {Uint8Array} data - Data to compress
+ * @returns {Promise<{compressed: Uint8Array, wasCompressed: boolean}>}
+ */
+export async function gzipCompress(data) {
+  try {
+    const stream = new Blob([data]).stream();
+    const compressedStream = stream.pipeThrough(new CompressionStream('gzip'));
+    const compressedBlob = await new Response(compressedStream).blob();
+    const compressed = new Uint8Array(await compressedBlob.arrayBuffer());
+
+    // Only use compressed if it's actually smaller
+    if (compressed.length < data.length) {
+      console.log(`[Media] Gzip: ${(data.length / 1024).toFixed(0)}KB → ${(compressed.length / 1024).toFixed(0)}KB`);
+      return { compressed, wasCompressed: true };
+    }
+    console.log(`[Media] Gzip didn't help (${(data.length / 1024).toFixed(0)}KB → ${(compressed.length / 1024).toFixed(0)}KB)`);
+    return { compressed: data, wasCompressed: false };
+  } catch (err) {
+    console.warn('[Media] Gzip compression failed:', err);
+    return { compressed: data, wasCompressed: false };
+  }
+}
+
+/**
+ * Check if data is gzip compressed (magic bytes: 0x1f 0x8b)
+ * @param {Uint8Array} data
+ * @returns {boolean}
+ */
+export function isGzipped(data) {
+  return data.length >= 2 && data[0] === 0x1f && data[1] === 0x8b;
+}
+
+/**
+ * Decompress gzip data
+ * @param {Uint8Array} data - Compressed data
+ * @returns {Promise<Uint8Array>}
+ */
+export async function gzipDecompress(data) {
+  try {
+    const stream = new Blob([data]).stream();
+    const decompressedStream = stream.pipeThrough(new DecompressionStream('gzip'));
+    const decompressedBlob = await new Response(decompressedStream).blob();
+    return new Uint8Array(await decompressedBlob.arrayBuffer());
+  } catch (err) {
+    console.warn('[Media] Gzip decompression failed:', err);
+    return data; // Return original if decompression fails
+  }
+}
+
+/**
+ * Auto-decompress if gzipped (detects via magic bytes)
+ * @param {Uint8Array} data
+ * @returns {Promise<Uint8Array>}
+ */
+export async function maybeDecompress(data) {
+  if (isGzipped(data)) {
+    console.log('[Media] Detected gzip, decompressing...');
+    return gzipDecompress(data);
+  }
+  return data;
+}
 
 /**
  * Compress an image to fit within size and dimension limits

@@ -10,7 +10,7 @@
  */
 import { navigate, markConversationRead } from '../index.js';
 import { parseMediaUrl, createMediaUrl } from '../../lib/attachmentUtils.js';
-import { AudioRecorder, getMediaCategory, compressImage } from '../../lib/media.js';
+import { AudioRecorder, getMediaCategory, compressImage, gzipCompress, maybeDecompress, MAX_UPLOAD_SIZE } from '../../lib/media.js';
 
 let cleanup = null;
 let messages = [];
@@ -307,7 +307,9 @@ export async function mount(container, client, router, params) {
           m.downloading = false;
           return;
         }
-        const decrypted = await client.attachments.download(parsed.ref);
+        let decrypted = await client.attachments.download(parsed.ref);
+        // Auto-decompress if gzipped (detected via magic bytes)
+        decrypted = await maybeDecompress(decrypted);
         const contentType = parsed.ref.contentType || 'image/jpeg';
         console.log('[Chat] Downloaded attachment, contentType:', contentType, 'from mediaUrl');
         const blob = new Blob([decrypted], { type: contentType });
@@ -417,7 +419,7 @@ export async function mount(container, client, router, params) {
       }
       console.log('[Upload] File ready:', bytes.length, 'bytes, type:', contentType);
 
-      // Compress images if too large (>1MB or >2048px dimension)
+      // Compress images if too large
       if (contentType.startsWith('image/')) {
         const compressed = await compressImage(blob);
         if (compressed !== blob) {
@@ -426,6 +428,33 @@ export async function mount(container, client, router, params) {
           contentType = 'image/jpeg'; // compressImage outputs JPEG
           console.log('[Upload] After compression:', bytes.length, 'bytes');
         }
+      }
+
+      // For non-images over limit, try gzip compression
+      // (Images use canvas compression only - no gzip)
+      if (!contentType.startsWith('image/') && bytes.length > MAX_UPLOAD_SIZE) {
+        console.log(`[Upload] Non-image file over ${MAX_UPLOAD_SIZE / 1024}KB, trying gzip...`);
+        const { compressed, wasCompressed } = await gzipCompress(bytes);
+        if (wasCompressed && compressed.length <= MAX_UPLOAD_SIZE) {
+          bytes = compressed;
+          console.log(`[Upload] Gzip succeeded: ${compressed.length} bytes`);
+        } else {
+          // Still too big after compression
+          const sizeMB = (bytes.length / (1024 * 1024)).toFixed(1);
+          const limitKB = Math.round(MAX_UPLOAD_SIZE / 1024);
+          alert(`File too large (${sizeMB}MB). Maximum size is ${limitKB}KB.`);
+          input.value = ''; // Reset file input
+          return;
+        }
+      }
+
+      // Final size check (catches images that couldn't compress enough)
+      if (bytes.length > MAX_UPLOAD_SIZE) {
+        const sizeMB = (bytes.length / (1024 * 1024)).toFixed(1);
+        const limitKB = Math.round(MAX_UPLOAD_SIZE / 1024);
+        alert(`File too large (${sizeMB}MB). Maximum size is ${limitKB}KB.`);
+        input.value = ''; // Reset file input
+        return;
       }
 
       // Convert to data URL for immediate display
@@ -549,7 +578,9 @@ export async function mount(container, client, router, params) {
 
       // Auto-download and display
       try {
-        const decrypted = await client.attachments.download(att.contentReference);
+        let decrypted = await client.attachments.download(att.contentReference);
+        // Auto-decompress if gzipped (detected via magic bytes)
+        decrypted = await maybeDecompress(decrypted);
         const contentType = att.contentReference?.contentType || 'image/jpeg';
         const blob = new Blob([decrypted], { type: contentType });
         const dataUrl = await blobToDataUrl(blob);
@@ -624,7 +655,9 @@ export async function mount(container, client, router, params) {
         try {
           const parsed = parseMediaUrl(mediaUrl);
           if (parsed?.isRef) {
-            const decrypted = await client.attachments.download(parsed.ref);
+            let decrypted = await client.attachments.download(parsed.ref);
+            // Auto-decompress if gzipped
+            decrypted = await maybeDecompress(decrypted);
             const contentType = parsed.ref.contentType || 'image/jpeg';
             const blob = new Blob([decrypted], { type: contentType });
             const dataUrl = await blobToDataUrl(blob);

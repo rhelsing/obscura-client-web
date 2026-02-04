@@ -358,6 +358,7 @@ export class Messenger {
         contentHash: opts.contentReference.contentHash,
         contentType: opts.contentReference.contentType || '',
         sizeBytes: opts.contentReference.sizeBytes || 0,
+        fileName: opts.contentReference.fileName || '',
       });
     }
 
@@ -484,6 +485,7 @@ export class Messenger {
         contentHash: msg.contentReference.contentHash,
         contentType: msg.contentReference.contentType || '',
         sizeBytes: Number(msg.contentReference.sizeBytes) || 0,
+        fileName: msg.contentReference.fileName || '',
       };
     }
 

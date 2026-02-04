@@ -103,8 +103,22 @@ export function getPixStatus(pixByFriend, friendUsername) {
   }
 
   // Check if any are video (for purple indicator)
-  // For now, assume all are photos since we don't have video yet
-  const type = 'photo';
+  // Parse mediaRef to check contentType
+  let hasVideo = false;
+  for (const pix of pixList) {
+    try {
+      const mediaRef = pix.data?.mediaRef;
+      if (mediaRef) {
+        const ref = JSON.parse(mediaRef);
+        if (ref.contentType?.startsWith('video/')) {
+          hasVideo = true;
+          break;
+        }
+      }
+    } catch (e) {
+      // Ignore parse errors
+    }
+  }
 
-  return { hasPix: true, count: pixList.length, type };
+  return { hasPix: true, count: pixList.length, type: hasVideo ? 'video' : 'photo' };
 }

@@ -1,17 +1,26 @@
 /**
  * PixCamera View
  * Camera capture for sending pix to friends
+ *
+ * - Tap capture button = photo
+ * - Hold capture button = video recording
  */
 import { navigate } from '../index.js';
+import { VideoRecorder } from '../../lib/media.js';
 
 let cleanup = null;
+const HOLD_THRESHOLD_MS = 300; // Hold for 300ms to start video
 
-export function render({ mode = 'camera', capturedPreview = null, friends = [], duration = 5, selectedFriends = [], sending = false } = {}) {
+export function render({ mode = 'camera', capturedPreview = null, mediaType = 'photo', friends = [], duration = 5, selectedFriends = [], sending = false, recording = false, recordingTime = 0 } = {}) {
   if (mode === 'preview' && capturedPreview) {
+    const isVideo = mediaType === 'video';
     return `
       <div class="view pix-camera pix-camera--preview">
         <div class="pix-camera__preview-container">
-          <img src="${capturedPreview}" alt="Captured" class="pix-camera__preview-image" />
+          ${isVideo
+            ? `<video src="${capturedPreview}" class="pix-camera__preview-video" autoplay loop muted playsinline></video>`
+            : `<img src="${capturedPreview}" alt="Captured" class="pix-camera__preview-image" />`
+          }
           <input
             type="text"
             class="pix-camera__caption"
@@ -57,13 +66,19 @@ export function render({ mode = 'camera', capturedPreview = null, friends = [], 
   }
 
   return `
-    <div class="view pix-camera">
+    <div class="view pix-camera ${recording ? 'pix-camera--recording' : ''}">
       <header class="pix-camera__header">
         <a href="/chats" data-navigo>
           <button variant="ghost" size="sm"><ry-icon name="close"></ry-icon></button>
         </a>
-        <span></span>
-        <button variant="ghost" size="sm" id="flip-btn">🔄</button>
+        ${recording
+          ? `<span class="pix-camera__recording-indicator">
+              <span class="pix-camera__recording-dot"></span>
+              ${Math.floor(recordingTime / 60)}:${String(recordingTime % 60).padStart(2, '0')}
+            </span>`
+          : '<span></span>'
+        }
+        <button variant="ghost" size="sm" id="flip-btn" ${recording ? 'disabled' : ''}>🔄</button>
       </header>
 
       <div class="pix-camera__viewfinder">
@@ -72,7 +87,8 @@ export function render({ mode = 'camera', capturedPreview = null, friends = [], 
       </div>
 
       <div class="pix-camera__capture-area">
-        <button class="pix-camera__capture-btn" id="capture-btn">
+        <p class="pix-camera__hint">${recording ? 'Release to stop' : 'Tap for photo, hold for video'}</p>
+        <button class="pix-camera__capture-btn ${recording ? 'pix-camera__capture-btn--recording' : ''}" id="capture-btn">
           <span class="pix-camera__capture-btn-inner"></span>
         </button>
       </div>
@@ -85,10 +101,18 @@ export async function mount(container, client, router) {
   let facingMode = 'user';
   let capturedPreview = null;
   let capturedBlob = null;
+  let capturedMediaType = 'photo'; // 'photo' or 'video'
   let duration = 5;
   let selectedFriends = [];
   let sending = false;
   let isCleanedUp = false;
+
+  // Video recording state
+  let isRecording = false;
+  let recordingTime = 0;
+  let recordingTimer = null;
+  let videoRecorder = null;
+  let holdTimeout = null;
 
   // Get accepted friends
   const friends = [];
@@ -119,7 +143,7 @@ export async function mount(container, client, router) {
     console.warn('Failed to load profiles:', err);
   }
 
-  async function startCamera() {
+  async function startCamera(withAudio = false) {
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -127,7 +151,7 @@ export async function mount(container, client, router) {
           width: { ideal: 1280 },
           height: { ideal: 720 }
         },
-        audio: false
+        audio: withAudio
       });
 
       const video = container.querySelector('#camera-video');
@@ -139,6 +163,58 @@ export async function mount(container, client, router) {
     } catch (err) {
       console.error('Failed to start camera:', err);
     }
+  }
+
+  async function startVideoRecording() {
+    // Restart stream with audio
+    stopCamera();
+
+    isRecording = true;
+    recordingTime = 0;
+
+    // Update UI first to show recording state
+    renderCameraMode();
+
+    // Now start camera - this will attach to the new video element
+    await startCamera(true);
+
+    // Start recording with the new stream
+    videoRecorder = new VideoRecorder(stream);
+    videoRecorder.start();
+
+    // Start timer
+    recordingTimer = setInterval(() => {
+      recordingTime++;
+      // Update timer display
+      const indicator = container.querySelector('.pix-camera__recording-indicator');
+      if (indicator) {
+        const mins = Math.floor(recordingTime / 60);
+        const secs = String(recordingTime % 60).padStart(2, '0');
+        indicator.innerHTML = `<span class="pix-camera__recording-dot"></span>${mins}:${secs}`;
+      }
+    }, 1000);
+  }
+
+  async function stopVideoRecording() {
+    if (!isRecording || !videoRecorder) return;
+
+    clearInterval(recordingTimer);
+    recordingTimer = null;
+    isRecording = false;
+
+    console.log('[PixCamera] Stopping video recording...');
+    const { blob, contentType } = await videoRecorder.stop();
+    videoRecorder = null;
+
+    console.log('[PixCamera] Video blob size:', blob.size);
+
+    // Accept any blob (even fake/empty ones in test environments)
+    // Real recordings will have content, test recordings may not
+    capturedBlob = blob;
+    capturedMediaType = 'video';
+    capturedPreview = URL.createObjectURL(blob);
+    stopCamera();
+    renderPreviewMode();
   }
 
   function stopCamera() {
@@ -175,15 +251,18 @@ export async function mount(container, client, router) {
   }
 
   function renderCameraMode() {
-    container.innerHTML = render({ mode: 'camera' });
+    container.innerHTML = render({ mode: 'camera', recording: isRecording, recordingTime });
     attachCameraListeners();
-    startCamera();
+    if (!isRecording) {
+      startCamera();
+    }
   }
 
   function renderPreviewMode() {
     container.innerHTML = render({
       mode: 'preview',
       capturedPreview,
+      mediaType: capturedMediaType,
       friends,
       duration,
       selectedFriends,
@@ -197,11 +276,74 @@ export async function mount(container, client, router) {
     const flipBtn = container.querySelector('#flip-btn');
 
     if (captureBtn) {
-      captureBtn.addEventListener('click', capturePhoto);
+      // Press and hold detection
+      let pressStartTime = 0;
+
+      const handlePressStart = (e) => {
+        e.preventDefault();
+        if (isRecording) return;
+
+        pressStartTime = Date.now();
+
+        // Start video recording after hold threshold
+        holdTimeout = setTimeout(() => {
+          startVideoRecording();
+        }, HOLD_THRESHOLD_MS);
+      };
+
+      const handlePressEnd = (e) => {
+        // Don't preventDefault on document-level events
+        if (e.target === captureBtn) {
+          e.preventDefault();
+        }
+
+        if (isRecording) {
+          // Stop video recording
+          stopVideoRecording();
+        } else if (e.target === captureBtn || e.target?.closest('#capture-btn')) {
+          // Cancel hold timeout and take photo (only if on button)
+          clearTimeout(holdTimeout);
+          holdTimeout = null;
+
+          const pressDuration = Date.now() - pressStartTime;
+          if (pressDuration < HOLD_THRESHOLD_MS) {
+            capturedMediaType = 'photo';
+            capturePhoto();
+          }
+        }
+      };
+
+      // Mouse events on button
+      captureBtn.addEventListener('mousedown', handlePressStart);
+      captureBtn.addEventListener('mouseup', handlePressEnd);
+
+      // Also listen on document for mouseup during recording (handles DOM re-render)
+      const documentMouseUp = (e) => {
+        if (isRecording) {
+          stopVideoRecording();
+          document.removeEventListener('mouseup', documentMouseUp);
+        }
+      };
+      document.addEventListener('mouseup', documentMouseUp);
+
+      // Touch events (for mobile)
+      captureBtn.addEventListener('touchstart', handlePressStart, { passive: false });
+      captureBtn.addEventListener('touchend', handlePressEnd, { passive: false });
+      captureBtn.addEventListener('touchcancel', handlePressEnd, { passive: false });
+
+      // Document-level touch end for recording
+      const documentTouchEnd = (e) => {
+        if (isRecording) {
+          stopVideoRecording();
+          document.removeEventListener('touchend', documentTouchEnd);
+        }
+      };
+      document.addEventListener('touchend', documentTouchEnd);
     }
 
     if (flipBtn) {
       flipBtn.addEventListener('click', () => {
+        if (isRecording) return;
         facingMode = facingMode === 'user' ? 'environment' : 'user';
         stopCamera();
         startCamera();
@@ -268,12 +410,13 @@ export async function mount(container, client, router) {
           const caption = captionInput?.value || '';
 
           // Create pix for EACH selected recipient
+          const contentType = capturedMediaType === 'video' ? 'video/webm' : 'image/jpeg';
           const mediaRef = JSON.stringify({
             attachmentId: ref.attachmentId,
             contentKey: Array.from(ref.contentKey),
             nonce: Array.from(ref.nonce),
             contentHash: Array.from(ref.contentHash),
-            contentType: 'image/jpeg'
+            contentType
           });
 
           for (const recipientUsername of selectedFriends) {
@@ -292,7 +435,16 @@ export async function mount(container, client, router) {
           console.error('Failed to send pix:', err);
           sending = false;
           renderPreviewMode();
-          alert('Failed to send pix. Please try again.');
+
+          // Show more specific error message
+          let errorMsg = 'Failed to send pix. Please try again.';
+          if (err.message?.includes('413') || err.message?.includes('too large')) {
+            errorMsg = 'Video is too large. Try recording a shorter clip.';
+          } else if (err.message?.includes('NetworkError') || err.message?.includes('fetch')) {
+            const sizeMB = (capturedBlob?.size / 1024 / 1024).toFixed(1);
+            errorMsg = `Upload failed (${sizeMB}MB). The file may be too large or your connection was interrupted.`;
+          }
+          alert(errorMsg);
         }
       });
     }
@@ -303,6 +455,11 @@ export async function mount(container, client, router) {
 
   cleanup = () => {
     isCleanedUp = true;
+    clearTimeout(holdTimeout);
+    clearInterval(recordingTimer);
+    if (videoRecorder?.isRecording) {
+      videoRecorder.stop();
+    }
     stopCamera();
     if (capturedPreview) {
       URL.revokeObjectURL(capturedPreview);

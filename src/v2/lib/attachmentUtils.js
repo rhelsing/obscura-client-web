@@ -24,6 +24,8 @@ export function parseMediaUrl(mediaUrl) {
           nonce: new Uint8Array(parsed.nonce),
           contentHash: parsed.contentHash ? new Uint8Array(parsed.contentHash) : undefined,
           contentType: parsed.contentType || 'application/octet-stream',
+          fileName: parsed.fileName, // Preserve filename for file attachments
+          sizeBytes: parsed.sizeBytes,
         },
       };
     }
@@ -54,5 +56,6 @@ export function createMediaUrl(ref) {
     contentHash: ref.contentHash ? Array.from(ref.contentHash) : undefined,
     contentType: ref.contentType,
     sizeBytes: ref.sizeBytes,
+    fileName: ref.fileName, // Preserve filename for file attachments
   });
 }

@@ -53,6 +53,9 @@ message ClientMessage {
     FRIEND_REQUEST = 2;
     FRIEND_RESPONSE = 3;
     SESSION_RESET = 4;
+    VIDEO = 5;
+    AUDIO = 6;
+    FILE = 7;  // Generic file attachment
 
     // Device management (10-19)
     // Note: 10 intentionally skipped - link "request" is out-of-band (QR/link code)
@@ -186,6 +189,7 @@ message ContentReference {
   bytes content_hash = 4;           // SHA-256 of plaintext for integrity
   string content_type = 5;          // MIME type (e.g., "image/jpeg")
   uint64 size_bytes = 6;            // Original size for progress/preview
+  string file_name = 7;             // Original filename for file attachments
 }
 
 // =============================================================================

@@ -4,6 +4,7 @@
   "type": "module",
   "dependencies": {
     "@privacyresearch/libsignal-protocol-typescript": "0.0.16",
+    "heic2any": "^0.0.4",
     "html5-qrcode": "^2.3.8",
     "navigo": "^8.11.1",
     "protobufjs": "^8.0.0",

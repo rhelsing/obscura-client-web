@@ -1055,17 +1055,30 @@ export class ObscuraClient {
    * Send an attachment to a friend (upload once, fan-out ContentReference)
    * @param {string} friendUsername - Friend to send to
    * @param {Blob|ArrayBuffer|Uint8Array} content - Content to upload
-   * @param {object} opts - Optional: { contentType }
+   * @param {object} opts - Optional: { contentType, fileName }
    * @returns {Promise<object>} The ContentReference
    */
   async sendAttachment(friendUsername, content, opts = {}) {
-    // Upload and encrypt once
-    const ref = await this.attachments.upload(content);
+    // Wrap content in Blob with contentType if provided (preserves type during encryption)
+    let uploadContent = content;
+    if (opts.contentType && !(content instanceof Blob)) {
+      uploadContent = new Blob([content], { type: opts.contentType });
+      console.log('[sendAttachment] Wrapped in Blob with type:', opts.contentType);
+    }
+
+    // Upload and encrypt
+    const ref = await this.attachments.upload(uploadContent);
+    console.log('[sendAttachment] Upload returned ref.contentType:', ref.contentType);
+
+    // Add fileName to ref if provided (for file attachments)
+    if (opts.fileName) {
+      ref.fileName = opts.fileName;
+    }
 
     // Create mediaUrl JSON string for storage (no Uint8Array serialization issues)
     const mediaUrl = createMediaUrl(ref);
 
-    // Fan-out ContentReference to all friend devices
+    // Fan-out ContentReference to all friend devices (includes fileName now)
     const targets = this.friends.getFanOutTargets(friendUsername);
     const timestamp = Date.now();
 

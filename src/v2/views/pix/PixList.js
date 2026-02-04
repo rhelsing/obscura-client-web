@@ -36,30 +36,32 @@ export function render({ pixFriends = [] } = {}) {
             const isDisabled = !hasUnviewed; // Disable if no unviewed pix
 
             // Determine indicator:
-            // - Received unviewed: filled square
+            // - Received unviewed: filled square (red=photo, purple=video)
             // - Sent pending: filled chevron
             // - Sent opened: outlined chevron
             // - Received opened: outlined square
+            const mediaType = friend.hasVideo ? 'video' : 'photo';
             let indicator;
             if (hasUnviewed) {
-              indicator = renderPixIndicator({ count: friend.unviewedCount });
+              indicator = renderPixIndicator({ count: friend.unviewedCount, type: mediaType });
             } else if (hasPendingSent) {
-              indicator = renderPixIndicatorSent();
+              indicator = renderPixIndicatorSent({ type: mediaType });
             } else if (friend.sentViewedCount > 0) {
-              indicator = renderPixIndicatorSentOpened();
+              indicator = renderPixIndicatorSentOpened({ type: mediaType });
             } else {
-              indicator = renderPixIndicatorOpened();
+              indicator = renderPixIndicatorOpened({ type: mediaType });
             }
 
             // Determine status text
             let statusText = '';
             let statusColor = 'var(--ry-color-text-muted)';
+            const indicatorColor = friend.hasVideo ? 'var(--ry-color-purple-500, #9333ea)' : 'var(--ry-color-red-500)';
             if (hasUnviewed) {
               statusText = `${friend.unviewedCount} new pix`;
-              statusColor = 'var(--ry-color-red-500)';
+              statusColor = indicatorColor;
             } else if (hasPendingSent) {
               statusText = 'Delivered';
-              statusColor = 'var(--ry-color-red-500)';
+              statusColor = indicatorColor;
             } else if (friend.sentViewedCount > 0) {
               statusText = 'Opened';
             } else if (friend.type === 'received') {
@@ -134,7 +136,8 @@ export async function mount(container, client, router) {
             sentIn3Days: 0,
             receivedIn3Days: 0,
             lastSentAt: 0,
-            lastReceivedAt: 0
+            lastReceivedAt: 0,
+            hasVideo: false // Track if any unviewed pix are video
           });
         }
         const data = friendPixData.get(friendUsername);
@@ -152,6 +155,16 @@ export async function mount(container, client, router) {
           data.type = data.type === 'sent' ? 'both' : 'received';
           if (!pix.data?.viewedAt) {
             data.unviewedCount++;
+            // Check if this unviewed pix is a video
+            try {
+              const mediaRef = pix.data?.mediaRef;
+              if (mediaRef) {
+                const ref = JSON.parse(mediaRef);
+                if (ref.contentType?.startsWith('video/')) {
+                  data.hasVideo = true;
+                }
+              }
+            } catch (e) { /* ignore parse errors */ }
           }
           if (isRecent) {
             data.receivedIn3Days++;
@@ -267,7 +280,8 @@ export async function mount(container, client, router) {
           lastPixTime: data.lastPixTime,
           hasUnviewed: data.unviewedCount > 0,
           type: data.type,
-          streakCount
+          streakCount,
+          hasVideo: data.hasVideo // For purple indicator
         });
       }
 

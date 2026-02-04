@@ -113,21 +113,6 @@ export function render({ settings = null, loading = false, saving = false, isFir
           </stack>
         </section>
 
-        <section class="settings-group">
-          <h2>Security</h2>
-          <stack gap="sm">
-            <card>
-              <button id="reset-sessions" variant="ghost" style="display: none;">
-                <cluster>
-                  <span>Reset All Sessions</span>
-                  <ry-icon name="refresh-cw"></ry-icon>
-                </cluster>
-              </button>
-              <p class="hint">Reset encrypted sessions with all contacts and devices. Use if experiencing decryption errors.</p>
-            </card>
-          </stack>
-        </section>
-
         <section class="settings-group danger">
           <h2>Account</h2>
           <stack gap="sm">
@@ -136,15 +121,6 @@ export function render({ settings = null, loading = false, saving = false, isFir
           </stack>
         </section>
       </stack>
-
-      <ry-modal id="reset-sessions-modal" title="Reset All Sessions">
-        <p>This will reset encrypted sessions with all your contacts and your other devices.</p>
-        <p>Recent messages may need to be re-sent after reset.</p>
-        <actions slot="footer">
-          <button variant="ghost" close>Cancel</button>
-          <button variant="primary" id="confirm-reset-sessions">Reset Sessions</button>
-        </actions>
-      </ry-modal>
 
       <ry-modal id="logout-modal" title="Confirm Logout">
         <p>Are you sure you want to log out?</p>
@@ -347,39 +323,6 @@ export async function mount(container, client, router) {
       } finally {
         confirmImportBtn.disabled = false;
         confirmImportBtn.textContent = 'Restore Backup';
-      }
-    });
-
-    // Reset sessions button - show modal
-    const resetSessionsBtn = container.querySelector('#reset-sessions');
-    const resetSessionsModal = container.querySelector('#reset-sessions-modal');
-    resetSessionsBtn.addEventListener('click', () => {
-      resetSessionsModal.show();
-    });
-
-    // Confirm reset sessions
-    const confirmResetSessions = container.querySelector('#confirm-reset-sessions');
-    confirmResetSessions.addEventListener('click', async () => {
-      confirmResetSessions.disabled = true;
-      confirmResetSessions.textContent = 'Resetting...';
-
-      try {
-        const count = await client.resetAllSessions('user_initiated');
-        resetSessionsModal.close();
-        resetSessionsBtn.querySelector('span').textContent = `Reset ${count} session${count !== 1 ? 's' : ''}`;
-        setTimeout(() => {
-          resetSessionsBtn.querySelector('span').textContent = 'Reset All Sessions';
-        }, 3000);
-      } catch (err) {
-        console.error('Failed to reset sessions:', err);
-        resetSessionsModal.close();
-        resetSessionsBtn.querySelector('span').textContent = 'Reset failed';
-        setTimeout(() => {
-          resetSessionsBtn.querySelector('span').textContent = 'Reset All Sessions';
-        }, 3000);
-      } finally {
-        confirmResetSessions.disabled = false;
-        confirmResetSessions.textContent = 'Reset Sessions';
       }
     });
 

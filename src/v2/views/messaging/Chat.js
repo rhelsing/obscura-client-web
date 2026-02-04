@@ -2,6 +2,7 @@
  * Chat View
  * - Message list for a conversation
  * - Send text + attachments
+ * - Audio messages (hold mic button to record)
  * - Real-time incoming messages
  *
  * IMPORTANT: Loads existing messages from client.messages on mount.
@@ -9,11 +10,15 @@
  */
 import { navigate, markConversationRead } from '../index.js';
 import { parseMediaUrl, createMediaUrl } from '../../lib/attachmentUtils.js';
+import { AudioRecorder, getMediaCategory } from '../../lib/media.js';
 
 let cleanup = null;
 let messages = [];
+let audioRecorder = null;
+let isRecording = false;
+let recordingStartTime = 0;
 
-export function render({ username = '', displayName = '', messages = [], sending = false, streakCount = 0 } = {}) {
+export function render({ username = '', displayName = '', messages = [], sending = false, streakCount = 0, recording = false, recordingTime = 0 } = {}) {
   const title = displayName || username;
   return `
     <div class="view chat">
@@ -38,8 +43,18 @@ export function render({ username = '', displayName = '', messages = [], sending
                 <div class="attachment">
                   ${m.downloading ? `
                     <div class="attachment-loading">Loading...</div>
+                  ` : m.audioDataUrl ? `
+                    <audio src="${m.audioDataUrl}" controls class="attachment-audio"></audio>
+                  ` : m.videoDataUrl ? `
+                    <video src="${m.videoDataUrl}" controls class="attachment-video" style="max-width: 100%; border-radius: 8px;"></video>
                   ` : m.imageDataUrl ? `
                     <img src="${m.imageDataUrl}" class="attachment-image" style="max-width: 100%; border-radius: 8px;" />
+                  ` : m.fileDataUrl ? `
+                    <div class="attachment-file">
+                      <a href="${m.fileDataUrl}" download="${m.fileName || 'file'}" class="file-download">
+                        📎 ${m.fileName || 'Download file'}
+                      </a>
+                    </div>
                   ` : `
                     <div class="attachment-content">${m.attachmentPreview || '[Attachment]'}</div>
                   `}
@@ -55,20 +70,31 @@ export function render({ username = '', displayName = '', messages = [], sending
 
       <form id="message-form" class="message-input">
         <ry-cluster>
-          <button type="button" variant="ghost" id="attach-btn" ${sending ? 'disabled' : ''}><ry-icon name="upload"></ry-icon></button>
-          <input
-            type="text"
-            id="message-text"
-            placeholder="Type a message..."
-            autocomplete="off"
-            style="flex: 1"
-            ${sending ? 'disabled' : ''}
-          />
-          <button type="submit" ${sending ? 'disabled' : ''}>${sending ? '...' : 'Send'}</button>
+          <button type="button" variant="ghost" id="attach-btn" ${sending || recording ? 'disabled' : ''}><ry-icon name="upload"></ry-icon></button>
+          ${recording ? `
+            <div class="recording-indicator" style="flex: 1; display: flex; align-items: center; gap: 8px;">
+              <span class="recording-dot"></span>
+              <span>${Math.floor(recordingTime / 60)}:${String(recordingTime % 60).padStart(2, '0')}</span>
+              <span style="color: var(--ry-color-text-muted)">Release to send</span>
+            </div>
+          ` : `
+            <input
+              type="text"
+              id="message-text"
+              placeholder="Type a message..."
+              autocomplete="off"
+              style="flex: 1"
+              ${sending ? 'disabled' : ''}
+            />
+          `}
+          <button type="button" variant="ghost" id="mic-btn" class="${recording ? 'recording' : ''}" ${sending ? 'disabled' : ''}>
+            ${recording ? '<ry-icon name="check"></ry-icon>' : '🎤'}
+          </button>
+          <button type="submit" ${sending || recording ? 'disabled' : ''}>${sending ? '...' : 'Send'}</button>
         </ry-cluster>
       </form>
 
-      <input type="file" id="file-input" hidden />
+      <input type="file" id="file-input" accept="*/*" hidden />
     </div>
   `;
 }
@@ -232,11 +258,15 @@ export async function mount(container, client, router, params) {
   let isInitialLoad = true;
   setTimeout(() => { isInitialLoad = false; }, 2000);
 
+  // Track recording time
+  let recordingTime = 0;
+  let recordingTimer = null;
+
   // Re-render while preserving scroll position
   const rerender = () => {
     const mc = getMessagesContainer();
     const scrollPos = mc ? mc.scrollTop : 0;
-    container.innerHTML = render({ username, displayName, messages, streakCount });
+    container.innerHTML = render({ username, displayName, messages, streakCount, recording: isRecording, recordingTime });
     const newMc = getMessagesContainer();
     if (newMc) newMc.scrollTop = scrollPos;
   };
@@ -257,8 +287,9 @@ export async function mount(container, client, router, params) {
   // Auto-download any attachments that need loading
   const downloadAttachments = async () => {
     // Collect all messages needing download first (avoid modifying during iteration)
+    // Check all media types
     const toDownload = messages.filter(m =>
-      m.mediaUrl && !m.imageDataUrl && !m.downloading
+      m.mediaUrl && !m.imageDataUrl && !m.audioDataUrl && !m.videoDataUrl && !m.fileDataUrl && !m.downloading
     );
 
     if (toDownload.length === 0) return;
@@ -277,8 +308,26 @@ export async function mount(container, client, router, params) {
           return;
         }
         const decrypted = await client.attachments.download(parsed.ref);
-        const blob = new Blob([decrypted], { type: parsed.ref.contentType || 'image/jpeg' });
-        m.imageDataUrl = await blobToDataUrl(blob);
+        const contentType = parsed.ref.contentType || 'image/jpeg';
+        console.log('[Chat] Downloaded attachment, contentType:', contentType, 'from mediaUrl');
+        const blob = new Blob([decrypted], { type: contentType });
+        const dataUrl = await blobToDataUrl(blob);
+
+        // Set appropriate data URL based on content type
+        const category = getMediaCategory(contentType);
+        console.log('[Chat] Media category:', category, 'fileName:', parsed.ref.fileName);
+        if (category === 'audio') {
+          m.audioDataUrl = dataUrl;
+        } else if (category === 'video') {
+          m.videoDataUrl = dataUrl;
+        } else if (category === 'image') {
+          m.imageDataUrl = dataUrl;
+        } else {
+          // Generic file - store for download
+          m.fileDataUrl = dataUrl;
+        }
+        // Always preserve fileName if present
+        m.fileName = parsed.ref.fileName || m.fileName || 'file';
         m.downloading = false;
         m.downloaded = true;
       } catch (err) {
@@ -340,9 +389,9 @@ export async function mount(container, client, router, params) {
   // File select handler (used by attachListeners)
   async function handleFileSelect(e) {
     const input = e.target;
-    console.log('[Upload] Step 4: File input change event fired');
+    console.log('[Upload] File input change event fired');
     const file = input.files[0];
-    console.log('[Upload] Step 5: Got file:', file ? `${file.name} (${file.size} bytes, type: ${file.type})` : 'NO FILE');
+    console.log('[Upload] Got file:', file ? `${file.name} (${file.size} bytes, type: ${file.type})` : 'NO FILE');
     if (!file) {
       console.log('[Upload] ABORT: No file selected');
       return;
@@ -351,66 +400,82 @@ export async function mount(container, client, router, params) {
     try {
       let blob;
       let bytes;
+      let contentType = file.type || 'application/octet-stream';
 
       // Convert HEIC/HEIF (iPhone camera photos) to JPEG
       if (file.type.startsWith('image/') && needsConversion(file)) {
-        console.log('[Upload] Step 6: Converting HEIC/HEIF to JPEG');
+        console.log('[Upload] Converting HEIC/HEIF to JPEG');
         blob = await convertToJpeg(file);
         const buffer = await blob.arrayBuffer();
         bytes = new Uint8Array(buffer);
-        console.log('[Upload] Step 7: Conversion complete:', bytes.length, 'bytes');
+        contentType = 'image/jpeg';
       } else {
-        console.log('[Upload] Step 6: Reading file as ArrayBuffer');
+        console.log('[Upload] Reading file as ArrayBuffer');
         const buffer = await file.arrayBuffer();
         bytes = new Uint8Array(buffer);
-        blob = new Blob([bytes], { type: file.type || 'image/jpeg' });
-        console.log('[Upload] Step 7: File read complete:', bytes.length, 'bytes');
+        blob = new Blob([bytes], { type: contentType });
       }
+      console.log('[Upload] File ready:', bytes.length, 'bytes, type:', contentType);
 
       // Convert to data URL for immediate display
-      const imageDataUrl = await blobToDataUrl(blob);
-      console.log('[Upload] Step 8: Data URL created');
+      const dataUrl = await blobToDataUrl(blob);
 
       const timestamp = Date.now();
       const msgId = generateMsgId();
+      const category = getMediaCategory(contentType);
 
-      // Optimistic UI - show actual image (use ID instead of index)
+      // Optimistic UI - show based on file type
       const msg = {
         id: msgId,
         attachment: true,
-        imageDataUrl,
         fromMe: true,
-        timestamp
+        timestamp,
+        fileName: file.name,
       };
+
+      // Set the appropriate data URL field based on category
+      if (category === 'audio') {
+        msg.audioDataUrl = dataUrl;
+      } else if (category === 'video') {
+        msg.videoDataUrl = dataUrl;
+      } else if (category === 'image') {
+        msg.imageDataUrl = dataUrl;
+      } else {
+        msg.fileDataUrl = dataUrl;
+      }
+
       messages.push(msg);
-      console.log('[Upload] Step 9: Messages array now has', messages.length, 'messages,', messages.filter(m => m.imageDataUrl).length, 'with images');
+      console.log('[Upload] UI updated with', category, 'attachment');
       rerender();
-      const imgCount = container.querySelectorAll('.attachment-image').length;
-      console.log('[Upload] Step 9: DOM now has', imgCount, 'attachment-image elements');
       scrollToBottom();
       attachListeners();
-      console.log('[Upload] Step 9: UI updated with optimistic image');
 
       // Send and get mediaUrl back (JSON string)
-      console.log('[Upload] Step 10: Calling sendAttachment to', username);
-      const mediaUrl = await client.sendAttachment(username, bytes);
+      console.log('[Upload] Calling sendAttachment to', username);
+      const mediaUrl = await client.sendAttachment(username, bytes, { contentType, fileName: file.name });
+
+      // Parse and add filename to the mediaUrl for persistence
       const parsed = parseMediaUrl(mediaUrl);
-      console.log('[Upload] Step 11: sendAttachment returned:', parsed?.ref?.attachmentId || 'NO REF');
+      if (parsed?.ref) {
+        parsed.ref.fileName = file.name;
+      }
+      const mediaUrlWithName = parsed ? JSON.stringify(parsed.ref) : mediaUrl;
+      console.log('[Upload] sendAttachment returned:', parsed?.ref?.attachmentId || 'NO REF');
 
       // Store to IndexedDB with mediaUrl for persistence (find by ID, not index)
-      if (mediaUrl && parsed?.ref?.attachmentId) {
+      if (mediaUrlWithName && parsed?.ref?.attachmentId) {
         const targetMsg = messages.find(m => m.id === msgId);
         if (targetMsg) {
-          targetMsg.mediaUrl = mediaUrl;
+          targetMsg.mediaUrl = mediaUrlWithName;
         }
         await client.messageStore.addMessage(username, {
           messageId: `att_${parsed.ref.attachmentId}`,
           content: '',
-          mediaUrl,
+          mediaUrl: mediaUrlWithName,
           isSent: true,
           timestamp,
         });
-        console.log('[Upload] Step 12: Persisted to IndexedDB');
+        console.log('[Upload] Persisted to IndexedDB');
       }
 
       console.log('[Upload] COMPLETE: Attachment sent successfully');
@@ -441,7 +506,7 @@ export async function mount(container, client, router, params) {
         timestamp: msg.timestamp || Date.now()
       });
       rerender();
-      scrollToBottom();
+      scrollToBottom(true); // instant scroll for incoming messages
       attachListeners();
     }
   };
@@ -452,7 +517,7 @@ export async function mount(container, client, router, params) {
     const friend = client.friends.get(username);
     const isFromFriend = friend?.devices?.some(d => d.serverUserId === att.from);
     if (isFromFriend) {
-      // Convert contentReference to mediaUrl
+      // Convert contentReference to mediaUrl (includes fileName from proto)
       const mediaUrl = createMediaUrl(att.contentReference);
 
       // Add message with loading state (use ID instead of index)
@@ -461,6 +526,7 @@ export async function mount(container, client, router, params) {
         id: msgId,
         attachment: true,
         mediaUrl,
+        fileName: att.contentReference?.fileName || '', // Extract fileName from proto
         downloading: true,
         fromMe: false,
         timestamp: Date.now()
@@ -473,14 +539,25 @@ export async function mount(container, client, router, params) {
       // Auto-download and display
       try {
         const decrypted = await client.attachments.download(att.contentReference);
-        const blob = new Blob([decrypted], { type: att.contentReference?.contentType || 'image/jpeg' });
+        const contentType = att.contentReference?.contentType || 'image/jpeg';
+        const blob = new Blob([decrypted], { type: contentType });
         const dataUrl = await blobToDataUrl(blob);
 
         // Find message by ID (safe even if array modified)
         const targetMsg = messages.find(m => m.id === msgId);
         if (targetMsg) {
           targetMsg.downloading = false;
-          targetMsg.imageDataUrl = dataUrl;
+          const category = getMediaCategory(contentType);
+          if (category === 'audio') {
+            targetMsg.audioDataUrl = dataUrl;
+          } else if (category === 'video') {
+            targetMsg.videoDataUrl = dataUrl;
+          } else if (category === 'file') {
+            targetMsg.fileDataUrl = dataUrl;
+            // fileName already set from att.contentReference.fileName
+          } else {
+            targetMsg.imageDataUrl = dataUrl;
+          }
           targetMsg.downloaded = true;
         }
         rerender();
@@ -537,13 +614,21 @@ export async function mount(container, client, router, params) {
           const parsed = parseMediaUrl(mediaUrl);
           if (parsed?.isRef) {
             const decrypted = await client.attachments.download(parsed.ref);
-            const blob = new Blob([decrypted], { type: parsed.ref.contentType || 'image/jpeg' });
+            const contentType = parsed.ref.contentType || 'image/jpeg';
+            const blob = new Blob([decrypted], { type: contentType });
             const dataUrl = await blobToDataUrl(blob);
 
             const targetMsg = messages.find(m => m.id === msgId);
             if (targetMsg) {
               targetMsg.downloading = false;
-              targetMsg.imageDataUrl = dataUrl;
+              const category = getMediaCategory(contentType);
+              if (category === 'audio') {
+                targetMsg.audioDataUrl = dataUrl;
+              } else if (category === 'video') {
+                targetMsg.videoDataUrl = dataUrl;
+              } else {
+                targetMsg.imageDataUrl = dataUrl;
+              }
               targetMsg.downloaded = true;
             }
             rerender();
@@ -601,6 +686,112 @@ export async function mount(container, client, router, params) {
   client.on('sentSync', handleSentSync);
   client.on('messagesMigrated', handleMessagesMigrated);
 
+  // Audio recording functions
+  async function startAudioRecording() {
+    try {
+      audioRecorder = new AudioRecorder();
+      await audioRecorder.start();
+      isRecording = true;
+      recordingTime = 0;
+      recordingStartTime = Date.now();
+
+      // Update timer every second
+      recordingTimer = setInterval(() => {
+        recordingTime = Math.floor((Date.now() - recordingStartTime) / 1000);
+        rerender();
+        attachListeners();
+      }, 1000);
+
+      rerender();
+      attachListeners();
+      console.log('[Audio] Recording started');
+    } catch (err) {
+      console.error('[Audio] Failed to start recording:', err);
+      isRecording = false;
+      audioRecorder = null;
+    }
+  }
+
+  async function stopAudioRecording() {
+    if (!isRecording || !audioRecorder) return;
+
+    clearInterval(recordingTimer);
+    recordingTimer = null;
+
+    console.log('[Audio] Stopping recording...');
+    const { blob, contentType, duration } = await audioRecorder.stop();
+    audioRecorder = null;
+    isRecording = false;
+
+    console.log('[Audio] Recording stopped, blob size:', blob.size);
+
+    if (blob.size > 0) {
+      // Send the audio message
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const audioDataUrl = await blobToDataUrl(blob);
+      const msgId = generateMsgId();
+
+      // Optimistic UI
+      messages.push({
+        id: msgId,
+        attachment: true,
+        audioDataUrl,
+        fromMe: true,
+        timestamp: Date.now()
+      });
+      rerender();
+      scrollToBottom();
+      attachListeners();
+
+      try {
+        // Send audio attachment (handles upload, encryption, and fan-out)
+        const mediaUrl = await client.sendAttachment(username, bytes, {
+          contentType: contentType || 'audio/webm'
+        });
+
+        // Update message with mediaUrl for persistence
+        const targetMsg = messages.find(m => m.id === msgId);
+        if (targetMsg) {
+          targetMsg.mediaUrl = mediaUrl;
+        }
+
+        // Persist to IndexedDB
+        const parsed = parseMediaUrl(mediaUrl);
+        console.log('[Audio] mediaUrl to persist:', mediaUrl);
+        console.log('[Audio] parsed.ref.contentType:', parsed?.ref?.contentType);
+        if (parsed?.ref?.attachmentId) {
+          await client.messageStore.addMessage(username, {
+            messageId: `audio_${parsed.ref.attachmentId}`,
+            content: '',
+            mediaUrl,
+            isSent: true,
+            timestamp: Date.now(),
+          });
+        }
+
+        console.log('[Audio] Audio message sent and persisted');
+      } catch (err) {
+        console.error('[Audio] Failed to send:', err);
+      }
+    }
+
+    rerender();
+    attachListeners();
+  }
+
+  function cancelAudioRecording() {
+    if (audioRecorder) {
+      audioRecorder.cancel();
+      audioRecorder = null;
+    }
+    clearInterval(recordingTimer);
+    recordingTimer = null;
+    isRecording = false;
+    recordingTime = 0;
+    rerender();
+    attachListeners();
+  }
+
   function attachListeners() {
     // Re-attach form listener after re-render
     const newForm = container.querySelector('#message-form');
@@ -621,6 +812,52 @@ export async function mount(container, client, router, params) {
 
     if (newFileInput) {
       newFileInput.addEventListener('change', handleFileSelect);
+    }
+
+    // Mic button for audio recording (press and hold)
+    const micBtn = container.querySelector('#mic-btn');
+    if (micBtn) {
+      const handleMicDown = (e) => {
+        e.preventDefault();
+        if (!isRecording) {
+          startAudioRecording();
+        }
+      };
+
+      const handleMicUp = (e) => {
+        e.preventDefault();
+        if (isRecording) {
+          stopAudioRecording();
+        }
+      };
+
+      // Mouse events
+      micBtn.addEventListener('mousedown', handleMicDown);
+      micBtn.addEventListener('mouseup', handleMicUp);
+      micBtn.addEventListener('mouseleave', handleMicUp);
+
+      // Touch events
+      micBtn.addEventListener('touchstart', handleMicDown, { passive: false });
+      micBtn.addEventListener('touchend', handleMicUp, { passive: false });
+      micBtn.addEventListener('touchcancel', handleMicUp, { passive: false });
+
+      // Document-level listeners for when button DOM changes during recording
+      const documentMouseUp = () => {
+        if (isRecording) {
+          stopAudioRecording();
+          document.removeEventListener('mouseup', documentMouseUp);
+        }
+      };
+      const documentTouchEnd = () => {
+        if (isRecording) {
+          stopAudioRecording();
+          document.removeEventListener('touchend', documentTouchEnd);
+        }
+      };
+      if (isRecording) {
+        document.addEventListener('mouseup', documentMouseUp);
+        document.addEventListener('touchend', documentTouchEnd);
+      }
     }
 
     // Scroll to bottom when images load (they change container height)
@@ -665,6 +902,14 @@ export async function mount(container, client, router, params) {
     client.off('attachment', handleAttachment);
     client.off('sentSync', handleSentSync);
     client.off('messagesMigrated', handleMessagesMigrated);
+
+    // Clean up audio recording if in progress
+    if (audioRecorder) {
+      audioRecorder.cancel();
+      audioRecorder = null;
+    }
+    clearInterval(recordingTimer);
+    isRecording = false;
   };
 }
 

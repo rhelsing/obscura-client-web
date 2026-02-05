@@ -22,6 +22,9 @@ export default defineConfig(({ mode }) => {
           rewrite: (path) => path.replace(/^\/ws/, ''),
           ws: true,
           secure: true,
+          // Prevent 60-second idle timeout from closing WebSocket connections
+          timeout: 0,
+          proxyTimeout: 0,
         },
       },
     },

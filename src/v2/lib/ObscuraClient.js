@@ -30,6 +30,9 @@ import { createMediaUrl, createChunkedMediaUrl } from './attachmentUtils.js';
 const RECONNECT_DELAY_MS = 1000;
 const RECONNECT_MAX_DELAY_MS = 30000;
 
+// WebSocket keep-alive ping interval (30 seconds)
+const PING_INTERVAL_MS = 30000;
+
 // Prekey replenishment settings
 const PREKEY_MIN_COUNT = 20;
 const PREKEY_REPLENISH_COUNT = 50;
@@ -95,6 +98,7 @@ export class ObscuraClient {
     console.log('[ObscuraClient] WS setup:', { isBrowser, isDev, apiUrl: this.apiUrl, wsUrl: this.wsUrl });
     this._reconnectAttempts = 0;
     this._shouldReconnect = true;
+    this._pingInterval = null;
 
     // Event handlers
     this._handlers = {
@@ -463,6 +467,9 @@ export class ObscuraClient {
         this._reconnectAttempts = 0;
         logger.logGatewayConnect();
 
+        // Start ping interval to keep connection alive
+        this._startPingInterval();
+
         // Run TTL cleanup on connect (non-blocking)
         this._runTTLCleanup().catch(e => {
           console.warn('[ObscuraClient] TTL cleanup failed:', e.message);
@@ -482,6 +489,7 @@ export class ObscuraClient {
 
       const onClose = (event) => {
         logger.logGatewayDisconnect(event?.code, event?.reason);
+        this._stopPingInterval();
         this._emit('disconnect');
         if (this._shouldReconnect) {
           this._scheduleReconnect();
@@ -625,10 +633,39 @@ export class ObscuraClient {
   }
 
   /**
+   * Start ping interval to keep WebSocket connection alive
+   * Uses WebSocket ping frames (Node.js) or relies on proxy timeout config (browser)
+   */
+  _startPingInterval() {
+    this._stopPingInterval();
+    this._pingInterval = setInterval(() => {
+      if (this.ws && this.ws.readyState === 1) {
+        // Node.js ws package has ping() method
+        if (typeof this.ws.ping === 'function') {
+          this.ws.ping();
+        }
+        // Browser WebSocket doesn't expose ping/pong API
+        // Connection kept alive by proxy timeout=0 config
+      }
+    }, PING_INTERVAL_MS);
+  }
+
+  /**
+   * Stop ping interval
+   */
+  _stopPingInterval() {
+    if (this._pingInterval) {
+      clearInterval(this._pingInterval);
+      this._pingInterval = null;
+    }
+  }
+
+  /**
    * Disconnect WebSocket
    */
   disconnect() {
     this._shouldReconnect = false;
+    this._stopPingInterval();
     if (this.ws) {
       this.ws.close();
       this.ws = null;

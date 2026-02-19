@@ -25,6 +25,7 @@ import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
 import { createSchema } from '../orm/index.js';
 import { logger } from './logger.js';
 import { createMediaUrl, createChunkedMediaUrl } from './attachmentUtils.js';
+import { createClient } from '../api/client.js';
 
 // Default reconnect settings
 const RECONNECT_DELAY_MS = 1000;
@@ -36,6 +37,9 @@ const PING_INTERVAL_MS = 30000;
 // Prekey replenishment settings
 const PREKEY_MIN_COUNT = 20;
 const PREKEY_REPLENISH_COUNT = 50;
+
+// Token refresh: refresh at 80% of TTL to avoid expiry during use
+const TOKEN_REFRESH_RATIO = 0.8;
 
 export class ObscuraClient {
   constructor(opts) {
@@ -138,9 +142,15 @@ export class ObscuraClient {
     this._ormModels = null;
     this._ormSyncManager = null;
 
+    // Token refresh state
+    this._refreshTimer = null;
+    this._refreshInProgress = null; // Promise dedup: only one refresh at a time
+
     // Auto-save session in browser
     if (typeof window !== 'undefined') {
       this.saveSession();
+      this._scheduleTokenRefresh();
+      this._setupVisibilityRefresh();
     }
   }
 
@@ -205,7 +215,12 @@ export class ObscuraClient {
    * Restore session from localStorage
    * @returns {ObscuraClient|null}
    */
-  static restoreSession() {
+  /**
+   * Restore session from localStorage.
+   * If the access token is expired but a refresh token exists, refreshes first.
+   * @returns {Promise<ObscuraClient|null>}
+   */
+  static async restoreSession() {
     if (typeof localStorage === 'undefined') return null;
 
     const saved = localStorage.getItem('obscura_session');
@@ -215,11 +230,27 @@ export class ObscuraClient {
       const session = JSON.parse(saved);
       if (!session.token || !session.username) return null;
 
-      // Check if token is expired - clear and require fresh login
+      // If token is expired, try to refresh before giving up
       if (ObscuraClient.isTokenExpired(session.token)) {
-        console.log('[ObscuraClient] Session token expired, clearing');
-        ObscuraClient.clearSession();
-        return null;
+        if (!session.refreshToken) {
+          console.log('[ObscuraClient] Token expired, no refresh token — clearing');
+          ObscuraClient.clearSession();
+          return null;
+        }
+
+        console.log('[ObscuraClient] Token expired, attempting refresh...');
+        try {
+          const apiClient = createClient(session.apiUrl);
+          const result = await apiClient.refreshSession(session.refreshToken);
+          // Update session with new tokens
+          session.token = result.token;
+          session.refreshToken = result.refreshToken;
+          console.log('[ObscuraClient] Token refreshed on restore');
+        } catch (e) {
+          console.warn('[ObscuraClient] Refresh failed on restore:', e.message);
+          ObscuraClient.clearSession();
+          return null;
+        }
       }
 
       // Recreate store from IndexedDB using username
@@ -246,7 +277,6 @@ export class ObscuraClient {
       });
 
       // Load recoveryPublicKey and p2pIdentity from deviceStore asynchronously
-      // We can't make this method async, so we load it in the background
       client._loadIdentityKeys();
 
       return client;
@@ -281,6 +311,168 @@ export class ObscuraClient {
       }
     } catch (e) {
       console.warn('[ObscuraClient] Failed to load identity keys:', e);
+    }
+  }
+
+  // === Token Refresh ===
+
+  /**
+   * Refresh access token using the stored refresh token.
+   * Deduplicates concurrent calls — only one refresh in-flight at a time.
+   * @returns {Promise<boolean>} true if refresh succeeded
+   */
+  async _refreshTokens() {
+    // Dedup: if a refresh is already in-flight, piggyback on it
+    if (this._refreshInProgress) {
+      return this._refreshInProgress;
+    }
+
+    this._refreshInProgress = this._doRefresh();
+    try {
+      return await this._refreshInProgress;
+    } finally {
+      this._refreshInProgress = null;
+    }
+  }
+
+  /**
+   * Internal: performs the actual token refresh
+   * @private
+   */
+  async _doRefresh() {
+    if (!this.refreshToken) {
+      console.warn('[ObscuraClient] No refresh token available');
+      return false;
+    }
+
+    try {
+      const apiClient = createClient(this.apiUrl);
+      const result = await apiClient.refreshSession(this.refreshToken);
+
+      // result: { token, refreshToken, expiresAt }
+      this._updateToken(result.token, result.refreshToken);
+      console.log('[ObscuraClient] Token refreshed, expires at:', new Date(result.expiresAt * 1000).toISOString());
+      return true;
+    } catch (e) {
+      console.error('[ObscuraClient] Token refresh failed:', e.message);
+      // If refresh token is revoked/expired (401/403), session is dead
+      if (e.status === 401 || e.status === 403) {
+        console.warn('[ObscuraClient] Refresh token rejected, session expired');
+      }
+      return false;
+    }
+  }
+
+  /**
+   * Propagate a new token to all subsystems and persist to localStorage
+   * @param {string} newToken - New JWT access token
+   * @param {string} newRefreshToken - New refresh token (rotation)
+   */
+  _updateToken(newToken, newRefreshToken) {
+    this.token = newToken;
+    this.refreshToken = newRefreshToken;
+
+    // Update subsystems
+    if (this.messenger) this.messenger.setToken(newToken);
+    if (this.attachments) this.attachments.setToken(newToken);
+
+    // Persist to localStorage
+    this.saveSession();
+
+    // Reschedule proactive refresh for the new token
+    this._scheduleTokenRefresh();
+  }
+
+  /**
+   * Schedule a proactive refresh at ~80% of the token's TTL.
+   * Clears any existing timer first.
+   */
+  _scheduleTokenRefresh() {
+    if (this._refreshTimer) {
+      clearTimeout(this._refreshTimer);
+      this._refreshTimer = null;
+    }
+
+    if (!this.token) return;
+
+    const payload = ObscuraClient._decodeTokenPayload(this.token);
+    if (!payload?.exp) return;
+
+    const now = Math.floor(Date.now() / 1000);
+    const ttl = payload.exp - now;
+    if (ttl <= 0) return; // Already expired, don't schedule
+
+    const refreshInMs = Math.max(ttl * TOKEN_REFRESH_RATIO * 1000, 5000); // At least 5s
+    this._refreshTimer = setTimeout(async () => {
+      console.log('[ObscuraClient] Proactive token refresh triggered');
+      const ok = await this._refreshTokens();
+      if (!ok) {
+        console.warn('[ObscuraClient] Proactive refresh failed, will retry on next activity');
+      }
+    }, refreshInMs);
+
+    console.log(`[ObscuraClient] Token refresh scheduled in ${Math.round(refreshInMs / 1000)}s`);
+  }
+
+  /**
+   * Listen for tab visibility changes.
+   * When the tab becomes visible again, check token and refresh if needed.
+   */
+  _setupVisibilityRefresh() {
+    if (typeof document === 'undefined') return;
+
+    this._visibilityHandler = async () => {
+      if (document.visibilityState !== 'visible') return;
+
+      // Tab just became visible — check if token is expired or close to expiry
+      if (ObscuraClient.isTokenExpired(this.token, 120)) {
+        console.log('[ObscuraClient] Tab resumed with stale token, refreshing...');
+        const ok = await this._refreshTokens();
+        if (ok) {
+          // Reconnect WebSocket with fresh token if it's disconnected
+          if (!this.ws || this.ws.readyState !== 1) {
+            console.log('[ObscuraClient] Reconnecting WebSocket after token refresh');
+            this._shouldReconnect = true;
+            this.connect().catch(e => {
+              console.warn('[ObscuraClient] Reconnect after refresh failed:', e.message);
+            });
+          }
+        }
+      } else {
+        // Token still valid, but reschedule timer (may have been throttled while hidden)
+        this._scheduleTokenRefresh();
+      }
+    };
+
+    document.addEventListener('visibilitychange', this._visibilityHandler);
+  }
+
+  /**
+   * Ensure the token is fresh before making a request.
+   * Call this before WebSocket connect or any critical API call.
+   * @returns {Promise<boolean>} true if token is valid (already fresh or refreshed)
+   */
+  async _ensureFreshToken() {
+    if (!ObscuraClient.isTokenExpired(this.token, 60)) {
+      return true; // Still good
+    }
+    return this._refreshTokens();
+  }
+
+  /**
+   * Decode JWT payload without validation
+   * @param {string} token - JWT
+   * @returns {object|null} Decoded payload
+   * @private
+   */
+  static _decodeTokenPayload(token) {
+    if (!token) return null;
+    try {
+      const parts = token.split('.');
+      if (parts.length !== 3) return null;
+      return JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    } catch {
+      return null;
     }
   }
 
@@ -617,7 +809,8 @@ export class ObscuraClient {
   }
 
   /**
-   * Schedule a reconnect with exponential backoff
+   * Schedule a reconnect with exponential backoff.
+   * Ensures token is fresh before attempting WebSocket connect.
    */
   _scheduleReconnect() {
     const delay = Math.min(
@@ -630,6 +823,8 @@ export class ObscuraClient {
       if (!this._shouldReconnect) return;
 
       try {
+        // Refresh token before reconnecting — no point connecting with a dead token
+        await this._ensureFreshToken();
         await this.connect();
         this._emit('reconnect');
       } catch (e) {
@@ -667,12 +862,23 @@ export class ObscuraClient {
   }
 
   /**
-   * Disconnect WebSocket
+   * Disconnect WebSocket and clean up token refresh timers
    */
   disconnect() {
     this._shouldReconnect = false;
     this._stopPingInterval();
     this._flushAcks();
+
+    // Clean up token refresh
+    if (this._refreshTimer) {
+      clearTimeout(this._refreshTimer);
+      this._refreshTimer = null;
+    }
+    if (this._visibilityHandler && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this._visibilityHandler);
+      this._visibilityHandler = null;
+    }
+
     if (this.ws) {
       this.ws.close();
       this.ws = null;

@@ -156,8 +156,14 @@ export class Messenger {
 
     if (!existingSession) {
       const bundle = await this.fetchPreKeyBundle(targetUserId);
-      const sessionBuilder = new SessionBuilder(this.store, address);
-      await sessionBuilder.processPreKey(bundle);
+      try {
+        const sessionBuilder = new SessionBuilder(this.store, address);
+        await sessionBuilder.processPreKey(bundle);
+      } catch (e) {
+        console.error(`[encrypt] processPreKey FAILED for ${targetUserId.slice(-8)}:`, e.message);
+        console.error(`[encrypt] bundle had: identityKey=${bundle.identityKey?.byteLength}B, signedPreKey.keyId=${bundle.signedPreKey?.keyId}, preKey=${!!bundle.preKey}, regId=${bundle.registrationId}`);
+        throw e;
+      }
       await logger.logSessionEstablish(targetUserId, !!bundle.preKey);
     }
 

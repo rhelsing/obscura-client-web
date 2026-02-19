@@ -1461,6 +1461,7 @@ export class ObscuraClient {
       signalIdentityKey: parsed.signalIdentityKey,
     };
     await this.devices.add(newDeviceInfo);
+    console.log(`[approveLink] step 1: device added ${parsed.serverUserId.slice(-8)}`);
 
     // Build approval with full device list (now includes new device)
     const approval = buildLinkApproval({
@@ -1479,6 +1480,8 @@ export class ObscuraClient {
       type: 'DEVICE_LINK_APPROVAL',
       deviceLinkApproval: approval,
     });
+
+    console.log(`[approveLink] step 2: approval sent to ${parsed.serverUserId.slice(-8)}`);
 
     // Notify OTHER own devices about the new device (excluding new device we just sent to)
     const otherDevices = this.devices.getAll().filter(d => d.serverUserId !== parsed.serverUserId);
@@ -1501,6 +1504,8 @@ export class ObscuraClient {
       }
     }
 
+    console.log(`[approveLink] step 3: other devices notified (${otherDevices.length})`);
+
     // Send SYNC_BLOB with full state (including ORM models)
     const syncData = {
       friends: this._serializeFriends(),
@@ -1514,6 +1519,8 @@ export class ObscuraClient {
       type: 'SYNC_BLOB',
       syncBlob: { compressedData },
     });
+
+    console.log(`[approveLink] step 4: sync blob sent to ${parsed.serverUserId.slice(-8)}`);
 
     // Announce updated device list to all friends
     await this.announceDevices();

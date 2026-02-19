@@ -103,7 +103,6 @@ export class ObscuraClient {
     // Bulk ACK buffer
     this._ackBuffer = [];
     this._ackTimer = null;
-    this._ackBatchSize = 20;
     this._ackFlushMs = 500;
 
     // Event handlers
@@ -994,14 +993,6 @@ export class ObscuraClient {
    */
   _acknowledge(messageId) {
     this._ackBuffer.push(messageId);
-
-    // Flush immediately if batch is full
-    if (this._ackBuffer.length >= this._ackBatchSize) {
-      this._flushAcks();
-      return;
-    }
-
-    // Otherwise schedule a flush
     if (!this._ackTimer) {
       this._ackTimer = setTimeout(() => this._flushAcks(), this._ackFlushMs);
     }

@@ -84,12 +84,21 @@ function formatTimeAgo(ts) {
 
 function formatReactions(reactions) {
   if (!reactions.length) return '';
-  // Group by emoji
-  const counts = {};
+  // Dedupe: keep only the latest reaction per user
+  const byUser = new Map();
   reactions.forEach(r => {
+    if (r.data?._deleted) return;
+    const existing = byUser.get(r.authorDeviceId);
+    if (!existing || r.timestamp > existing.timestamp) {
+      byUser.set(r.authorDeviceId, r);
+    }
+  });
+
+  const counts = {};
+  for (const r of byUser.values()) {
     const emoji = r.data?.emoji || '❤️';
     counts[emoji] = (counts[emoji] || 0) + 1;
-  });
+  }
   return Object.entries(counts)
     .map(([emoji, count]) => `${emoji} ${count}`)
     .join(' ');

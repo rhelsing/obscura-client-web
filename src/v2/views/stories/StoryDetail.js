@@ -61,7 +61,9 @@ export function render({ story = null, loading = false, error = null, myDeviceId
 
         <ry-cluster class="reaction-picker">
           ${(() => {
-            const myReaction = myDeviceId && reactions.find(r => r.authorDeviceId === myDeviceId && !r.data?._deleted);
+            const myReaction = myDeviceId && reactions
+              .filter(r => r.authorDeviceId === myDeviceId && !r.data?._deleted)
+              .sort((a, b) => b.timestamp - a.timestamp)[0];
             const myEmoji = myReaction?.data?.emoji;
             return ['❤️', '🔥', '😂', '😮', '😢', '👏'].map(emoji => `
               <button variant="ghost" size="sm" class="reaction-btn${emoji === myEmoji ? ' active' : ''}" data-emoji="${emoji}">${emoji}</button>
@@ -194,12 +196,21 @@ async function loadMedia(mediaUrl, client) {
 }
 
 function formatReactionGroups(reactions) {
-  const counts = {};
+  // Dedupe: keep only the latest reaction per user
+  const byUser = new Map();
   reactions.forEach(r => {
     if (r.data?._deleted) return;
+    const existing = byUser.get(r.authorDeviceId);
+    if (!existing || r.timestamp > existing.timestamp) {
+      byUser.set(r.authorDeviceId, r);
+    }
+  });
+
+  const counts = {};
+  for (const r of byUser.values()) {
     const emoji = r.data?.emoji || '❤️';
     counts[emoji] = (counts[emoji] || 0) + 1;
-  });
+  }
 
   return Object.entries(counts)
     .map(([emoji, count]) => `<span class="reaction-group">${emoji} ${count}</span>`)
@@ -290,6 +301,26 @@ export async function mount(container, client, router, params) {
       const reactions = await client.reaction.where({
         'data.storyId': storyId
       }).exec();
+
+      // Clean up duplicate reactions: keep only the latest per user
+      const byUser = new Map();
+      const duplicates = [];
+      for (const r of reactions.filter(r => !r.data?._deleted)) {
+        const existing = byUser.get(r.authorDeviceId);
+        if (!existing) {
+          byUser.set(r.authorDeviceId, r);
+        } else if (r.timestamp > existing.timestamp) {
+          duplicates.push(existing);
+          byUser.set(r.authorDeviceId, r);
+        } else {
+          duplicates.push(r);
+        }
+      }
+      // Delete duplicates in background
+      if (duplicates.length > 0) {
+        Promise.all(duplicates.map(d => client.reaction.delete(d.id).catch(() => {})));
+      }
+
       story.reactions = reactions;
     }
 
@@ -338,9 +369,11 @@ export async function mount(container, client, router, params) {
         btn.addEventListener('click', async () => {
           const emoji = btn.dataset.emoji;
           try {
-            const existing = (story.reactions || []).find(
-              r => r.authorDeviceId === client.deviceUUID && !r.data?._deleted
-            );
+            // Find the latest reaction from this user (there may be old duplicates)
+            const myReactions = (story.reactions || [])
+              .filter(r => r.authorDeviceId === client.deviceUUID && !r.data?._deleted)
+              .sort((a, b) => b.timestamp - a.timestamp);
+            const existing = myReactions[0] || null;
 
             if (existing && existing.data?.emoji === emoji) {
               // Same emoji - toggle off

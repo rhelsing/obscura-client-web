@@ -15,7 +15,7 @@
  *   9. Alice2 should STILL see the message (data persisted)
  */
 import { test, expect } from '@playwright/test';
-import { delay, randomUsername, waitForViewReady } from './helpers.js';
+import { delay, randomUsername, waitForViewReady, TEST_PASSWORD } from './helpers.js';
 
 test.describe('Scenario 15: Linked Device Data Persistence', () => {
 
@@ -43,7 +43,7 @@ test.describe('Scenario 15: Linked Device Data Persistence', () => {
 
     const aliceUsername = randomUsername();
     const bobUsername = randomUsername();
-    const password = 'testpass123';
+    const password = TEST_PASSWORD;
 
     // ============================================================
     // STEP 1: Register Alice1

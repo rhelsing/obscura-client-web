@@ -12,6 +12,7 @@
  *   13.3 Bob3 registers successfully in bob2's browser context
  */
 import { test, expect } from '@playwright/test';
+import { TEST_PASSWORD } from './helpers.js';
 
 const delay = (ms = 300) => new Promise(r => setTimeout(r, ms));
 
@@ -39,7 +40,7 @@ test.describe('Scenario 13: Device Unlink', () => {
 
     const bobUsername = randomUsername();
     const bob3Username = randomUsername();
-    const password = 'testpass123';
+    const password = TEST_PASSWORD;
 
     // ============================================================
     // SETUP: Register Bob1

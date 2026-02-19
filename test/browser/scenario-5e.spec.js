@@ -25,6 +25,7 @@
  *   12. Verify Bob2 NOW receives SENT_SYNC (recovered)
  */
 import { test, expect } from '@playwright/test';
+import { TEST_PASSWORD } from './helpers.js';
 
 const delay = (ms = 300) => new Promise(r => setTimeout(r, ms));
 
@@ -54,7 +55,7 @@ test.describe('Scenario 5e: Own-Device SESSION_RESET', () => {
 
     const bobUsername = randomUsername();
     const aliceUsername = randomUsername();
-    const password = 'testpass123';
+    const password = TEST_PASSWORD;
 
     // ============================================================
     // STEP 1: Register Bob (Device 1)

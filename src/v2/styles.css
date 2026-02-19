@@ -711,6 +711,11 @@ ul {
   background: var(--bg-secondary);
 }
 
+.reaction-btn.active {
+  background: var(--bg-secondary);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
 /* Comments */
 .comments-section {
   padding-top: 16px;

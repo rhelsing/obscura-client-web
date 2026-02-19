@@ -14,7 +14,7 @@
  *   17.8 Verify alice1 now sees only 1 Bob device (recovery device)
  */
 import { test, expect } from '@playwright/test';
-import { delay, randomUsername } from './helpers.js';
+import { delay, randomUsername, TEST_PASSWORD } from './helpers.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -45,7 +45,7 @@ test.describe('Scenario 17: Encrypted Backup/Recovery', () => {
 
     const bobUsername = randomUsername();
     const aliceUsername = randomUsername();
-    const password = 'testpass123';
+    const password = TEST_PASSWORD;
     let bobRecoveryPhrase = null;
     let backupFilePath = null;
 

@@ -7,7 +7,7 @@
 import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
-import { delay, randomUsername, waitForViewReady } from './helpers.js';
+import { delay, randomUsername, waitForViewReady, TEST_PASSWORD } from './helpers.js';
 
 test.describe('Scenario 12: Logging', () => {
 
@@ -29,7 +29,7 @@ test.describe('Scenario 12: Logging', () => {
 
     const username = randomUsername();
     const bobUsername = randomUsername();
-    const password = 'testpass123';
+    const password = TEST_PASSWORD;
 
     // ============================================================
     // SETUP: Register Alice

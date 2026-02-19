@@ -48,7 +48,7 @@ async function main() {
   // Build payload with 33-byte keys (standard libsignal output)
   const payload = {
     username: `test_xeddsa_${Date.now()}`,
-    password: 'testpass123',
+    password: 'testpass12345',
     identityKey: toBase64(identityKeyPair.pubKey),
     registrationId,
     signedPreKey: {

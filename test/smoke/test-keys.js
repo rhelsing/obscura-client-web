@@ -90,7 +90,7 @@ async function testRegistration(keys, config) {
   console.log(`\n=== Testing: ${label} ===\n`);
 
   const username = `test_${Date.now()}`;
-  const password = 'testpass123';
+  const password = 'testpass12345';
 
   // Choose encoding functions based on config
   const encodeKey = (buffer, strip) => {

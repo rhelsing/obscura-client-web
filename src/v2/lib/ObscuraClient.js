@@ -100,6 +100,12 @@ export class ObscuraClient {
     this._shouldReconnect = true;
     this._pingInterval = null;
 
+    // Bulk ACK buffer
+    this._ackBuffer = [];
+    this._ackTimer = null;
+    this._ackBatchSize = 20;
+    this._ackFlushMs = 500;
+
     // Event handlers
     this._handlers = {
       message: [],
@@ -666,6 +672,7 @@ export class ObscuraClient {
   disconnect() {
     this._shouldReconnect = false;
     this._stopPingInterval();
+    this._flushAcks();
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -983,13 +990,39 @@ export class ObscuraClient {
   }
 
   /**
-   * Acknowledge a message
+   * Queue a message ID for bulk acknowledgment
    */
   _acknowledge(messageId) {
-    if (!this.ws || this.ws.readyState !== 1) return;
+    this._ackBuffer.push(messageId);
+
+    // Flush immediately if batch is full
+    if (this._ackBuffer.length >= this._ackBatchSize) {
+      this._flushAcks();
+      return;
+    }
+
+    // Otherwise schedule a flush
+    if (!this._ackTimer) {
+      this._ackTimer = setTimeout(() => this._flushAcks(), this._ackFlushMs);
+    }
+  }
+
+  /**
+   * Flush buffered ACKs as a single bulk message
+   */
+  _flushAcks() {
+    clearTimeout(this._ackTimer);
+    this._ackTimer = null;
+
+    if (!this._ackBuffer.length || !this.ws || this.ws.readyState !== 1) return;
+
+    const ids = this._ackBuffer;
+    this._ackBuffer = [];
 
     const frame = this.messenger.WebSocketFrame.create({
-      ack: { messageId },
+      ack: ids.length === 1
+        ? { messageId: ids[0] }
+        : { messageIds: ids },
     });
     const buffer = this.messenger.WebSocketFrame.encode(frame).finish();
     this.ws.send(buffer);

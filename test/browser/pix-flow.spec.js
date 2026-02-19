@@ -2,6 +2,7 @@
  * Pix Flow Test - Full test for pix send/receive with streak
  */
 import { test, expect } from '@playwright/test';
+import { TEST_PASSWORD } from './helpers.js';
 
 const delay = (ms = 300) => new Promise(r => setTimeout(r, ms));
 
@@ -47,7 +48,7 @@ test('Pix: Alice and Bob exchange 3 pix each, streak shows', async ({ browser })
 
   const aliceUsername = randomUsername();
   const bobUsername = randomUsername();
-  const password = 'testpass123';
+  const password = TEST_PASSWORD;
 
   // ========== REGISTER ALICE ==========
   console.log('\n--- Registering Alice ---');

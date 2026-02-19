@@ -7,7 +7,7 @@ import { navigate } from '../index.js';
 
 let cleanup = null;
 
-export function render({ story = null, loading = false, error = null } = {}) {
+export function render({ story = null, loading = false, error = null, myDeviceId = null } = {}) {
   if (loading) {
     return `<div class="view story-detail"><div class="loading">Loading...</div></div>`;
   }
@@ -60,9 +60,13 @@ export function render({ story = null, loading = false, error = null } = {}) {
         </ry-cluster>
 
         <ry-cluster class="reaction-picker">
-          ${['❤️', '🔥', '😂', '😮', '😢', '👏'].map(emoji => `
-            <button variant="ghost" size="sm" class="reaction-btn" data-emoji="${emoji}">${emoji}</button>
-          `).join('')}
+          ${(() => {
+            const myReaction = myDeviceId && reactions.find(r => r.authorDeviceId === myDeviceId && !r.data?._deleted);
+            const myEmoji = myReaction?.data?.emoji;
+            return ['❤️', '🔥', '😂', '😮', '😢', '👏'].map(emoji => `
+              <button variant="ghost" size="sm" class="reaction-btn${emoji === myEmoji ? ' active' : ''}" data-emoji="${emoji}">${emoji}</button>
+            `).join('');
+          })()}
         </ry-cluster>
       </ry-card>
 
@@ -296,7 +300,7 @@ export async function mount(container, client, router, params) {
     story.mediaLoading = story.hasMedia; // Start loading if has media
 
     const rerender = () => {
-      container.innerHTML = render({ story });
+      container.innerHTML = render({ story, myDeviceId: client.deviceUUID });
       attachEventHandlers();
     };
 
@@ -329,12 +333,26 @@ export async function mount(container, client, router, params) {
         });
       }
 
-      // Reaction buttons
+      // Reaction buttons - one reaction per user per story
       container.querySelectorAll('.reaction-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           const emoji = btn.dataset.emoji;
           try {
-            await client.reaction.create({ storyId, emoji });
+            const existing = (story.reactions || []).find(
+              r => r.authorDeviceId === client.deviceUUID && !r.data?._deleted
+            );
+
+            if (existing && existing.data?.emoji === emoji) {
+              // Same emoji - toggle off
+              await client.reaction.delete(existing.id);
+            } else if (existing) {
+              // Different emoji - swap
+              await client.reaction.delete(existing.id);
+              await client.reaction.create({ storyId, emoji });
+            } else {
+              // No existing reaction - create
+              await client.reaction.create({ storyId, emoji });
+            }
             mount(container, client, router, params);
           } catch (err) {
             console.error('Failed to add reaction:', err);
@@ -382,7 +400,7 @@ export async function mount(container, client, router, params) {
       router.updatePageLinks();
     };
 
-    container.innerHTML = render({ story });
+    container.innerHTML = render({ story, myDeviceId: client.deviceUUID });
     attachEventHandlers();
 
     // Auto-download media if present

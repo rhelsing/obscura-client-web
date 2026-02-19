@@ -21,6 +21,7 @@
  *   6. Verify ALL communication paths still work after reset
  */
 import { test, expect } from '@playwright/test';
+import { TEST_PASSWORD } from './helpers.js';
 
 const delay = (ms = 300) => new Promise(r => setTimeout(r, ms));
 
@@ -51,7 +52,7 @@ test.describe('Scenario 5d: Multi-Device SESSION_RESET', () => {
 
     const aliceUsername = randomUsername();
     const bobUsername = randomUsername();
-    const password = 'testpass123';
+    const password = TEST_PASSWORD;
 
     // ============================================================
     // STEP 1: Register Alice (Device 1)

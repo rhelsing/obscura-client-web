@@ -24,6 +24,7 @@
  * never overlap online but still need to stay in sync.
  */
 import { test, expect } from '@playwright/test';
+import { TEST_PASSWORD } from './helpers.js';
 
 const delay = (ms = 300) => new Promise(r => setTimeout(r, ms));
 
@@ -59,7 +60,7 @@ test.describe('Scenario 16: Multi-Device Offline Sync (Bidirectional)', () => {
     const aliceUsername = randomUsername();
     const charlieUsername = randomUsername();
     const daveUsername = randomUsername();
-    const password = 'testpass123';
+    const password = TEST_PASSWORD;
 
     // ============================================================
     // PHASE 1: SETUP

@@ -9,6 +9,7 @@
 import { test, expect } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
+import { TEST_PASSWORD } from './helpers.js';
 
 const delay = (ms = 300) => new Promise(r => setTimeout(r, ms));
 
@@ -43,7 +44,7 @@ test.describe('Scenario 18: HEIC Image Upload', () => {
     page.on('dialog', d => d.accept());
 
     const username = randomUsername();
-    const password = 'testpass123';
+    const password = TEST_PASSWORD;
 
     // --- Register Alice ---
     await page.goto('/register');
@@ -146,7 +147,7 @@ test.describe('Scenario 18: HEIC Image Upload', () => {
     page.on('console', msg => console.log('[alice]', msg.text()));
 
     const username = randomUsername();
-    const password = 'testpass123';
+    const password = TEST_PASSWORD;
 
     // Register
     await page.goto('/register');

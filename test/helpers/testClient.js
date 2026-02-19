@@ -292,7 +292,7 @@ export class TestClient {
 
   // === Auth Methods ===
 
-  async register(username, password = 'testpass123') {
+  async register(username, password = 'testpass12345') {
     this.username = username;
     this.password = password;
 

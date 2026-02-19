@@ -8,7 +8,7 @@
  * - Bob2 tests multi-device fan-out + self-sync
  */
 import { test, expect } from '@playwright/test';
-import { delay, randomUsername, waitForViewReady } from './helpers.js';
+import { delay, randomUsername, waitForViewReady, TEST_PASSWORD } from './helpers.js';
 
 test.describe('Scenario 8: ORM Layer', () => {
 
@@ -30,7 +30,7 @@ test.describe('Scenario 8: ORM Layer', () => {
 
     const username = randomUsername();
     const bobUsername = randomUsername();
-    const password = 'testpass123';
+    const password = TEST_PASSWORD;
 
     // --- Register Alice ---
     await page.goto('/register');

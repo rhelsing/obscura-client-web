@@ -51,4 +51,5 @@ message EncryptedMessage {
 // Sent by Client to confirm processing. Server hard-deletes the message upon receipt.
 message AckMessage {
   string message_id = 1;    // The UUID from the Envelope.
+  repeated string message_ids = 2; // Support for bulk ACKs.
 }

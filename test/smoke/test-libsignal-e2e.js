@@ -224,7 +224,7 @@ async function main() {
 
   const userA = `alice_${Date.now()}`;
   const userB = `bob_${Date.now()}`;
-  const password = 'testpass123';
+  const password = 'testpass12345';
 
   // === Step 1: Generate keys for both users ===
   console.log('━━━ Step 1: Generating libsignal keys ━━━\n');

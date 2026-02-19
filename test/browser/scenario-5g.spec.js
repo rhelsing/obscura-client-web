@@ -19,6 +19,7 @@
  *   - Fan-out continues to work after partial recovery
  */
 import { test, expect } from '@playwright/test';
+import { TEST_PASSWORD } from './helpers.js';
 
 const delay = (ms = 300) => new Promise(r => setTimeout(r, ms));
 
@@ -48,7 +49,7 @@ test.describe('Scenario 5g: Multi-Device Auto-Recovery', () => {
 
     const aliceUsername = randomUsername();
     const bobUsername = randomUsername();
-    const password = 'testpass123';
+    const password = TEST_PASSWORD;
 
     // ============================================================
     // STEP 1: Register Alice

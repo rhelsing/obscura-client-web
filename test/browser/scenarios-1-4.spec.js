@@ -13,7 +13,7 @@
  *   - scenario-7.spec.js - Device Revocation
  */
 import { test, expect } from '@playwright/test';
-import { delay, randomUsername, waitForViewReady } from './helpers.js';
+import { delay, randomUsername, waitForViewReady, TEST_PASSWORD } from './helpers.js';
 
 test.describe('Scenarios 1-4: Core Flow', () => {
 
@@ -38,7 +38,7 @@ test.describe('Scenarios 1-4: Core Flow', () => {
 
     const username = randomUsername();       // Alice's username
     const bobUsername = randomUsername();    // Bob's username
-    const password = 'testpass123';
+    const password = TEST_PASSWORD;
     let savedPhrase = null;      // Alice's recovery phrase
 
     // ============================================================

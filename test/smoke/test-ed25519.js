@@ -42,7 +42,7 @@ async function main() {
   // Build registration payload (32-byte keys, like server tests)
   const payload = {
     username: `test_ed25519_${Date.now()}`,
-    password: 'testpass123',
+    password: 'testpass12345',
     identityKey: toBase64(identityPubKey),
     registrationId: Math.floor(Math.random() * 16380) + 1,
     signedPreKey: {
@@ -93,7 +93,7 @@ async function main() {
 
   const payload33 = {
     username: `test_ed25519_33_${Date.now()}`,
-    password: 'testpass123',
+    password: 'testpass12345',
     identityKey: toBase64(identityPubKey33),
     registrationId: Math.floor(Math.random() * 16380) + 1,
     signedPreKey: {

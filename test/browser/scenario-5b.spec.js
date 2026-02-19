@@ -30,6 +30,7 @@
  *   - Session is Bob's, not Alice's
  */
 import { test, expect } from '@playwright/test';
+import { TEST_PASSWORD } from './helpers.js';
 
 const delay = (ms = 300) => new Promise(r => setTimeout(r, ms));
 
@@ -52,7 +53,7 @@ test.describe('Scenario 5b: Cross-User Device Linking', () => {
     const bobContext = await browser.newContext();            // Browser Y
     const alice2Context = await browser.newContext();         // Browser Z
 
-    const password = 'testpass123';
+    const password = TEST_PASSWORD;
     const aliceUsername = randomUsername();    // Stale user on shared browser
     const bobUsername = randomUsername();
     const alice2Username = randomUsername();   // Fresh Alice for friending

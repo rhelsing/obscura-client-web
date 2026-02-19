@@ -34,6 +34,11 @@ export async function gotoAndWait(page, path, extraDelay = 100) {
 export const delay = (ms = 300) => new Promise(r => setTimeout(r, ms));
 
 /**
+ * Default test password (13 characters)
+ */
+export const TEST_PASSWORD = 'testpass12345';
+
+/**
  * Generate a random test username
  * @returns {string}
  */

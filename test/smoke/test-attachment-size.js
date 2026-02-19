@@ -10,7 +10,7 @@ const API_URL = process.env.VITE_API_URL || 'http://localhost:3000';
 
 async function register() {
   const username = `sizetest_${Date.now()}`;
-  const password = 'testpass123';
+  const password = 'testpass12345';
 
   const res = await fetch(`${API_URL}/v1/register`, {
     method: 'POST',

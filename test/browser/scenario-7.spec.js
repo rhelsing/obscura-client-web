@@ -11,7 +11,7 @@
  *   7.5 Bob2 self-bricks (wipes data, redirects to login)
  */
 import { test, expect } from '@playwright/test';
-import { delay, randomUsername, waitForViewReady } from './helpers.js';
+import { delay, randomUsername, waitForViewReady, TEST_PASSWORD } from './helpers.js';
 
 test.describe('Scenario 7: Device Revocation', () => {
 
@@ -33,7 +33,7 @@ test.describe('Scenario 7: Device Revocation', () => {
 
     const username = randomUsername();
     const bobUsername = randomUsername();
-    const password = 'testpass123';
+    const password = TEST_PASSWORD;
     let bobSavedPhrase = null;
 
     // ============================================================

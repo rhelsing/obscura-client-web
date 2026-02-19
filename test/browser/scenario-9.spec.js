@@ -5,7 +5,7 @@
  * Tests: Camera capture, send, receive, multi-recipient, offline delivery, PixViewer UI
  */
 import { test, expect } from '@playwright/test';
-import { delay, randomUsername, waitForViewReady } from './helpers.js';
+import { delay, randomUsername, waitForViewReady, TEST_PASSWORD } from './helpers.js';
 
 test.describe('Scenario 9: Pix Flow', () => {
 
@@ -40,7 +40,7 @@ test.describe('Scenario 9: Pix Flow', () => {
     const username = randomUsername();
     const bobUsername = randomUsername();
     const carolUsername = randomUsername();
-    const password = 'testpass123';
+    const password = TEST_PASSWORD;
 
     // ============================================================
     // SETUP 1: Register Alice

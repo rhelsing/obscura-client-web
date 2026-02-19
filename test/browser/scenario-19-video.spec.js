@@ -7,6 +7,7 @@
  * Alice records a video pix and sends to Bob
  */
 import { test, expect } from '@playwright/test';
+import { TEST_PASSWORD } from './helpers.js';
 
 const delay = (ms = 300) => new Promise(r => setTimeout(r, ms));
 
@@ -35,7 +36,7 @@ test.describe('Scenario 19: Video Recording', () => {
 
     const username = randomUsername();
     const bobUsername = randomUsername();
-    const password = 'testpass123';
+    const password = TEST_PASSWORD;
 
     // --- Register Alice ---
     await page.goto('/register');

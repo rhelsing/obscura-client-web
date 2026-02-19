@@ -17,8 +17,8 @@ async function bootstrap() {
     return;
   }
 
-  // Try to restore session
-  const client = ObscuraClient.restoreSession();
+  // Try to restore session (may refresh expired token)
+  const client = await ObscuraClient.restoreSession();
 
   if (client) {
     console.log('[main] Restored session for:', client.username);

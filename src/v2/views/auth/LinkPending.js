@@ -111,6 +111,11 @@ export async function mount(container, _client, router) {
 
   let approvalHandler = null;
   let syncHandler = null;
+  let syncRetryTimer = null;
+  let syncRetryCount = 0;
+  let syncReceived = false;
+  const SYNC_RETRY_INTERVAL = 10000; // 10s between retries
+  const SYNC_MAX_RETRIES = 3;
 
   try {
     // 1. Define schema FIRST so ORM models exist when SYNC_BLOB arrives
@@ -128,9 +133,33 @@ export async function mount(container, _client, router) {
         waitingDiv.innerHTML = '<p>Approved! Syncing data...</p>';
       }
       approval.apply();
+
+      // Start retry timer - if SYNC_BLOB doesn't arrive, request it
+      const retrySyncIfNeeded = async () => {
+        if (syncReceived) return;
+        syncRetryCount++;
+        console.log(`[LinkPending] SYNC_BLOB not received, sending SYNC_REQUEST (attempt ${syncRetryCount}/${SYNC_MAX_RETRIES})`);
+        try {
+          await pendingClient.requestSync();
+        } catch (e) {
+          console.warn('[LinkPending] SYNC_REQUEST failed:', e.message);
+        }
+        if (!syncReceived && syncRetryCount < SYNC_MAX_RETRIES) {
+          syncRetryTimer = setTimeout(retrySyncIfNeeded, SYNC_RETRY_INTERVAL);
+        } else if (!syncReceived) {
+          console.error('[LinkPending] SYNC_BLOB not received after max retries');
+          container.innerHTML = render({ error: 'Sync timed out. The approving device may have gone offline. Please try again.' });
+        }
+      };
+      syncRetryTimer = setTimeout(retrySyncIfNeeded, SYNC_RETRY_INTERVAL);
     };
 
     syncHandler = async () => {
+      syncReceived = true;
+      if (syncRetryTimer) {
+        clearTimeout(syncRetryTimer);
+        syncRetryTimer = null;
+      }
       try {
         // Schema already defined before connect, just clean up and navigate
         delete window.__pendingClient;
@@ -155,6 +184,10 @@ export async function mount(container, _client, router) {
   router.updatePageLinks();
 
   cleanup = () => {
+    if (syncRetryTimer) {
+      clearTimeout(syncRetryTimer);
+      syncRetryTimer = null;
+    }
     if (pendingClient) {
       if (approvalHandler) pendingClient.off('linkApproval', approvalHandler);
       if (syncHandler) pendingClient.off('syncBlob', syncHandler);

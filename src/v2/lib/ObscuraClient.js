@@ -103,7 +103,8 @@ export class ObscuraClient {
     // Bulk ACK buffer
     this._ackBuffer = [];
     this._ackTimer = null;
-    this._ackFlushMs = 500;
+    this._ackBatchSize = 100;
+    this._ackFlushMs = 200;
 
     // Event handlers
     this._handlers = {
@@ -993,6 +994,10 @@ export class ObscuraClient {
    */
   _acknowledge(messageId) {
     this._ackBuffer.push(messageId);
+    if (this._ackBuffer.length >= this._ackBatchSize) {
+      this._flushAcks();
+      return;
+    }
     if (!this._ackTimer) {
       this._ackTimer = setTimeout(() => this._flushAcks(), this._ackFlushMs);
     }

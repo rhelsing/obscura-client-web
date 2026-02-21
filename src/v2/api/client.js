@@ -281,6 +281,114 @@ export function createClient(baseUrl = API_URL) {
     },
 
     /**
+     * Upload a backup blob to the server
+     * Uses optimistic locking: If-None-Match: * for first upload, If-Match: <etag> for updates
+     * @param {Uint8Array} data - Encrypted backup blob
+     * @param {string|null} etag - ETag from previous backup (null for first upload)
+     * @returns {Promise<{etag: string}>} New ETag for subsequent updates
+     */
+    async uploadBackup(data, etag = null) {
+      const url = `${baseUrl}/v1/backup`;
+      const headers = {
+        'Content-Type': 'application/octet-stream',
+        'Authorization': `Bearer ${token}`,
+      };
+
+      if (etag) {
+        headers['If-Match'] = etag;
+      } else {
+        headers['If-None-Match'] = '*';
+      }
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: data,
+      });
+
+      if (!response.ok) {
+        const error = new Error(`HTTP ${response.status}`);
+        error.status = response.status;
+        error.body = await response.text().catch(() => '');
+        throw error;
+      }
+
+      return { etag: response.headers.get('etag') };
+    },
+
+    /**
+     * Download the latest backup blob from the server
+     * @param {string|null} etag - If-None-Match value for conditional fetch
+     * @returns {Promise<{data: Uint8Array, etag: string}|null>} Backup data or null if not modified
+     */
+    async downloadBackup(etag = null) {
+      const url = `${baseUrl}/v1/backup`;
+      const headers = {
+        'Authorization': `Bearer ${token}`,
+      };
+
+      if (etag) {
+        headers['If-None-Match'] = etag;
+      }
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+      });
+
+      if (response.status === 304) {
+        return null; // Not modified
+      }
+
+      if (response.status === 404) {
+        return null; // No backup exists
+      }
+
+      if (!response.ok) {
+        const error = new Error(`HTTP ${response.status}`);
+        error.status = response.status;
+        throw error;
+      }
+
+      return {
+        data: new Uint8Array(await response.arrayBuffer()),
+        etag: response.headers.get('etag'),
+      };
+    },
+
+    /**
+     * Check if a backup exists on the server (HEAD request)
+     * @returns {Promise<{exists: boolean, etag: string|null, size: number|null}>}
+     */
+    async checkBackup() {
+      const url = `${baseUrl}/v1/backup`;
+      const headers = {
+        'Authorization': `Bearer ${token}`,
+      };
+
+      const response = await fetch(url, {
+        method: 'HEAD',
+        headers,
+      });
+
+      if (response.status === 404) {
+        return { exists: false, etag: null, size: null };
+      }
+
+      if (!response.ok) {
+        const error = new Error(`HTTP ${response.status}`);
+        error.status = response.status;
+        throw error;
+      }
+
+      return {
+        exists: true,
+        etag: response.headers.get('etag'),
+        size: parseInt(response.headers.get('content-length'), 10) || null,
+      };
+    },
+
+    /**
      * Decode JWT payload
      */
     decodeToken(t = token) {

@@ -26,6 +26,7 @@ import { createSchema } from '../orm/index.js';
 import { logger } from './logger.js';
 import { createMediaUrl, createChunkedMediaUrl } from './attachmentUtils.js';
 import { createClient } from '../api/client.js';
+import { createBackupManager } from '../backup/BackupManager.js';
 
 // Default reconnect settings
 const RECONNECT_DELAY_MS = 1000;
@@ -862,12 +863,50 @@ export class ObscuraClient {
   }
 
   /**
+   * Perform a web backup upload if enabled in settings.
+   * Fire-and-forget — errors are logged but not thrown.
+   * @returns {Promise<void>}
+   */
+  async performWebBackup() {
+    try {
+      if (!this.settings) return;
+
+      const settingsRecord = await this.settings.where({}).first();
+      if (!settingsRecord?.data?.webBackupEnabled) return;
+
+      console.log('[ObscuraClient] Web backup enabled, uploading...');
+
+      const backupManager = createBackupManager(this.username, this.userId);
+      const apiClient = createClient(this.apiUrl);
+      apiClient.setToken(this.token);
+
+      const knownEtag = settingsRecord.data.webBackupEtag || null;
+      const result = await backupManager.uploadWebBackup(apiClient, knownEtag);
+      backupManager.close();
+
+      // Persist new etag and timestamp
+      const now = new Date().toISOString();
+      await this.settings.upsert(settingsRecord.id, {
+        webBackupEtag: result.etag,
+        webBackupLastUpload: now,
+      });
+
+      console.log('[ObscuraClient] Web backup uploaded successfully');
+    } catch (err) {
+      console.error('[ObscuraClient] Web backup failed:', err);
+    }
+  }
+
+  /**
    * Disconnect WebSocket and clean up token refresh timers
    */
   disconnect() {
     this._shouldReconnect = false;
     this._stopPingInterval();
     this._flushAcks();
+
+    // Trigger web backup before disconnecting (fire-and-forget)
+    this.performWebBackup();
 
     // Clean up token refresh
     if (this._refreshTimer) {

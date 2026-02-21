@@ -11,6 +11,7 @@ import { renderNav, initNav } from '../components/Nav.js';
 import { ObscuraClient } from '../../lib/ObscuraClient.js';
 import { unlinkDevice } from '../../lib/auth.js';
 import { createBackupManager } from '../../backup/BackupManager.js';
+import { createClient } from '../../api/client.js';
 
 let cleanup = null;
 
@@ -20,6 +21,8 @@ export function render({ settings = null, loading = false, saving = false, isFir
   }
 
   const notifications = settings?.data?.notificationsEnabled ?? true;
+  const webBackup = settings?.data?.webBackupEnabled ?? false;
+  const lastUpload = settings?.data?.webBackupLastUpload;
 
   return `
     <div class="view settings">
@@ -92,6 +95,13 @@ export function render({ settings = null, loading = false, saving = false, isFir
         <section class="settings-group">
           <h2>Backup & Recovery</h2>
           <stack gap="sm">
+            <card>
+              <ry-switch id="web-backup-toggle" ${webBackup ? 'checked' : ''} ${saving ? 'disabled' : ''}>
+                Web Backup
+              </ry-switch>
+              <p class="hint">Automatically back up your account to the server. Encrypted with your recovery key — no media, text and keys only.</p>
+              <p id="web-backup-status" class="hint" style="display: ${webBackup ? 'block' : 'none'};">${lastUpload ? `Last backup: ${new Date(lastUpload).toLocaleString()}` : ''}</p>
+            </card>
             <card>
               <button id="export-backup" variant="ghost">
                 <cluster>
@@ -205,6 +215,66 @@ export async function mount(container, client, router) {
         } catch (err) {
           console.error('Failed to save settings:', err);
         }
+      }
+    });
+
+    // Web backup toggle
+    const webBackupToggle = container.querySelector('#web-backup-toggle');
+    const webBackupStatus = container.querySelector('#web-backup-status');
+
+    webBackupToggle.addEventListener('ry:change', async (e) => {
+      const enabled = e.detail.checked;
+
+      // Persist the setting
+      if (client.settings) {
+        try {
+          const data = { webBackupEnabled: enabled };
+          if (settingsId) {
+            await client.settings.upsert(settingsId, data);
+          } else {
+            const created = await client.settings.create(data);
+            settingsId = created.id;
+          }
+        } catch (err) {
+          console.error('Failed to save web backup setting:', err);
+        }
+      }
+
+      if (enabled) {
+        // Trigger an immediate upload
+        webBackupStatus.style.display = 'block';
+        webBackupStatus.textContent = 'Uploading backup...';
+
+        try {
+          const backupManager = createBackupManager(client.username, client.userId);
+          const apiClient = createClient(client.apiUrl);
+          apiClient.setToken(client.token);
+
+          // Get existing etag from settings if we have one
+          const currentSettings = settingsId
+            ? await client.settings.where({}).first()
+            : null;
+          const knownEtag = currentSettings?.data?.webBackupEtag || null;
+
+          const result = await backupManager.uploadWebBackup(apiClient, knownEtag);
+          backupManager.close();
+
+          // Store the new etag and timestamp
+          const now = new Date().toISOString();
+          if (client.settings && settingsId) {
+            await client.settings.upsert(settingsId, {
+              webBackupEtag: result.etag,
+              webBackupLastUpload: now,
+            });
+          }
+
+          webBackupStatus.textContent = `Last backup: ${new Date(now).toLocaleString()}`;
+        } catch (err) {
+          console.error('Failed to upload web backup:', err);
+          webBackupStatus.textContent = `Backup failed: ${err.message}`;
+        }
+      } else {
+        webBackupStatus.style.display = 'none';
       }
     });
 

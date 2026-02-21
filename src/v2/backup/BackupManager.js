@@ -12,6 +12,7 @@ import { createDeviceStore } from '../store/deviceStore.js';
 import { createFriendStore } from '../store/friendStore.js';
 import { createMessageStore } from '../store/messageStore.js';
 import { keyCache } from '../lib/keyCache.js';
+import { compress } from '../crypto/compress.js';
 
 const BACKUP_MAGIC = 'OBSCURA_BACKUP';
 const BACKUP_FILE_VERSION = 1;
@@ -297,6 +298,66 @@ export function createBackupManager(username, userId) {
         friendCount: backupData.friends?.length || 0,
         messageCount: backupData.messages?.length || 0,
       };
+    },
+
+    /**
+     * Export a condensed backup for server upload (no media)
+     * Strips mediaUrl and contentReference from messages, compresses with gzip.
+     * Result is encrypted with recovery public key, same as local backup.
+     *
+     * @returns {Promise<Uint8Array>} Encrypted + compressed backup blob (no file header)
+     * @throws {Error} If recoveryPublicKey not found
+     */
+    async exportWebBackup() {
+      const identity = await deviceStore.getIdentity();
+      if (!identity?.recoveryPublicKey) {
+        throw new Error('Recovery public key not found. Cannot create web backup.');
+      }
+
+      const recoveryPublicKey = identity.recoveryPublicKey instanceof Uint8Array
+        ? identity.recoveryPublicKey
+        : new Uint8Array(Object.values(identity.recoveryPublicKey));
+
+      // Collect all data (same as full backup)
+      const backupData = await this._collectAllData(identity);
+
+      // Strip media from messages to reduce size
+      if (backupData.messages) {
+        backupData.messages = backupData.messages.map(msg => {
+          const { mediaUrl, contentReference, ...rest } = msg;
+          return rest;
+        });
+      }
+
+      // Mark as web backup
+      backupData.webBackup = true;
+
+      // Compress before encryption to minimize size
+      const compressed = await compress(backupData);
+
+      // Encrypt with recovery public key
+      return encryptBackup(compressed, recoveryPublicKey);
+    },
+
+    /**
+     * Upload a web backup to the server
+     * Handles ETag-based optimistic locking automatically.
+     *
+     * @param {object} apiClient - API client with uploadBackup/checkBackup methods
+     * @param {string|null} knownEtag - Last known ETag (null for first upload)
+     * @returns {Promise<{etag: string}>} New ETag for subsequent updates
+     */
+    async uploadWebBackup(apiClient, knownEtag = null) {
+      const blob = await this.exportWebBackup();
+
+      // If we don't have an etag, check if one exists on server
+      let etag = knownEtag;
+      if (!etag) {
+        const check = await apiClient.checkBackup();
+        etag = check.etag; // null if no backup exists yet
+      }
+
+      return apiClient.uploadBackup(blob, etag);
     },
 
     /**

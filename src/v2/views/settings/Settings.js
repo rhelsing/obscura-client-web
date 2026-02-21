@@ -197,24 +197,27 @@ export async function mount(container, client, router) {
 
     container.innerHTML = render({ settings, isFirstDevice });
 
+    // Helper: save a partial settings update (merges with existing data)
+    const SETTINGS_DEFAULTS = { theme: 'system', notificationsEnabled: true, webBackupEnabled: false };
+    async function saveSettings(updates) {
+      if (!client.settings) return;
+      if (settingsId) {
+        const current = await client.settings.where({}).first();
+        const merged = { ...SETTINGS_DEFAULTS, ...current?.data, ...updates };
+        await client.settings.upsert(settingsId, merged);
+      } else {
+        const created = await client.settings.create({ ...SETTINGS_DEFAULTS, ...updates });
+        settingsId = created.id;
+      }
+    }
+
     // Notifications toggle - listen for ry:change event from switch
     const notifToggle = container.querySelector('#notifications-toggle');
     notifToggle.addEventListener('ry:change', async (e) => {
-      if (client.settings) {
-        try {
-          const data = {
-            notificationsEnabled: e.detail.checked
-          };
-
-          if (settingsId) {
-            await client.settings.upsert(settingsId, data);
-          } else {
-            const created = await client.settings.create(data);
-            settingsId = created.id;
-          }
-        } catch (err) {
-          console.error('Failed to save settings:', err);
-        }
+      try {
+        await saveSettings({ notificationsEnabled: e.detail.value === 'true' || e.detail.value === true });
+      } catch (err) {
+        console.error('Failed to save settings:', err);
       }
     });
 
@@ -223,21 +226,13 @@ export async function mount(container, client, router) {
     const webBackupStatus = container.querySelector('#web-backup-status');
 
     webBackupToggle.addEventListener('ry:change', async (e) => {
-      const enabled = e.detail.checked;
+      const enabled = e.detail.value === 'true' || e.detail.value === true;
 
       // Persist the setting
-      if (client.settings) {
-        try {
-          const data = { webBackupEnabled: enabled };
-          if (settingsId) {
-            await client.settings.upsert(settingsId, data);
-          } else {
-            const created = await client.settings.create(data);
-            settingsId = created.id;
-          }
-        } catch (err) {
-          console.error('Failed to save web backup setting:', err);
-        }
+      try {
+        await saveSettings({ webBackupEnabled: enabled });
+      } catch (err) {
+        console.error('Failed to save web backup setting:', err);
       }
 
       if (enabled) {
@@ -248,7 +243,7 @@ export async function mount(container, client, router) {
         try {
           const backupManager = createBackupManager(client.username, client.userId);
           const apiClient = createClient(client.apiUrl);
-          apiClient.setToken(client.token);
+          apiClient.setToken(client.shellToken || client.token);
 
           // Get existing etag from settings if we have one
           const currentSettings = settingsId
@@ -261,12 +256,10 @@ export async function mount(container, client, router) {
 
           // Store the new etag and timestamp
           const now = new Date().toISOString();
-          if (client.settings && settingsId) {
-            await client.settings.upsert(settingsId, {
-              webBackupEtag: result.etag,
-              webBackupLastUpload: now,
-            });
-          }
+          await saveSettings({
+            webBackupEtag: result.etag,
+            webBackupLastUpload: now,
+          });
 
           webBackupStatus.textContent = `Last backup: ${new Date(now).toLocaleString()}`;
         } catch (err) {

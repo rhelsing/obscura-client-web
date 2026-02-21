@@ -127,6 +127,26 @@ export async function register(username, password, opts = {}) {
   });
   deviceStore.close();
 
+  // Shell login to get shellToken (needed for backup operations)
+  let shellToken = null;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const shellLoginRes = await fetch(`${apiUrl}/v1/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (shellLoginRes.ok) {
+      const shellLoginData = await shellLoginRes.json();
+      shellToken = shellLoginData.token;
+    }
+  } catch (e) {
+    console.warn('[Auth] Shell login after registration failed:', e.message);
+  }
+
   // Recovery phrase - one-time access
   let recoveryPhrase = keys.recoveryPhrase;
 
@@ -147,6 +167,8 @@ export async function register(username, password, opts = {}) {
       deviceName: detectDeviceName(),
       signalIdentityKey: new Uint8Array(deviceIdentityKeyPair.pubKey),  // Device's key, not shell's
     },
+
+    shellToken,
 
     // Explicit backup flow - clears after first read
     getRecoveryPhrase() {
@@ -244,6 +266,7 @@ export async function login(username, password, opts = {}) {
             deviceName: detectDeviceName(),
             signalIdentityKey: identityKeyPair ? new Uint8Array(identityKeyPair.pubKey) : null,
           },
+          shellToken,
         },
       };
     }
@@ -340,6 +363,7 @@ export async function login(username, password, opts = {}) {
           deviceName: detectDeviceName(),
           signalIdentityKey: new Uint8Array(deviceIdentityKeyPair.pubKey),
         },
+        shellToken,
       },
     };
   }
@@ -431,6 +455,7 @@ export async function login(username, password, opts = {}) {
         deviceName: detectDeviceName(),
         signalIdentityKey: new Uint8Array(identityKeyPair.pubKey),
       },
+      shellToken,
     },
   };
 }

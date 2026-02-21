@@ -5,7 +5,7 @@ export class Settings extends BaseModel {
     theme: 'string',
     notificationsEnabled: 'boolean',
     defaultTTL: 'string?',  // User's default TTL (e.g., '30d')
-    webBackupEnabled: 'boolean',
+    webBackupEnabled: 'boolean?',
     webBackupEtag: 'string?',  // Server ETag for optimistic locking
     webBackupLastUpload: 'string?',  // ISO timestamp of last successful upload
   };

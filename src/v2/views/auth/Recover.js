@@ -1,7 +1,7 @@
 /**
  * Recover View
  * 4-step flow to recover account from encrypted backup:
- * 1. Upload backup file
+ * 1. Upload backup file (or restore from server backup)
  * 2. Enter recovery phrase + password
  * 3. Choose recovery mode (add device vs replace all)
  * 4. Processing
@@ -11,12 +11,13 @@ import { fullSchema } from '../../lib/schema.js';
 import { decryptBackup } from '../../crypto/backup.js';
 import { recoverAccount } from '../../lib/auth.js';
 import { ObscuraClient } from '../../lib/index.js';
+import { createClient } from '../../api/client.js';
 
 let cleanup = null;
 
 const BACKUP_MAGIC = 'OBSCURA_BACKUP';
 
-export function render({ step = 'upload', error = null, loading = false, username = null } = {}) {
+export function render({ step = 'upload', error = null, loading = false, username = null, serverBackup = null } = {}) {
   // Step 1: Upload backup file
   if (step === 'upload') {
     return `
@@ -24,6 +25,17 @@ export function render({ step = 'upload', error = null, loading = false, usernam
         <h1>Recover Account</h1>
         <p>Upload your backup file to restore your account.</p>
         ${error ? `<ry-alert type="error">${error}</ry-alert>` : ''}
+        ${serverBackup ? `
+          <card style="margin-bottom: var(--ry-space-4);">
+            <stack gap="sm">
+              <p><strong>Server backup found</strong>${serverBackup.size ? ` (${Math.round(serverBackup.size / 1024)} KB)` : ''}</p>
+              <button type="button" id="restore-from-server" ${loading ? 'disabled' : ''}>
+                ${loading ? 'Downloading...' : 'Restore from server backup'}
+              </button>
+            </stack>
+          </card>
+          <p style="text-align: center; color: var(--ry-color-text-muted);">Or upload a local backup file:</p>
+        ` : ''}
         <form id="upload-form">
           <stack gap="md">
             <ry-field label="Backup File">
@@ -128,13 +140,67 @@ export function mount(container, client, router) {
   let backupData = null;
   let recoveryPhrase = null;
   let password = null;
+  let isWebBackup = false;
+
+  // Check for pending client (user came from link-pending)
+  const pendingClient = window.__pendingClient;
+  let serverBackup = null;
 
   container.innerHTML = render({ step: 'upload' });
   router.updatePageLinks();
 
-  // Step 1: Handle file upload
-  setupUploadStep();
+  if (pendingClient) {
+    checkServerBackup();
+  } else {
+    setupUploadStep();
+  }
 
+  async function checkServerBackup() {
+    try {
+      const apiClient = createClient(pendingClient.apiUrl);
+      apiClient.setToken(pendingClient.shellToken || pendingClient.token);
+      const check = await apiClient.checkBackup();
+      if (check.exists) {
+        serverBackup = { size: check.size, etag: check.etag, apiClient };
+        container.innerHTML = render({ step: 'upload', serverBackup });
+        router.updatePageLinks();
+        setupUploadStep();
+        setupServerRestoreButton();
+        return;
+      }
+    } catch (err) {
+      console.error('[Recover] Failed to check server backup:', err);
+    }
+    setupUploadStep();
+  }
+
+  function setupServerRestoreButton() {
+    const btn = container.querySelector('#restore-from-server');
+    if (!btn) return;
+
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = 'Downloading...';
+      try {
+        const result = await serverBackup.apiClient.downloadBackup();
+        if (!result?.data) throw new Error('No backup data received');
+
+        backupFileData = result.data;
+        isWebBackup = true;
+
+        container.innerHTML = render({ step: 'phrase' });
+        router.updatePageLinks();
+        setupPhraseStep();
+      } catch (err) {
+        container.innerHTML = render({ step: 'upload', error: err.message, serverBackup });
+        router.updatePageLinks();
+        setupUploadStep();
+        setupServerRestoreButton();
+      }
+    });
+  }
+
+  // Step 1: Handle file upload
   function setupUploadStep() {
     const uploadForm = container.querySelector('#upload-form');
     if (!uploadForm) return;
@@ -147,6 +213,7 @@ export function mount(container, client, router) {
 
       try {
         backupFileData = new Uint8Array(await file.arrayBuffer());
+        isWebBackup = false;
 
         // Validate file format (check magic header)
         const magicBytes = new TextEncoder().encode(BACKUP_MAGIC);
@@ -160,9 +227,10 @@ export function mount(container, client, router) {
         router.updatePageLinks();
         setupPhraseStep();
       } catch (err) {
-        container.innerHTML = render({ step: 'upload', error: err.message });
+        container.innerHTML = render({ step: 'upload', error: err.message, serverBackup });
         router.updatePageLinks();
         setupUploadStep();
+        if (serverBackup) setupServerRestoreButton();
       }
     };
 
@@ -233,12 +301,17 @@ export function mount(container, client, router) {
       container.innerHTML = render({ step: 'phrase', loading: true });
 
       try {
-        // Extract encrypted data (skip magic header + version byte)
-        const magicBytes = new TextEncoder().encode(BACKUP_MAGIC);
-        const encryptedData = backupFileData.slice(magicBytes.length + 1);
-
-        // Decrypt backup with phrase
-        backupData = await decryptBackup(encryptedData, recoveryPhrase);
+        if (isWebBackup) {
+          // Web backup: no file header, compressed inside encryption
+          const { decompress } = await import('../../crypto/compress.js');
+          const compressed = await decryptBackup(backupFileData, recoveryPhrase);
+          backupData = await decompress(compressed);
+        } else {
+          // Local backup: strip magic header + version byte
+          const magicBytes = new TextEncoder().encode(BACKUP_MAGIC);
+          const encryptedData = backupFileData.slice(magicBytes.length + 1);
+          backupData = await decryptBackup(encryptedData, recoveryPhrase);
+        }
 
         // Move to mode selection step
         container.innerHTML = render({ step: 'mode', username: backupData.username });

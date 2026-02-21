@@ -55,6 +55,7 @@ export class ObscuraClient {
     this.deviceInfo = opts.deviceInfo;
     this.p2pIdentity = opts.p2pIdentity;
     this.recoveryPublicKey = opts.recoveryPublicKey;  // Only public key, never private
+    this.shellToken = opts.shellToken || null;  // Shell account token for backup API
 
     // Recovery phrase - private, cleared after read
     this._recoveryPhrase = opts.recoveryPhrase || null;
@@ -175,6 +176,7 @@ export class ObscuraClient {
         deviceName: this.deviceInfo.deviceName,
         signalIdentityKey: this.deviceInfo.signalIdentityKey ? Array.from(this.deviceInfo.signalIdentityKey) : null,
       } : null,
+      shellToken: this.shellToken,
     };
     localStorage.setItem('obscura_session', JSON.stringify(session));
   }
@@ -275,6 +277,7 @@ export class ObscuraClient {
         deviceUsername: session.deviceUsername,
         deviceUUID: session.deviceUUID,
         deviceInfo,
+        shellToken: session.shellToken,
       });
 
       // Load recoveryPublicKey and p2pIdentity from deviceStore asynchronously
@@ -878,7 +881,7 @@ export class ObscuraClient {
 
       const backupManager = createBackupManager(this.username, this.userId);
       const apiClient = createClient(this.apiUrl);
-      apiClient.setToken(this.token);
+      apiClient.setToken(this.shellToken || this.token);
 
       const knownEtag = settingsRecord.data.webBackupEtag || null;
       const result = await backupManager.uploadWebBackup(apiClient, knownEtag);

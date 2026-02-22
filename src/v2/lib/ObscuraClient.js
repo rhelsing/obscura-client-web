@@ -937,13 +937,14 @@ export class ObscuraClient {
   /**
    * Disconnect WebSocket and clean up token refresh timers
    */
-  disconnect() {
+  disconnect({ skipBackup = false } = {}) {
     this._shouldReconnect = false;
     this._stopPingInterval();
     this._flushAcks();
 
     // Trigger web backup before disconnecting (fire-and-forget)
-    this.performWebBackup();
+    // Skip on logout — tokens are about to be revoked
+    if (!skipBackup) this.performWebBackup();
 
     // Clean up token refresh
     if (this._refreshTimer) {

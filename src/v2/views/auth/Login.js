@@ -6,6 +6,7 @@
 import { Obscura, ObscuraClient } from '../../lib/index.js';
 import { setClient, navigate, getApiUrl } from '../index.js';
 import { fullSchema } from '../../lib/schema.js';
+import { logger } from '../../lib/logger.js';
 
 let cleanup = null;
 
@@ -58,21 +59,29 @@ export function mount(container, client, router) {
         await c.schema(fullSchema);
         await c.connect();
         setClient(c);
+        logger.logLogin({ username, result: 'ok', isNewDevice: false,
+          hasShellToken: !!c.shellToken, hasShellRefreshToken: !!c.shellRefreshToken,
+          hasDeviceIdentity: true });
         navigate('/stories');
 
       } else if (result.status === 'newDevice') {
         // New device needs approval
         // Store client temporarily for LinkPending view
         window.__pendingClient = result.client;
+        logger.logLogin({ username, result: 'newDevice', isNewDevice: true,
+          hasShellToken: !!result.client.shellToken, hasShellRefreshToken: !!result.client.shellRefreshToken,
+          hasDeviceIdentity: false });
         navigate('/link-pending');
 
       } else {
         // Error
+        logger.logLoginError({ username, reason: result.reason || 'Login failed', stage: 'auth' });
         RyToast.error(result.reason || 'Login failed');
         container.innerHTML = render();
       }
 
     } catch (err) {
+      logger.logLoginError({ username, reason: err.message || 'Login failed', stage: 'unknown' });
       RyToast.error(err.message || 'Login failed');
       container.innerHTML = render();
     }

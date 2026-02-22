@@ -12,6 +12,7 @@ import { ObscuraClient } from '../../lib/ObscuraClient.js';
 import { unlinkDevice } from '../../lib/auth.js';
 import { createBackupManager } from '../../backup/BackupManager.js';
 import { createClient } from '../../api/client.js';
+import { logger } from '../../lib/logger.js';
 
 let cleanup = null;
 
@@ -262,9 +263,17 @@ export async function mount(container, client, router) {
           });
 
           webBackupStatus.textContent = `Last backup: ${new Date(now).toLocaleString()}`;
+          logger.logBackupUpload({ tokenSource: client.shellToken ? 'shell' : 'device',
+            tokenExpired: false, etag: result.etag });
         } catch (err) {
           console.error('Failed to upload web backup:', err);
           webBackupStatus.textContent = `Backup failed: ${err.message}`;
+          logger.logBackupUploadError({ error: err.message,
+            tokenSource: client.shellToken ? 'shell' : 'device',
+            tokenExpired: ObscuraClient.isTokenExpired(client.shellToken || client.token, 0),
+            hasRecoveryPublicKey: !!client.recoveryPublicKey,
+            hasShellToken: !!client.shellToken, hasShellRefreshToken: !!client.shellRefreshToken,
+            trigger: 'settings-toggle' });
         }
       } else {
         webBackupStatus.style.display = 'none';
@@ -396,14 +405,17 @@ export async function mount(container, client, router) {
       await client.performWebBackup();
 
       // Revoke refresh token server-side
+      let serverRevoked = false;
       if (client.refreshToken) {
         try {
           const api = createClient();
           await api.logout(client.refreshToken);
+          serverRevoked = true;
         } catch (e) {
           // Still proceed with local logout even if server revocation fails
         }
       }
+      logger.logLogout({ username: client.username, serverRevoked, backupAttempted: true });
       client.disconnect({ skipBackup: true });
       ObscuraClient.clearSession();
       clearClient();

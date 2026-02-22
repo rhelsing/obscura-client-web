@@ -235,10 +235,17 @@ export class ObscuraClient {
       const session = JSON.parse(saved);
       if (!session.token || !session.username) return null;
 
+      // Init logger early so restore events are captured
+      if (session.userId) logger.init(session.userId);
+
+      const tokenWasExpired = ObscuraClient.isTokenExpired(session.token);
+
       // If token is expired, try to refresh before giving up
-      if (ObscuraClient.isTokenExpired(session.token)) {
+      if (tokenWasExpired) {
         if (!session.refreshToken) {
           console.log('[ObscuraClient] Token expired, no refresh token — clearing');
+          logger.logSessionRestoreError({ error: 'Token expired, no refresh token',
+            username: session.username, hadToken: true, hadRefreshToken: false });
           ObscuraClient.clearSession();
           return null;
         }
@@ -265,6 +272,8 @@ export class ObscuraClient {
           }
         } catch (e) {
           console.warn('[ObscuraClient] Refresh failed on restore:', e.message);
+          logger.logSessionRestoreError({ error: e.message, username: session.username,
+            hadToken: true, hadRefreshToken: true, status: e.status });
           ObscuraClient.clearSession();
           return null;
         }
@@ -298,9 +307,15 @@ export class ObscuraClient {
       // Load recoveryPublicKey and p2pIdentity from deviceStore asynchronously
       client._loadIdentityKeys();
 
+      logger.logSessionRestore({ username: session.username, tokenWasExpired,
+        refreshAttempted: tokenWasExpired, refreshSucceeded: true,
+        hasShellToken: !!session.shellToken, hasShellRefreshToken: !!session.shellRefreshToken,
+        shellTokenExpired: ObscuraClient.isTokenExpired(session.shellToken, 0) });
+
       return client;
     } catch (e) {
       console.warn('Failed to restore session:', e);
+      logger.logSessionRestoreError({ error: e.message });
       return null;
     }
   }
@@ -361,6 +376,8 @@ export class ObscuraClient {
   async _doRefresh() {
     if (!this.refreshToken) {
       console.warn('[ObscuraClient] No refresh token available');
+      logger.logTokenRefreshError({ tokenSource: 'device', error: 'No refresh token available',
+        hasRefreshToken: false, hasShellRefreshToken: !!this.shellRefreshToken });
       return false;
     }
 
@@ -370,7 +387,10 @@ export class ObscuraClient {
 
       // result: { token, refreshToken, expiresAt }
       this._updateToken(result.token, result.refreshToken);
-      console.log('[ObscuraClient] Token refreshed, expires at:', new Date(result.expiresAt * 1000).toISOString());
+      const expiresAt = new Date(result.expiresAt * 1000).toISOString();
+      console.log('[ObscuraClient] Token refreshed, expires at:', expiresAt);
+      logger.logTokenRefresh({ tokenSource: 'device', expiresAt,
+        hasShellToken: !!this.shellToken, hasShellRefreshToken: !!this.shellRefreshToken });
 
       // Also refresh shell token (used for backup API)
       if (this.shellRefreshToken) {
@@ -379,21 +399,24 @@ export class ObscuraClient {
           this.shellToken = shellResult.token;
           this.shellRefreshToken = shellResult.refreshToken;
           this.saveSession();
-          console.log('[ObscuraClient] Shell token refreshed alongside device token');
+          logger.logTokenRefresh({ tokenSource: 'shell',
+            expiresAt: new Date(shellResult.expiresAt * 1000).toISOString(),
+            hasShellToken: true, hasShellRefreshToken: true });
         } catch (shellErr) {
           console.warn('[ObscuraClient] Shell token refresh failed:', shellErr.message);
+          logger.logTokenRefreshError({ tokenSource: 'shell', error: shellErr.message,
+            status: shellErr.status, hasRefreshToken: true, hasShellRefreshToken: true });
         }
       } else {
-        console.warn('[ObscuraClient] No shellRefreshToken — shell token will go stale');
+        logger.logTokenRefreshError({ tokenSource: 'shell', error: 'No shellRefreshToken — will go stale',
+          hasRefreshToken: true, hasShellRefreshToken: false });
       }
 
       return true;
     } catch (e) {
       console.error('[ObscuraClient] Token refresh failed:', e.message);
-      // If refresh token is revoked/expired (401/403), session is dead
-      if (e.status === 401 || e.status === 403) {
-        console.warn('[ObscuraClient] Refresh token rejected, session expired');
-      }
+      logger.logTokenRefreshError({ tokenSource: 'device', error: e.message,
+        status: e.status, hasRefreshToken: true, hasShellRefreshToken: !!this.shellRefreshToken });
       return false;
     }
   }
@@ -902,6 +925,7 @@ export class ObscuraClient {
    * @returns {Promise<void>}
    */
   async performWebBackup() {
+    let tokenSource = 'unknown';
     try {
       if (!this.settings) return;
 
@@ -909,9 +933,8 @@ export class ObscuraClient {
       if (!settingsRecord?.data?.webBackupEnabled) return;
 
       const backupToken = this.shellToken || this.token;
-      const tokenSource = this.shellToken ? 'shell' : 'device';
-      const isExpired = ObscuraClient.isTokenExpired(backupToken, 0);
-      console.log(`[ObscuraClient] Web backup using ${tokenSource} token, expired: ${isExpired}`);
+      tokenSource = this.shellToken ? 'shell' : 'device';
+      const tokenExpired = ObscuraClient.isTokenExpired(backupToken, 0);
 
       const backupManager = createBackupManager(this.username, this.userId);
       const apiClient = createClient(this.apiUrl);
@@ -928,9 +951,14 @@ export class ObscuraClient {
         webBackupLastUpload: now,
       });
 
-      console.log('[ObscuraClient] Web backup uploaded successfully');
+      logger.logBackupUpload({ tokenSource, tokenExpired, etag: result.etag });
     } catch (err) {
       console.error('[ObscuraClient] Web backup failed:', err);
+      logger.logBackupUploadError({ error: err.message, tokenSource,
+        tokenExpired: ObscuraClient.isTokenExpired(this.shellToken || this.token, 0),
+        hasRecoveryPublicKey: !!this.recoveryPublicKey,
+        hasShellToken: !!this.shellToken, hasShellRefreshToken: !!this.shellRefreshToken,
+        trigger: 'disconnect' });
     }
   }
 

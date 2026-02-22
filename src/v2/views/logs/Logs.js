@@ -70,6 +70,21 @@ const EVENT_COLORS = {
   // TTL Cleanup
   [LogEventType.TTL_CLEANUP]: '#78716c',
   [LogEventType.TTL_CLEANUP_ERROR]: '#ef4444',
+  // Auth lifecycle
+  [LogEventType.TOKEN_REFRESH]: '#14b8a6',
+  [LogEventType.TOKEN_REFRESH_ERROR]: '#ef4444',
+  [LogEventType.SESSION_RESTORE]: '#0ea5e9',
+  [LogEventType.SESSION_RESTORE_ERROR]: '#ef4444',
+  [LogEventType.LOGIN]: '#22c55e',
+  [LogEventType.LOGIN_ERROR]: '#ef4444',
+  [LogEventType.LOGOUT]: '#f97316',
+  // Backup
+  [LogEventType.BACKUP_UPLOAD]: '#a855f7',
+  [LogEventType.BACKUP_UPLOAD_ERROR]: '#ef4444',
+  [LogEventType.BACKUP_CHECK]: '#c084fc',
+  [LogEventType.BACKUP_CHECK_ERROR]: '#ef4444',
+  [LogEventType.BACKUP_DOWNLOAD]: '#8b5cf6',
+  [LogEventType.BACKUP_DOWNLOAD_ERROR]: '#ef4444',
 };
 
 const EVENT_DIRECTION = {
@@ -132,6 +147,21 @@ const EVENT_DIRECTION = {
   // TTL Cleanup
   [LogEventType.TTL_CLEANUP]: 'gateway',
   [LogEventType.TTL_CLEANUP_ERROR]: 'error',
+  // Auth lifecycle
+  [LogEventType.TOKEN_REFRESH]: 'gateway',
+  [LogEventType.TOKEN_REFRESH_ERROR]: 'error',
+  [LogEventType.SESSION_RESTORE]: 'gateway',
+  [LogEventType.SESSION_RESTORE_ERROR]: 'error',
+  [LogEventType.LOGIN]: 'out',
+  [LogEventType.LOGIN_ERROR]: 'error',
+  [LogEventType.LOGOUT]: 'out',
+  // Backup
+  [LogEventType.BACKUP_UPLOAD]: 'out',
+  [LogEventType.BACKUP_UPLOAD_ERROR]: 'error',
+  [LogEventType.BACKUP_CHECK]: 'out',
+  [LogEventType.BACKUP_CHECK_ERROR]: 'error',
+  [LogEventType.BACKUP_DOWNLOAD]: 'in',
+  [LogEventType.BACKUP_DOWNLOAD_ERROR]: 'error',
 };
 
 let cleanup = null;

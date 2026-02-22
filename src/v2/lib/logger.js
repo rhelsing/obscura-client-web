@@ -446,6 +446,77 @@ class Logger {
     });
   }
 
+  // === AUTH LIFECYCLE EVENTS ===
+
+  async logTokenRefresh(data) {
+    return this.log(LogEventType.TOKEN_REFRESH, data);
+  }
+
+  async logTokenRefreshError(data) {
+    return this.log(LogEventType.TOKEN_REFRESH_ERROR, {
+      ...data,
+      error: data.error?.message || data.error || 'Unknown',
+    });
+  }
+
+  async logSessionRestore(data) {
+    return this.log(LogEventType.SESSION_RESTORE, data);
+  }
+
+  async logSessionRestoreError(data) {
+    return this.log(LogEventType.SESSION_RESTORE_ERROR, {
+      ...data,
+      error: data.error?.message || data.error || 'Unknown',
+    });
+  }
+
+  async logLogin(data) {
+    return this.log(LogEventType.LOGIN, data);
+  }
+
+  async logLoginError(data) {
+    return this.log(LogEventType.LOGIN_ERROR, data);
+  }
+
+  async logLogout(data) {
+    return this.log(LogEventType.LOGOUT, data);
+  }
+
+  // === BACKUP EVENTS ===
+
+  async logBackupUpload(data) {
+    return this.log(LogEventType.BACKUP_UPLOAD, data);
+  }
+
+  async logBackupUploadError(data) {
+    return this.log(LogEventType.BACKUP_UPLOAD_ERROR, {
+      ...data,
+      error: data.error?.message || data.error || 'Unknown',
+    });
+  }
+
+  async logBackupCheck(data) {
+    return this.log(LogEventType.BACKUP_CHECK, data);
+  }
+
+  async logBackupCheckError(data) {
+    return this.log(LogEventType.BACKUP_CHECK_ERROR, {
+      ...data,
+      error: data.error?.message || data.error || 'Unknown',
+    });
+  }
+
+  async logBackupDownload(data) {
+    return this.log(LogEventType.BACKUP_DOWNLOAD, data);
+  }
+
+  async logBackupDownloadError(data) {
+    return this.log(LogEventType.BACKUP_DOWNLOAD_ERROR, {
+      ...data,
+      error: data.error?.message || data.error || 'Unknown',
+    });
+  }
+
   // === QUERY METHODS ===
 
   async getAllEvents(limit = 500) {

@@ -82,6 +82,23 @@ export const LogEventType = {
   // TTL Cleanup
   TTL_CLEANUP: 'ttl_cleanup',
   TTL_CLEANUP_ERROR: 'ttl_cleanup_error',
+
+  // Auth lifecycle
+  TOKEN_REFRESH: 'token_refresh',
+  TOKEN_REFRESH_ERROR: 'token_refresh_error',
+  SESSION_RESTORE: 'session_restore',
+  SESSION_RESTORE_ERROR: 'session_restore_error',
+  LOGIN: 'login',
+  LOGIN_ERROR: 'login_error',
+  LOGOUT: 'logout',
+
+  // Backup
+  BACKUP_UPLOAD: 'backup_upload',
+  BACKUP_UPLOAD_ERROR: 'backup_upload_error',
+  BACKUP_CHECK: 'backup_check',
+  BACKUP_CHECK_ERROR: 'backup_check_error',
+  BACKUP_DOWNLOAD: 'backup_download',
+  BACKUP_DOWNLOAD_ERROR: 'backup_download_error',
 };
 
 class LogStore {

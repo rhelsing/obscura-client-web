@@ -40,6 +40,7 @@ export const Obscura = {
       recoveryPublicKey: result.recoveryPublicKey,  // Only public key, never private
       recoveryPhrase: result.getRecoveryPhrase(),
       shellToken: result.shellToken,
+      shellRefreshToken: result.shellRefreshToken,
     });
   },
 
@@ -70,6 +71,7 @@ export const Obscura = {
           recoveryPublicKey: result.client.recoveryPublicKey,
           p2pIdentity: result.client.p2pIdentity,
           shellToken: result.client.shellToken,
+          shellRefreshToken: result.client.shellRefreshToken,
         }),
       };
     }
@@ -91,6 +93,7 @@ export const Obscura = {
           deviceInfo: result.client.deviceInfo,
           linkCode: result.linkCode,
           shellToken: result.client.shellToken,
+          shellRefreshToken: result.client.shellRefreshToken,
         }),
       };
     }

@@ -391,7 +391,16 @@ export async function mount(container, client, router) {
 
     // Logout - modal handles confirmation, just attach to confirm button
     const confirmLogout = container.querySelector('#confirm-logout');
-    confirmLogout.addEventListener('click', () => {
+    confirmLogout.addEventListener('click', async () => {
+      // Revoke refresh token server-side
+      if (client.refreshToken) {
+        try {
+          const api = createClient();
+          await api.logout(client.refreshToken);
+        } catch (e) {
+          // Still proceed with local logout even if server revocation fails
+        }
+      }
       client.disconnect();
       ObscuraClient.clearSession();
       clearClient();

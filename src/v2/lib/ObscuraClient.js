@@ -56,6 +56,7 @@ export class ObscuraClient {
     this.p2pIdentity = opts.p2pIdentity;
     this.recoveryPublicKey = opts.recoveryPublicKey;  // Only public key, never private
     this.shellToken = opts.shellToken || null;  // Shell account token for backup API
+    this.shellRefreshToken = opts.shellRefreshToken || null;  // Shell refresh token
 
     // Recovery phrase - private, cleared after read
     this._recoveryPhrase = opts.recoveryPhrase || null;
@@ -177,6 +178,7 @@ export class ObscuraClient {
         signalIdentityKey: this.deviceInfo.signalIdentityKey ? Array.from(this.deviceInfo.signalIdentityKey) : null,
       } : null,
       shellToken: this.shellToken,
+      shellRefreshToken: this.shellRefreshToken,
     };
     localStorage.setItem('obscura_session', JSON.stringify(session));
   }
@@ -249,6 +251,18 @@ export class ObscuraClient {
           session.token = result.token;
           session.refreshToken = result.refreshToken;
           console.log('[ObscuraClient] Token refreshed on restore');
+
+          // Also refresh shell token if available
+          if (session.shellRefreshToken) {
+            try {
+              const shellResult = await apiClient.refreshSession(session.shellRefreshToken);
+              session.shellToken = shellResult.token;
+              session.shellRefreshToken = shellResult.refreshToken;
+              console.log('[ObscuraClient] Shell token refreshed on restore');
+            } catch (shellErr) {
+              console.warn('[ObscuraClient] Shell refresh failed on restore:', shellErr.message);
+            }
+          }
         } catch (e) {
           console.warn('[ObscuraClient] Refresh failed on restore:', e.message);
           ObscuraClient.clearSession();
@@ -278,6 +292,7 @@ export class ObscuraClient {
         deviceUUID: session.deviceUUID,
         deviceInfo,
         shellToken: session.shellToken,
+        shellRefreshToken: session.shellRefreshToken,
       });
 
       // Load recoveryPublicKey and p2pIdentity from deviceStore asynchronously
@@ -356,6 +371,22 @@ export class ObscuraClient {
       // result: { token, refreshToken, expiresAt }
       this._updateToken(result.token, result.refreshToken);
       console.log('[ObscuraClient] Token refreshed, expires at:', new Date(result.expiresAt * 1000).toISOString());
+
+      // Also refresh shell token (used for backup API)
+      if (this.shellRefreshToken) {
+        try {
+          const shellResult = await apiClient.refreshSession(this.shellRefreshToken);
+          this.shellToken = shellResult.token;
+          this.shellRefreshToken = shellResult.refreshToken;
+          this.saveSession();
+          console.log('[ObscuraClient] Shell token refreshed alongside device token');
+        } catch (shellErr) {
+          console.warn('[ObscuraClient] Shell token refresh failed:', shellErr.message);
+        }
+      } else {
+        console.warn('[ObscuraClient] No shellRefreshToken — shell token will go stale');
+      }
+
       return true;
     } catch (e) {
       console.error('[ObscuraClient] Token refresh failed:', e.message);
@@ -877,11 +908,14 @@ export class ObscuraClient {
       const settingsRecord = await this.settings.where({}).first();
       if (!settingsRecord?.data?.webBackupEnabled) return;
 
-      console.log('[ObscuraClient] Web backup enabled, uploading...');
+      const backupToken = this.shellToken || this.token;
+      const tokenSource = this.shellToken ? 'shell' : 'device';
+      const isExpired = ObscuraClient.isTokenExpired(backupToken, 0);
+      console.log(`[ObscuraClient] Web backup using ${tokenSource} token, expired: ${isExpired}`);
 
       const backupManager = createBackupManager(this.username, this.userId);
       const apiClient = createClient(this.apiUrl);
-      apiClient.setToken(this.shellToken || this.token);
+      apiClient.setToken(backupToken);
 
       const knownEtag = settingsRecord.data.webBackupEtag || null;
       const result = await backupManager.uploadWebBackup(apiClient, knownEtag);

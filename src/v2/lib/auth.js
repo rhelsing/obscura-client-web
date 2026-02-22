@@ -129,6 +129,7 @@ export async function register(username, password, opts = {}) {
 
   // Shell login to get shellToken (needed for backup operations)
   let shellToken = null;
+  let shellRefreshToken = null;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -142,6 +143,7 @@ export async function register(username, password, opts = {}) {
     if (shellLoginRes.ok) {
       const shellLoginData = await shellLoginRes.json();
       shellToken = shellLoginData.token;
+      shellRefreshToken = shellLoginData.refreshToken;
     }
   } catch (e) {
     console.warn('[Auth] Shell login after registration failed:', e.message);
@@ -169,6 +171,7 @@ export async function register(username, password, opts = {}) {
     },
 
     shellToken,
+    shellRefreshToken,
 
     // Explicit backup flow - clears after first read
     getRecoveryPhrase() {
@@ -193,6 +196,7 @@ export async function login(username, password, opts = {}) {
   // Try shell login
   let shellLoginSuccess = false;
   let shellToken = null;
+  let shellRefreshToken = null;
 
   try {
     const res = await fetch(`${apiUrl}/v1/sessions`, {
@@ -205,6 +209,7 @@ export async function login(username, password, opts = {}) {
       const data = await res.json();
       shellLoginSuccess = true;
       shellToken = data.token;
+      shellRefreshToken = data.refreshToken;
     } else if (res.status === 401) {
       return { status: 'error', reason: 'Invalid credentials' };
     } else {
@@ -267,6 +272,7 @@ export async function login(username, password, opts = {}) {
             signalIdentityKey: identityKeyPair ? new Uint8Array(identityKeyPair.pubKey) : null,
           },
           shellToken,
+          shellRefreshToken,
         },
       };
     }
@@ -364,6 +370,7 @@ export async function login(username, password, opts = {}) {
           signalIdentityKey: new Uint8Array(deviceIdentityKeyPair.pubKey),
         },
         shellToken,
+        shellRefreshToken,
       },
     };
   }
@@ -456,6 +463,7 @@ export async function login(username, password, opts = {}) {
         signalIdentityKey: new Uint8Array(identityKeyPair.pubKey),
       },
       shellToken,
+      shellRefreshToken,
     },
   };
 }

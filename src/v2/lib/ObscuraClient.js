@@ -304,8 +304,8 @@ export class ObscuraClient {
         shellRefreshToken: session.shellRefreshToken,
       });
 
-      // Load recoveryPublicKey and p2pIdentity from deviceStore asynchronously
-      client._loadIdentityKeys();
+      // Load recoveryPublicKey and p2pIdentity from deviceStore
+      await client._loadIdentityKeys();
 
       logger.logSessionRestore({ username: session.username, tokenWasExpired,
         refreshAttempted: tokenWasExpired, refreshSucceeded: true,
@@ -931,6 +931,13 @@ export class ObscuraClient {
 
       const settingsRecord = await this.settings.where({}).first();
       if (!settingsRecord?.data?.webBackupEnabled) return;
+
+      // Skip if recovery public key is not available (user needs to provide
+      // their recovery phrase via Settings to store the key on this device)
+      if (!this.recoveryPublicKey) {
+        console.warn('[ObscuraClient] Skipping web backup — recovery public key not available');
+        return;
+      }
 
       const backupToken = this.shellToken || this.token;
       tokenSource = this.shellToken ? 'shell' : 'device';

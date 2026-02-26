@@ -457,15 +457,23 @@ test.describe('Scenario 9: Pix Flow', () => {
     console.log('Bob and Carol both received pix ✓');
 
     // Verify Carol can query her pix
+    // Poll because Carol may receive Bob's pix MODEL_SYNC first (broadcast to all friends),
+    // so Carol's own pix may not be persisted yet when the first sync event fires
     const carolPixQuery = await carolPage.evaluate(async (aliceUser) => {
-      const allPix = await window.__client.pix.all();
-      const unviewed = allPix.filter(s =>
-        s.data.recipientUsername === window.__client.username &&
-        !s.data.viewedAt &&
-        !s.data._deleted
-      );
-      const pixEntry = unviewed.find(s => s.data.senderUsername === aliceUser);
-      return pixEntry ? { found: true, mediaRef: pixEntry.data.mediaRef } : { found: false };
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const allPix = await window.__client.pix.all();
+        const unviewed = allPix.filter(s =>
+          s.data.recipientUsername === window.__client.username &&
+          !s.data.viewedAt &&
+          !s.data._deleted
+        );
+        const pixEntry = unviewed.find(s => s.data.senderUsername === aliceUser);
+        if (pixEntry) {
+          return { found: true, mediaRef: pixEntry.data.mediaRef };
+        }
+        await new Promise(r => setTimeout(r, 250));
+      }
+      return { found: false };
     }, username);
 
     expect(carolPixQuery.found).toBe(true);

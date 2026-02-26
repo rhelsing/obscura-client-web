@@ -198,8 +198,8 @@ export function createClient(baseUrl = API_URL) {
     /**
      * Send a message (protobuf binary)
      */
-    async sendMessage(recipientId, protobufData) {
-      const url = `${baseUrl}/v1/messages/${recipientId}`;
+    async sendMessage(protobufData) {
+      const url = `${baseUrl}/v1/messages`;
 
       const response = await fetch(url, {
         method: 'POST',

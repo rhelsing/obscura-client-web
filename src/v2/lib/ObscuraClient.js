@@ -22,6 +22,7 @@ import {
   generateVerifyCodeFromDevices,
 } from '../crypto/signatures.js';
 import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
+import { bytesToUuid, uuidToBytes } from '../crypto/uuid.js';
 import { createSchema } from '../orm/index.js';
 import { logger } from './logger.js';
 import { createMediaUrl, createChunkedMediaUrl } from './attachmentUtils.js';
@@ -1023,56 +1024,63 @@ export class ObscuraClient {
       }
 
       frame = this.messenger.WebSocketFrame.decode(bytes);
-      console.log('[ws] Frame received:', frame.envelope ? 'envelope' : frame.ack ? 'ack' : 'unknown', frame.envelope?.id?.slice(-8) || '');
 
       if (frame.envelope) {
         correlationId = logger.generateCorrelationId();
 
+        // Convert bytes UUIDs to strings at the edge
+        const envelopeId = bytesToUuid(frame.envelope.id);
+        const senderId = bytesToUuid(frame.envelope.senderId);
+
+        // Decode EncryptedMessage from raw bytes (server passes through opaque)
+        const encMsg = this.messenger.EncryptedMessage.decode(frame.envelope.message);
+
+        console.log('[ws] Frame received: envelope', envelopeId.slice(-8));
+
         // Debug: log types of envelope fields
         console.log('[ws:debug] Envelope field types:', {
           device: this.userId?.slice(-8),
-          idType: frame.envelope.id?.constructor?.name,
-          sourceUserIdType: frame.envelope.sourceUserId?.constructor?.name,
-          contentType: frame.envelope.message?.content?.constructor?.name,
-          msgType: frame.envelope.message?.type,
+          envelopeId: envelopeId.slice(-8),
+          senderId: senderId.slice(-8),
+          msgType: encMsg.type,
         });
 
         await logger.logReceiveEnvelope(
-          frame.envelope.id,
-          frame.envelope.sourceUserId,
-          frame.envelope.message.type,
+          envelopeId,
+          senderId,
+          encMsg.type,
           correlationId
         );
 
         // Check if this is from one of our own devices (self-sync)
-        const isFromOwnDevice = this.devices.getAll().some(d => d.serverUserId === frame.envelope.sourceUserId);
-        const isFromSelf = frame.envelope.sourceUserId === this.userId;
+        const isFromOwnDevice = this.devices.getAll().some(d => d.serverUserId === senderId);
+        const isFromSelf = senderId === this.userId;
 
         // Log diagnostic info for debugging session issues
         if (isFromOwnDevice || isFromSelf) {
           console.log('[ws] Message from own device:', {
-            sourceUserId: frame.envelope.sourceUserId?.slice(-8),
+            senderId: senderId.slice(-8),
             isFromSelf,
-            messageType: frame.envelope.message.type === 1 ? 'PreKey' : 'Whisper',
+            messageType: encMsg.type === 1 ? 'PreKey' : 'Whisper',
           });
         }
 
         const decrypted = await this.messenger.decrypt(
-          frame.envelope.sourceUserId,
-          frame.envelope.message.content,
-          frame.envelope.message.type
+          senderId,
+          encMsg.content,
+          encMsg.type
         );
 
         const msg = this.messenger.decodeClientMessage(decrypted);
-        msg.sourceUserId = frame.envelope.sourceUserId;
-        msg.envelopeId = frame.envelope.id;
+        msg.sourceUserId = senderId;
+        msg.envelopeId = envelopeId;
 
-        await logger.logReceiveDecode(frame.envelope.sourceUserId, msg.type, correlationId);
+        await logger.logReceiveDecode(senderId, msg.type, correlationId);
 
         await this._routeMessage(msg);
-        this._acknowledge(frame.envelope.id);
+        this._acknowledge(envelopeId);
 
-        await logger.logReceiveComplete(frame.envelope.id, frame.envelope.sourceUserId, msg.type, correlationId);
+        await logger.logReceiveComplete(envelopeId, senderId, msg.type, correlationId);
 
         // Check and replenish prekeys (non-blocking)
         this._checkAndReplenishPrekeys().catch(() => {});
@@ -1097,63 +1105,47 @@ export class ObscuraClient {
 
       if (e.name === 'SendingChainError') {
         // Signal Protocol session desync - log details but don't crash
-        // This can happen when:
-        // 1. Receiving own message echoed back (self-sync issue)
-        // 2. Session state mismatch between devices
-        // 3. First message from new direction arrives as wrong type
         console.warn('[ws] SendingChainError - session may be out of sync:', e.message);
 
-        // Log to persistent log model for debugging
-        await logger.logReceiveError(
-          frame.envelope?.id,
-          frame.envelope?.sourceUserId,
-          e,
-          correlationId
-        );
+        const errEnvId = frame.envelope?.id ? bytesToUuid(frame.envelope.id) : null;
+        const errSenderId = frame.envelope?.senderId ? bytesToUuid(frame.envelope.senderId) : null;
 
-        // Don't emit to UI, but error is now in log model
+        await logger.logReceiveError(errEnvId, errSenderId, e, correlationId);
         return;
       }
 
       // Auto-recovery: "No record" + Whisper = no session but sender expects one
       const isNoRecord = e.message?.toLowerCase().includes('no record');
-      const isWhisper = frame.envelope?.message?.type === 2;
+      // Try to detect Whisper type from the raw message bytes
+      let isWhisper = false;
+      try {
+        if (frame.envelope?.message) {
+          const errEncMsg = this.messenger.EncryptedMessage.decode(frame.envelope.message);
+          isWhisper = errEncMsg.type === 2;
+        }
+      } catch { /* ignore decode failure in error path */ }
 
-      if (isNoRecord && isWhisper && frame.envelope?.sourceUserId) {
+      const errSenderId = frame.envelope?.senderId ? bytesToUuid(frame.envelope.senderId) : null;
+      const errEnvelopeId = frame.envelope?.id ? bytesToUuid(frame.envelope.id) : null;
+
+      if (isNoRecord && isWhisper && errSenderId) {
         console.log('[ws] Auto-recovering: no session for sender, sending SESSION_RESET');
         try {
-          await this.resetSessionWith(frame.envelope.sourceUserId, 'auto_no_record');
-          await logger.logSessionReset(frame.envelope.sourceUserId, 'auto_no_record');
-          // ACK the message - it's encrypted with dead session, unrecoverable
-          // This stops retry loop. Message is lost, sender must resend.
-          this._acknowledge(frame.envelope.id);
+          await this.resetSessionWith(errSenderId, 'auto_no_record');
+          await logger.logSessionReset(errSenderId, 'auto_no_record');
+          this._acknowledge(errEnvelopeId);
           return;
         } catch (resetErr) {
           console.error('[ws] Auto-reset failed:', resetErr.message);
-          // Fall through to normal error handling
         }
       }
 
-      // Enhanced diagnostic logging - show which device and what message
+      // Enhanced diagnostic logging
       const deviceSuffix = this.userId?.slice(-8) || 'unknown';
-      const envelopeId = frame?.envelope?.id ?
-        Array.from(frame.envelope.id.slice(-4)).map(b => b.toString(16).padStart(2, '0')).join('') : 'none';
-      const sourceId = frame?.envelope?.sourceUserId ?
-        Array.from(frame.envelope.sourceUserId.slice(-4)).map(b => b.toString(16).padStart(2, '0')).join('') : 'none';
-      const msgType = frame?.envelope?.message?.type === 1 ? 'PreKey' :
-                      frame?.envelope?.message?.type === 2 ? 'Whisper' :
-                      frame?.envelope?.message?.type || 'unknown';
-
       console.error(`  [ws:${deviceSuffix}] Failed to handle message:`, e.message);
-      console.error(`  [ws:${deviceSuffix}] Envelope: id=${envelopeId}, from=${sourceId}, type=${msgType}`);
+      console.error(`  [ws:${deviceSuffix}] Envelope: id=${errEnvelopeId?.slice(-8) || 'none'}, from=${errSenderId?.slice(-8) || 'none'}`);
 
-      // Log all other errors to log model
-      await logger.logReceiveError(
-        frame?.envelope?.id,
-        frame?.envelope?.sourceUserId,
-        e,
-        correlationId
-      );
+      await logger.logReceiveError(errEnvelopeId, errSenderId, e, correlationId);
 
       this._emit('error', e);
     }
@@ -1327,9 +1319,7 @@ export class ObscuraClient {
     this._ackBuffer = [];
 
     const frame = this.messenger.WebSocketFrame.create({
-      ack: ids.length === 1
-        ? { messageId: ids[0] }
-        : { messageIds: ids },
+      ack: { messageIds: ids.map(id => uuidToBytes(id)) },
     });
     const buffer = this.messenger.WebSocketFrame.encode(frame).finish();
     this.ws.send(buffer);

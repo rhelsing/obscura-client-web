@@ -5,6 +5,7 @@
 
 import { SessionBuilder, SessionCipher, SignalProtocolAddress } from '@privacyresearch/libsignal-protocol-typescript';
 import { logger } from './logger.js';
+import { uuidToBytes, generateDeviceUUID } from '../crypto/uuid.js';
 
 // Signal message type constants
 const SIGNAL_PREKEY_MESSAGE = 3;
@@ -80,11 +81,13 @@ export class Messenger {
     console.log('[Messenger] Server proto loaded:', Object.keys(this.proto.nested || {}));
     this.WebSocketFrame = this.proto.lookupType('obscura.v1.WebSocketFrame');
     this.Envelope = this.proto.lookupType('obscura.v1.Envelope');
-    this.EncryptedMessage = this.proto.lookupType('obscura.v1.EncryptedMessage');
     this.AckMessage = this.proto.lookupType('obscura.v1.AckMessage');
+    this.SendMessageRequest = this.proto.lookupType('obscura.v1.SendMessageRequest');
+    this.SendMessageResponse = this.proto.lookupType('obscura.v1.SendMessageResponse');
 
     this.clientProto = await protobuf.load(clientProtoPath);
     console.log('[Messenger] Client proto loaded:', Object.keys(this.clientProto.nested || {}));
+    this.EncryptedMessage = this.clientProto.lookupType('obscura.v2.EncryptedMessage');
     this.ClientMessage = this.clientProto.lookupType('obscura.v2.ClientMessage');
     this.DeviceInfo = this.clientProto.lookupType('obscura.v2.DeviceInfo');
     this.DeviceLinkApproval = this.clientProto.lookupType('obscura.v2.DeviceLinkApproval');
@@ -573,17 +576,29 @@ export class Messenger {
     const clientMsgBytes = this.encodeClientMessage(opts);
     const encrypted = await this.encrypt(targetUserId, clientMsgBytes);
 
-    const msg = this.EncryptedMessage.create({
+    // Wrap Signal ciphertext in EncryptedMessage (client-side, opaque to server)
+    const encMsg = this.EncryptedMessage.create({
       type: encrypted.protoType,
       content: encrypted.body,
     });
-    const protobufData = this.EncryptedMessage.encode(msg).finish();
+    const encryptedPayload = this.EncryptedMessage.encode(encMsg).finish();
 
-    const res = await fetch(`${this.apiUrl}/v1/messages/${targetUserId}`, {
+    // Wrap in SendMessageRequest for batch endpoint
+    const req = this.SendMessageRequest.create({
+      messages: [{
+        submissionId: uuidToBytes(generateDeviceUUID()),
+        recipientId: uuidToBytes(targetUserId),
+        message: encryptedPayload,
+      }],
+    });
+    const protobufData = this.SendMessageRequest.encode(req).finish();
+
+    const res = await fetch(`${this.apiUrl}/v1/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-protobuf',
         'Authorization': `Bearer ${this.token}`,
+        'Idempotency-Key': generateDeviceUUID(),
       },
       body: protobufData,
     });

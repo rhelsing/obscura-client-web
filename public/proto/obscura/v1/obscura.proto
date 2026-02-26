@@ -6,6 +6,41 @@ option java_package = "xyz.obscura.server.contracts";
 option java_outer_classname = "ObscuraProtocol";
 
 // ==============================================================================
+// REST API Payloads (Upstream)
+// Endpoint: POST /v1/messages
+// Note: Idempotency is handled via HTTP Header (Idempotency-Key), not in payload.
+// ==============================================================================
+
+message SendMessageRequest {
+  message Submission {
+    bytes submission_id = 1; // Client-generated UUID (16 bytes)
+    bytes recipient_id = 2;  // UUID of the target recipient (16 bytes)
+    bytes message = 3;       // The encrypted message payload
+  }
+
+  repeated Submission messages = 1;
+}
+
+message SendMessageResponse {
+  enum ErrorCode {
+    ERROR_CODE_UNSPECIFIED = 0;
+    ERROR_CODE_INVALID_RECIPIENT = 1;       // Recipient not found in database
+    ERROR_CODE_MALFORMED_RECIPIENT_ID = 2;  // Recipient ID bytes are invalid (expected 16)
+    ERROR_CODE_MALFORMED_SUBMISSION_ID = 3; // Submission ID bytes are invalid (expected 16)
+    ERROR_CODE_MESSAGE_MISSING = 4;         // Message payload is missing
+  }
+
+  message FailedSubmission {
+    bytes submission_id = 1;  // Echoed back to the client (16 bytes)
+    ErrorCode error_code = 2;
+    string error_message = 3; // Optional human-readable context
+  }
+
+  // If empty, all submissions in the batch were successfully queued.
+  repeated FailedSubmission failed_submissions = 1;
+}
+
+// ==============================================================================
 // Gateway Protocol (WebSocket)
 // Endpoint: /v1/gateway
 // ==============================================================================
@@ -16,7 +51,7 @@ message WebSocketFrame {
     // Server -> Client: A new message has arrived.
     Envelope envelope = 10;
 
-    // Client -> Server: Acknowledge receipt of a message (Triggers DB deletion).
+    // Client -> Server: Acknowledge receipt of a message and triggers server-side deletion.
     AckMessage ack = 11;
 
     // Server -> Client: Notification that one-time pre-keys are running low.
@@ -32,24 +67,13 @@ message PreKeyStatus {
 // Represents a message waiting in the queue for the connected device.
 // The client MUST reply with an `AckMessage` containing this message's ID.
 message Envelope {
-  string id = 1;            // Unique UUID of the message in the server queue.
-  string source_user_id = 2;// UUID of the sender (Unencrypted metadata).
-  uint64 timestamp = 3;     // Server-generated timestamp (ms) when the message was received.
-  EncryptedMessage message = 4;
+  bytes id = 1;         // UUID of the message (16 bytes).
+  bytes sender_id = 2;  // UUID of the sender (16 bytes).
+  uint64 timestamp = 3; // Server-generated timestamp (ms) of when the message was received.
+  bytes message = 4;    // The encrypted message payload
 }
 
-message EncryptedMessage {
-  enum Type {
-    TYPE_UNSPECIFIED = 0;
-    TYPE_PREKEY_MESSAGE = 1; // Initial handshake
-    TYPE_ENCRYPTED_MESSAGE = 2; // Standard encrypted message
-  }
-  Type type = 1;
-  bytes content = 2; // The actual ciphertext
-}
-
-// Sent by Client to confirm processing. Server hard-deletes the message upon receipt.
+// Sent by client to confirm processing. Server deletes the message upon receipt.
 message AckMessage {
-  string message_id = 1;    // The UUID from the Envelope.
-  repeated string message_ids = 2; // Support for bulk ACKs.
+  repeated bytes message_ids = 1; // UUIDs of the messages to acknowledge (16 bytes each).
 }

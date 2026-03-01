@@ -11,6 +11,29 @@ import { dirname, join } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// UUID <-> bytes helpers
+function uuidToBytes(uuid) {
+  const hex = uuid.replace(/-/g, '');
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) {
+    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return bytes;
+}
+
+function bytesToUuid(bytes) {
+  const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function randomUUID() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  return bytesToUuid(bytes);
+}
+
 // In-memory Signal store (same interface as signalStore.js but uses Maps)
 class InMemorySignalStore {
   constructor() {
@@ -244,6 +267,9 @@ export class TestClient {
 
     // Message history (for sync verification)
     this.messages = [];
+
+    // Batch queue for bulk sending
+    this._sendQueue = [];
   }
 
   // === Level 2: Friend Management ===
@@ -368,19 +394,20 @@ export class TestClient {
   async loadProto() {
     if (this.proto) return;
 
-    // Server proto (v1 - for WebSocketFrame, EncryptedMessage)
+    // Server proto (v1 - for WebSocketFrame, SendMessageRequest)
     const serverProtoPath = join(__dirname, '../../../public/proto/obscura/v1/obscura.proto');
-    // Client proto (v2 - unified client messages)
-    const clientProtoPath = join(__dirname, '../proto/client.proto');
+    // Client proto (v2 - unified client messages + EncryptedMessage)
+    const clientProtoPath = join(__dirname, '../../../public/proto/v2/client.proto');
 
     this.proto = await protobuf.load(serverProtoPath);
     this.WebSocketFrame = this.proto.lookupType('obscura.v1.WebSocketFrame');
     this.Envelope = this.proto.lookupType('obscura.v1.Envelope');
-    this.EncryptedMessage = this.proto.lookupType('obscura.v1.EncryptedMessage');
     this.AckMessage = this.proto.lookupType('obscura.v1.AckMessage');
+    this.SendMessageRequest = this.proto.lookupType('obscura.v1.SendMessageRequest');
 
     this.clientProto = await protobuf.load(clientProtoPath);
     this.ClientMessage = this.clientProto.lookupType('obscura.v2.ClientMessage');
+    this.EncryptedMessage = this.clientProto.lookupType('obscura.v2.EncryptedMessage');
     this.DeviceInfo = this.clientProto.lookupType('obscura.v2.DeviceInfo');
     this.DeviceLinkApproval = this.clientProto.lookupType('obscura.v2.DeviceLinkApproval');
     this.DeviceAnnounce = this.clientProto.lookupType('obscura.v2.DeviceAnnounce');
@@ -565,13 +592,20 @@ export class TestClient {
       const frame = this.WebSocketFrame.decode(new Uint8Array(data));
 
       if (frame.envelope) {
-        console.log(`Received envelope from: ${frame.envelope.sourceUserId}`);
+        // Convert bytes UUIDs to strings at the edge
+        const envelopeId = bytesToUuid(frame.envelope.id);
+        const senderId = bytesToUuid(frame.envelope.senderId);
+
+        // Decode EncryptedMessage from raw bytes
+        const encMsg = this.EncryptedMessage.decode(frame.envelope.message);
+
+        console.log(`Received envelope from: ${senderId}`);
 
         // Decrypt the message
         const decrypted = await this.decryptMessage(
-          frame.envelope.sourceUserId,
-          frame.envelope.message.content,
-          frame.envelope.message.type
+          senderId,
+          encMsg.content,
+          encMsg.type
         );
 
         // Decode client message
@@ -579,8 +613,8 @@ export class TestClient {
 
         // Add to queue
         this.messageQueue.push({
-          envelopeId: frame.envelope.id,
-          sourceUserId: frame.envelope.sourceUserId,
+          envelopeId,
+          sourceUserId: senderId,
           ...clientMsg,
         });
 
@@ -591,7 +625,7 @@ export class TestClient {
         }
 
         // Ack the message
-        this.acknowledge(frame.envelope.id);
+        this.acknowledge(envelopeId);
       }
     } catch (err) {
       // Suppress MessageCounterError - happens when server redelivers already-processed messages
@@ -608,7 +642,7 @@ export class TestClient {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
     const frame = this.WebSocketFrame.create({
-      ack: { messageId },
+      ack: { messageIds: [uuidToBytes(messageId)] },
     });
     const buffer = this.WebSocketFrame.encode(frame).finish();
     this.ws.send(buffer);
@@ -950,26 +984,59 @@ export class TestClient {
 
   // === Messaging ===
 
-  async sendMessage(targetUserId, opts) {
+  /**
+   * Encrypt and queue a message for batch sending (no HTTP call).
+   */
+  async queueMessage(targetUserId, opts) {
     await this.loadProto();
 
     const clientMsgBytes = this.encodeClientMessage(opts);
     const encrypted = await this.encrypt(targetUserId, clientMsgBytes);
-    const protobufData = this.encodeOutgoingMessage(encrypted.body, encrypted.protoType);
+    const encryptedPayload = this.encodeOutgoingMessage(encrypted.body, encrypted.protoType);
 
-    const url = `${this.apiUrl}/v1/messages/${targetUserId}`;
+    this._sendQueue.push({
+      submissionId: uuidToBytes(randomUUID()),
+      recipientId: uuidToBytes(targetUserId),
+      message: encryptedPayload,
+    });
+  }
+
+  /**
+   * Flush all queued messages in a single HTTP request.
+   */
+  async flushMessages() {
+    if (this._sendQueue.length === 0) return;
+
+    await this.loadProto();
+
+    const submissions = this._sendQueue.splice(0);
+    const req = this.SendMessageRequest.create({ messages: submissions });
+    const protobufData = this.SendMessageRequest.encode(req).finish();
+
+    const url = `${this.apiUrl}/v1/messages`;
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-protobuf',
         'Authorization': `Bearer ${this.token}`,
+        'Idempotency-Key': randomUUID(),
       },
       body: protobufData,
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to send message: HTTP ${response.status}`);
+      throw new Error(`Failed to send batch: HTTP ${response.status}`);
     }
+
+    console.log(`Flushed batch of ${submissions.length} message(s)`);
+  }
+
+  /**
+   * Send a single message (convenience — queues + flushes immediately).
+   */
+  async sendMessage(targetUserId, opts) {
+    await this.queueMessage(targetUserId, opts);
+    await this.flushMessages();
 
     const typeName = typeof opts.type === 'string' ? opts.type : MessageTypeName[opts.type];
     console.log(`Sent ${typeName} to ${targetUserId}`);
@@ -1107,10 +1174,29 @@ export class TestClient {
     const messageId = this.generateMessageId();
     const timestamp = Date.now();
 
-    // Send to friend's devices
+    // Queue to friend's devices
     for (const targetUserId of targets) {
-      await this.sendMessage(targetUserId, opts);
+      await this.queueMessage(targetUserId, opts);
     }
+
+    // Queue self-sync to own devices (Level 2 compliant)
+    const ownTargets = this.getOwnFanOutTargets();
+    if (ownTargets.length > 0) {
+      for (const targetUserId of ownTargets) {
+        await this.queueMessage(targetUserId, {
+          type: 'SENT_SYNC',
+          sentSync: {
+            conversationId: friendUsername,
+            messageId,
+            timestamp,
+            content: opts.text || opts.content,
+          },
+        });
+      }
+    }
+
+    // Flush all in one HTTP request
+    await this.flushMessages();
 
     // Store locally as sent message
     this.messages.push({
@@ -1121,23 +1207,9 @@ export class TestClient {
       isSent: true,
     });
 
-    // Self-sync: send SENT_SYNC to own devices (Level 2 compliant)
-    const ownTargets = this.getOwnFanOutTargets();
     if (ownTargets.length > 0) {
-      for (const targetUserId of ownTargets) {
-        await this.sendMessage(targetUserId, {
-          type: 'SENT_SYNC',
-          sentSync: {
-            conversationId: friendUsername,
-            messageId,
-            timestamp,
-            content: opts.text || opts.content,
-          },
-        });
-      }
       console.log(`  [SentSync] Synced to ${ownTargets.length} own device(s)`);
     }
-
     console.log(`  [Friends] Sent ${opts.type} to ${friendUsername} (${targets.length} device(s))`);
   }
 

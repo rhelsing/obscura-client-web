@@ -63,3 +63,27 @@ export function isValidUUID(uuid) {
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   return uuidRegex.test(uuid);
 }
+
+/**
+ * Convert a UUID string to 16 raw bytes.
+ * @param {string} uuid - e.g. "550e8400-e29b-41d4-a716-446655440000"
+ * @returns {Uint8Array} 16 bytes
+ */
+export function uuidToBytes(uuid) {
+  const hex = uuid.replace(/-/g, '');
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) {
+    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return bytes;
+}
+
+/**
+ * Convert 16 raw bytes to a UUID string.
+ * @param {Uint8Array} bytes - 16 bytes
+ * @returns {string} e.g. "550e8400-e29b-41d4-a716-446655440000"
+ */
+export function bytesToUuid(bytes) {
+  const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}

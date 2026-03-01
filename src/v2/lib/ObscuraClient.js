@@ -1405,10 +1405,30 @@ export class ObscuraClient {
     // Log send start
     await logger.logSendStart(friendUsername, msgOpts.type, correlationId);
 
-    // Fan-out to all friend devices
+    // Queue fan-out to all friend devices
     for (const targetUserId of targets) {
-      await this.messenger.sendMessage(targetUserId, msgOpts);
+      await this.messenger.queueMessage(targetUserId, msgOpts);
     }
+
+    // Queue self-sync to own devices
+    const selfTargets = this.devices.getSelfSyncTargets();
+    if (selfTargets.length > 0) {
+      for (const targetUserId of selfTargets) {
+        await this.messenger.queueMessage(targetUserId, {
+          type: 'SENT_SYNC',
+          sentSync: {
+            conversationId: friendUsername,
+            messageId,
+            timestamp,
+            content: opts.text,
+            authorDeviceId: this.userId,
+          },
+        });
+      }
+    }
+
+    // Flush all in one HTTP request
+    await this.messenger.flushMessages();
 
     // Log send complete
     await logger.logSendComplete(friendUsername, targets.length, correlationId);
@@ -1421,23 +1441,6 @@ export class ObscuraClient {
       text: opts.text,
       isSent: true,
     });
-
-    // Self-sync to own devices
-    const selfTargets = this.devices.getSelfSyncTargets();
-    if (selfTargets.length > 0) {
-      for (const targetUserId of selfTargets) {
-        await this.messenger.sendMessage(targetUserId, {
-          type: 'SENT_SYNC',
-          sentSync: {
-            conversationId: friendUsername,
-            messageId,
-            timestamp,
-            content: opts.text,
-            authorDeviceId: this.userId, // Track which device sent this
-          },
-        });
-      }
-    }
   }
 
   /**
@@ -1480,7 +1483,7 @@ export class ObscuraClient {
       : { contentReference: ref };
 
     for (const targetUserId of targets) {
-      await this.messenger.sendMessage(targetUserId, {
+      await this.messenger.queueMessage(targetUserId, {
         type: messageType,
         ...messagePayload,
         timestamp,
@@ -1492,7 +1495,7 @@ export class ObscuraClient {
     const messageId = isChunked ? ref.fileId : ref.attachmentId;
 
     for (const targetUserId of selfTargets) {
-      await this.messenger.sendMessage(targetUserId, {
+      await this.messenger.queueMessage(targetUserId, {
         type: 'SENT_SYNC',
         sentSync: {
           conversationId: friendUsername,
@@ -1503,6 +1506,9 @@ export class ObscuraClient {
         },
       });
     }
+
+    // Flush all in one HTTP request
+    await this.messenger.flushMessages();
 
     return mediaUrl; // Return JSON string
   }

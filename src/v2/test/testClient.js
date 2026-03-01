@@ -267,6 +267,9 @@ export class TestClient {
 
     // Message history (for sync verification)
     this.messages = [];
+
+    // Batch queue for bulk sending
+    this._sendQueue = [];
   }
 
   // === Level 2: Friend Management ===
@@ -981,21 +984,33 @@ export class TestClient {
 
   // === Messaging ===
 
-  async sendMessage(targetUserId, opts) {
+  /**
+   * Encrypt and queue a message for batch sending (no HTTP call).
+   */
+  async queueMessage(targetUserId, opts) {
     await this.loadProto();
 
     const clientMsgBytes = this.encodeClientMessage(opts);
     const encrypted = await this.encrypt(targetUserId, clientMsgBytes);
     const encryptedPayload = this.encodeOutgoingMessage(encrypted.body, encrypted.protoType);
 
-    // Wrap in SendMessageRequest for batch endpoint
-    const req = this.SendMessageRequest.create({
-      messages: [{
-        submissionId: uuidToBytes(randomUUID()),
-        recipientId: uuidToBytes(targetUserId),
-        message: encryptedPayload,
-      }],
+    this._sendQueue.push({
+      submissionId: uuidToBytes(randomUUID()),
+      recipientId: uuidToBytes(targetUserId),
+      message: encryptedPayload,
     });
+  }
+
+  /**
+   * Flush all queued messages in a single HTTP request.
+   */
+  async flushMessages() {
+    if (this._sendQueue.length === 0) return;
+
+    await this.loadProto();
+
+    const submissions = this._sendQueue.splice(0);
+    const req = this.SendMessageRequest.create({ messages: submissions });
     const protobufData = this.SendMessageRequest.encode(req).finish();
 
     const url = `${this.apiUrl}/v1/messages`;
@@ -1010,8 +1025,18 @@ export class TestClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to send message: HTTP ${response.status}`);
+      throw new Error(`Failed to send batch: HTTP ${response.status}`);
     }
+
+    console.log(`Flushed batch of ${submissions.length} message(s)`);
+  }
+
+  /**
+   * Send a single message (convenience — queues + flushes immediately).
+   */
+  async sendMessage(targetUserId, opts) {
+    await this.queueMessage(targetUserId, opts);
+    await this.flushMessages();
 
     const typeName = typeof opts.type === 'string' ? opts.type : MessageTypeName[opts.type];
     console.log(`Sent ${typeName} to ${targetUserId}`);
@@ -1149,10 +1174,29 @@ export class TestClient {
     const messageId = this.generateMessageId();
     const timestamp = Date.now();
 
-    // Send to friend's devices
+    // Queue to friend's devices
     for (const targetUserId of targets) {
-      await this.sendMessage(targetUserId, opts);
+      await this.queueMessage(targetUserId, opts);
     }
+
+    // Queue self-sync to own devices (Level 2 compliant)
+    const ownTargets = this.getOwnFanOutTargets();
+    if (ownTargets.length > 0) {
+      for (const targetUserId of ownTargets) {
+        await this.queueMessage(targetUserId, {
+          type: 'SENT_SYNC',
+          sentSync: {
+            conversationId: friendUsername,
+            messageId,
+            timestamp,
+            content: opts.text || opts.content,
+          },
+        });
+      }
+    }
+
+    // Flush all in one HTTP request
+    await this.flushMessages();
 
     // Store locally as sent message
     this.messages.push({
@@ -1163,23 +1207,9 @@ export class TestClient {
       isSent: true,
     });
 
-    // Self-sync: send SENT_SYNC to own devices (Level 2 compliant)
-    const ownTargets = this.getOwnFanOutTargets();
     if (ownTargets.length > 0) {
-      for (const targetUserId of ownTargets) {
-        await this.sendMessage(targetUserId, {
-          type: 'SENT_SYNC',
-          sentSync: {
-            conversationId: friendUsername,
-            messageId,
-            timestamp,
-            content: opts.text || opts.content,
-          },
-        });
-      }
       console.log(`  [SentSync] Synced to ${ownTargets.length} own device(s)`);
     }
-
     console.log(`  [Friends] Sent ${opts.type} to ${friendUsername} (${targets.length} device(s))`);
   }
 

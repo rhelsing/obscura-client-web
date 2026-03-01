@@ -46,6 +46,7 @@ export class Messenger {
     this.protoBasePath = opts.protoBasePath;
     this.proto = null;
     this.clientProto = null;
+    this._queue = []; // Pending submissions for batch sending
   }
 
   setToken(token) {
@@ -568,29 +569,41 @@ export class Messenger {
   }
 
   /**
-   * Send an encrypted message to a target user
+   * Encrypt and queue a message for batch sending (no HTTP call).
+   * Call flushMessages() after queueing all messages to send them in one request.
    */
-  async sendMessage(targetUserId, opts) {
+  async queueMessage(targetUserId, opts) {
     await this.loadProto();
 
     const clientMsgBytes = this.encodeClientMessage(opts);
     const encrypted = await this.encrypt(targetUserId, clientMsgBytes);
 
-    // Wrap Signal ciphertext in EncryptedMessage (client-side, opaque to server)
     const encMsg = this.EncryptedMessage.create({
       type: encrypted.protoType,
       content: encrypted.body,
     });
     const encryptedPayload = this.EncryptedMessage.encode(encMsg).finish();
 
-    // Wrap in SendMessageRequest for batch endpoint
-    const req = this.SendMessageRequest.create({
-      messages: [{
-        submissionId: uuidToBytes(generateDeviceUUID()),
-        recipientId: uuidToBytes(targetUserId),
-        message: encryptedPayload,
-      }],
+    this._queue.push({
+      submissionId: uuidToBytes(generateDeviceUUID()),
+      recipientId: uuidToBytes(targetUserId),
+      message: encryptedPayload,
     });
+  }
+
+  /**
+   * Flush all queued messages in a single HTTP request.
+   * Returns { sent, failed, failedSubmissions } for error reporting.
+   */
+  async flushMessages() {
+    if (this._queue.length === 0) {
+      return { sent: 0, failed: 0, failedSubmissions: [] };
+    }
+
+    await this.loadProto();
+
+    const submissions = this._queue.splice(0);
+    const req = this.SendMessageRequest.create({ messages: submissions });
     const protobufData = this.SendMessageRequest.encode(req).finish();
 
     const res = await fetch(`${this.apiUrl}/v1/messages`, {
@@ -604,8 +617,40 @@ export class Messenger {
     });
 
     if (!res.ok) {
-      throw new Error(`Failed to send message: ${res.status}`);
+      throw new Error(`Failed to send batch: ${res.status}`);
     }
+
+    // Parse response for per-submission errors
+    const responseBytes = new Uint8Array(await res.arrayBuffer());
+    let failedSubmissions = [];
+    if (responseBytes.length > 0) {
+      try {
+        const resp = this.SendMessageResponse.decode(responseBytes);
+        failedSubmissions = resp.failedSubmissions || [];
+        if (failedSubmissions.length > 0) {
+          console.warn(`[Messenger] Batch: ${failedSubmissions.length}/${submissions.length} submissions failed`);
+          for (const f of failedSubmissions) {
+            console.warn(`[Messenger]   submission failed: code=${f.errorCode} ${f.errorMessage || ''}`);
+          }
+        }
+      } catch (e) {
+        // Response may be empty on full success
+      }
+    }
+
+    return {
+      sent: submissions.length - failedSubmissions.length,
+      failed: failedSubmissions.length,
+      failedSubmissions,
+    };
+  }
+
+  /**
+   * Send an encrypted message to a single target user (convenience for non-batch cases).
+   */
+  async sendMessage(targetUserId, opts) {
+    await this.queueMessage(targetUserId, opts);
+    await this.flushMessages();
   }
 
   /**

@@ -99,6 +99,7 @@ export async function register(username, password, opts = {}) {
     identityKeyPair: deviceIdentityKeyPair,
     registrationId: deviceRegistrationId,
   });
+  await store.saveSessionKeys(deviceIdentityKeyPair, deviceRegistrationId);
 
   // Store DEVICE prekeys (not shell prekeys)
   await store.storeSignedPreKey(deviceSignedPreKey.keyId, deviceSignedPreKey.keyPair);
@@ -335,6 +336,7 @@ export async function login(username, password, opts = {}) {
 
     // Cache new keys
     keyCache.set({ identityKeyPair: deviceIdentityKeyPair, registrationId: deviceRegistrationId });
+    await store.saveSessionKeys(deviceIdentityKeyPair, deviceRegistrationId);
 
     // Store new prekeys
     await store.storeSignedPreKey(deviceSignedPreKey.keyId, deviceSignedPreKey.keyPair);
@@ -421,6 +423,7 @@ export async function login(username, password, opts = {}) {
 
   // Cache decrypted keys for this session
   keyCache.set({ identityKeyPair, registrationId });
+  await store.saveSessionKeys(identityKeyPair, registrationId);
 
   // Store prekeys (not encrypted)
   await store.storeSignedPreKey(signedPreKey.keyId, signedPreKey.keyPair);
@@ -499,6 +502,7 @@ async function loadAndDecryptIdentity(store, password) {
 
     // Cache for this session
     keyCache.set({ identityKeyPair: keyPair, registrationId });
+    await store.saveSessionKeys(keyPair, registrationId);
 
     console.log('Migration complete');
     return keyPair;
@@ -518,6 +522,7 @@ async function loadAndDecryptIdentity(store, password) {
         identityKeyPair: decrypted.identityKeyPair,
         registrationId: record.registrationId,
       });
+      await store.saveSessionKeys(decrypted.identityKeyPair, record.registrationId);
 
       return decrypted.identityKeyPair;
     } catch (e) {
@@ -826,6 +831,7 @@ export async function recoverAccount(username, password, backupData, recoveryPhr
 
   // Cache keys for this session
   keyCache.set({ identityKeyPair, registrationId });
+  await store.saveSessionKeys(identityKeyPair, registrationId);
 
   // Store prekeys
   await store.storeSignedPreKey(signedPreKey.keyId, signedPreKey.keyPair);

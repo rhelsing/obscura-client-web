@@ -119,8 +119,19 @@ export class IndexedDBStore {
     const cached = keyCache.getIdentityKeyPair();
     if (cached) return cached;
 
-    // Fallback: check IndexedDB for unencrypted keys (pre-migration)
+    // Fallback: check IndexedDB session keys (survives sessionStorage clear)
     const store = await this._getStore(STORES.IDENTITY);
+    const sessionRecord = await this._promisify(store.get('sessionKeys'));
+    if (sessionRecord?.identityKeyPair) {
+      // Re-populate keyCache so subsequent calls are fast
+      keyCache.set({
+        identityKeyPair: sessionRecord.identityKeyPair,
+        registrationId: sessionRecord.registrationId,
+      });
+      return sessionRecord.identityKeyPair;
+    }
+
+    // Legacy fallback: check for unencrypted keys (pre-migration)
     const record = await this._promisify(store.get('identity'));
     return record?.keyPair || null;
   }
@@ -149,8 +160,14 @@ export class IndexedDBStore {
     const cached = keyCache.getRegistrationId();
     if (cached) return cached;
 
-    // Fallback: check IndexedDB
+    // Fallback: check IndexedDB session keys
     const store = await this._getStore(STORES.IDENTITY);
+    const sessionRecord = await this._promisify(store.get('sessionKeys'));
+    if (sessionRecord?.registrationId) {
+      return sessionRecord.registrationId;
+    }
+
+    // Legacy fallback: check main identity record
     const record = await this._promisify(store.get('identity'));
     return record?.registrationId || null;
   }
@@ -233,6 +250,31 @@ export class IndexedDBStore {
         // Explicitly remove unencrypted keyPair
         keyPair: undefined,
       }));
+    }
+  }
+
+  /**
+   * Save decrypted session keys to IndexedDB (survives sessionStorage clear)
+   * Cleared on logout via clearSessionKeys()
+   */
+  async saveSessionKeys(identityKeyPair, registrationId) {
+    const store = await this._getStore(STORES.IDENTITY, 'readwrite');
+    await this._promisify(store.put({
+      id: 'sessionKeys',
+      identityKeyPair,
+      registrationId,
+    }));
+  }
+
+  /**
+   * Clear session keys from IndexedDB (called on logout)
+   */
+  async clearSessionKeys() {
+    try {
+      const store = await this._getStore(STORES.IDENTITY, 'readwrite');
+      await this._promisify(store.delete('sessionKeys'));
+    } catch (e) {
+      // Ignore - store may not exist yet
     }
   }
 

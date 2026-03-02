@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => {
   const wsUrl = apiUrl?.replace('https://', 'wss://');
 
   return {
-    base: env.CF === 'yes' ? '/' : '/obscura-client-web/',
+    base: (mode === 'production' && env.CF !== 'yes') ? '/obscura-client-web/' : '/',
     server: {
       port: 5173,
       proxy: {

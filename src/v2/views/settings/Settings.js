@@ -416,6 +416,9 @@ export async function mount(container, client, router) {
         }
       }
       logger.logLogout({ username: client.username, serverRevoked, backupAttempted: true });
+      if (client.store?.clearSessionKeys) {
+        await client.store.clearSessionKeys();
+      }
       client.disconnect({ skipBackup: true });
       ObscuraClient.clearSession();
       clearClient();

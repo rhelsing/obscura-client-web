@@ -10,6 +10,14 @@ import { ObscuraClient } from '../../lib/ObscuraClient.js';
 
 let cleanup = null;
 
+function renderSmallAvatar(avatarUrl, name) {
+  if (avatarUrl) {
+    return `<img class="avatar-sm" src="${avatarUrl}" alt="" />`;
+  }
+  const letter = (name || 'U')[0].toUpperCase();
+  return `<div class="avatar-sm-placeholder">${letter}</div>`;
+}
+
 export function render({ conversations = [], pendingRequests = 0 } = {}) {
   return `
     <div class="view conversation-list">
@@ -40,7 +48,9 @@ export function render({ conversations = [], pendingRequests = 0 } = {}) {
           ${conversations.map(c => `
             <card class="conversation-item" data-username="${c.username}" data-type="${c.type || 'dm'}" data-group-id="${c.groupId || ''}" style="position: relative;">
               <cluster>
-                <ry-icon name="${c.type === 'group' ? 'star' : 'user'}"></ry-icon>
+                ${c.type === 'group'
+                  ? `<div class="avatar-sm-placeholder"><ry-icon name="star" style="font-size: 16px"></ry-icon></div>`
+                  : renderSmallAvatar(c.avatarUrl, c.displayName || c.username)}
                 <stack gap="none" style="flex: 1">
                   <strong>${c.displayName || c.username}</strong>
                   ${c.lastMessage ? `
@@ -66,14 +76,17 @@ export async function mount(container, client, router) {
   const conversations = [];
   let pendingRequests = 0;
 
-  // Load profiles to get displayNames
-  const profileMap = new Map();
+  // Load profiles to get displayNames and avatars
+  const profileMap = new Map();  // deviceId -> { displayName, avatarUrl }
   if (client.profile) {
     try {
       const profiles = await client.profile.where({}).exec();
       for (const p of profiles) {
-        if (p.authorDeviceId && p.data?.displayName) {
-          profileMap.set(p.authorDeviceId, p.data.displayName);
+        if (p.authorDeviceId && p.data) {
+          profileMap.set(p.authorDeviceId, {
+            displayName: p.data.displayName || null,
+            avatarUrl: p.data.avatarUrl || null,
+          });
         }
       }
     } catch (err) {
@@ -103,12 +116,15 @@ export async function mount(container, client, router) {
           console.warn('Failed to load messages for', username, err);
         }
 
-        // Look up display name from profiles using friend's deviceUUID
+        // Look up display name and avatar from profiles using friend's deviceUUID
         let displayName = null;
+        let avatarUrl = null;
         if (data.devices) {
           for (const device of data.devices) {
             if (device.deviceUUID && profileMap.has(device.deviceUUID)) {
-              displayName = profileMap.get(device.deviceUUID);
+              const profileData = profileMap.get(device.deviceUUID);
+              displayName = profileData.displayName;
+              avatarUrl = profileData.avatarUrl;
               break;
             }
           }
@@ -120,6 +136,7 @@ export async function mount(container, client, router) {
         conversations.push({
           username,
           displayName,
+          avatarUrl,
           lastMessage,
           type: 'dm',
           unread
@@ -149,7 +166,8 @@ export async function mount(container, client, router) {
             // Prefix with author if not self
             if (last.authorDeviceId !== client.deviceUUID) {
               // Prefer profile displayName, fall back to authorUsername
-              const authorName = profileMap.get(last.authorDeviceId) || last.data?.authorUsername || 'Someone';
+              const authorProfile = profileMap.get(last.authorDeviceId);
+              const authorName = authorProfile?.displayName || last.data?.authorUsername || 'Someone';
               lastMessage = `${authorName}: ${lastMessage}`;
             } else {
               lastMessage = 'You: ' + lastMessage;

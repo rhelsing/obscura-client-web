@@ -794,6 +794,13 @@ ul {
   margin-bottom: 16px;
 }
 
+.avatar-preview {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
 .avatar-placeholder {
   width: 120px;
   height: 120px;
@@ -806,6 +813,29 @@ ul {
   font-weight: bold;
   margin: 0 auto 16px;
   color: var(--text-secondary);
+}
+
+/* Small avatars for lists and headers */
+.avatar-sm {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.avatar-sm-placeholder {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  flex-shrink: 0;
 }
 
 .display-name {

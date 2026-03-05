@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en" data-ry-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Profile Pictures Demo</title>
+  <link rel="stylesheet" href="/src/v2/styles.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@ryanhelsing/ry-ui@1.0.0/dist/css/ry-ui.css">
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@ryanhelsing/ry-ui@1.0.0/dist/ry-ui.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    .demo-section { padding: 24px; max-width: 500px; margin: 0 auto; }
+    .demo-section h2 { margin-bottom: 16px; font-size: 18px; color: var(--text-secondary); }
+    hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+  </style>
+</head>
+<body>
+<ry-page>
+<div class="demo-section">
+  <h1>Profile Pictures Demo</h1>
+  <p style="color: var(--text-secondary); margin-bottom: 24px;">Demonstrating avatar rendering across all views.</p>
+
+  <!-- Avatar Upload Demo -->
+  <h2>1. Edit Profile (Avatar Upload)</h2>
+  <div class="view edit-profile">
+    <form id="profile-form">
+      <div class="avatar-section" style="text-align: center">
+        <div class="avatar-placeholder" id="avatar-display">?</div>
+        <button type="button" id="change-avatar-btn" class="secondary" style="margin-top: 8px">
+          Change Photo
+        </button>
+      </div>
+      <label>
+        Display Name
+        <input type="text" id="display-name" value="Alice" />
+      </label>
+    </form>
+    <input type="file" id="avatar-input" accept="image/*" hidden />
+  </div>
+
+  <hr>
+
+  <!-- View Profile Demo -->
+  <h2>2. View Profile</h2>
+  <card>
+    <stack gap="md" style="text-align: center; padding: var(--ry-space-4)">
+      <div id="profile-avatar-display" style="width: 120px; height: 120px; border-radius: 50%; background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; font-size: 48px; font-weight: bold; margin: 0 auto; color: var(--text-secondary)">A</div>
+      <h2 style="margin: 0" id="profile-name">Alice</h2>
+      <p style="color: var(--text-secondary)">This is my bio</p>
+    </stack>
+  </card>
+
+  <hr>
+
+  <!-- Friend List Demo -->
+  <h2>3. Friend List</h2>
+  <stack gap="sm" class="friend-list-items" id="friend-list">
+    <!-- With avatar -->
+    <card class="friend-item">
+      <cluster>
+        <img class="avatar-sm" id="friend-avatar-1" src="" alt="" style="display: none" />
+        <div class="avatar-sm-placeholder" id="friend-placeholder-1">B</div>
+        <stack gap="none">
+          <strong>Bob</strong>
+        </stack>
+        <ry-icon name="chevron-right"></ry-icon>
+      </cluster>
+    </card>
+    <!-- Without avatar (placeholder) -->
+    <card class="friend-item">
+      <cluster>
+        <div class="avatar-sm-placeholder">C</div>
+        <stack gap="none">
+          <strong>Charlie</strong>
+        </stack>
+        <ry-icon name="chevron-right"></ry-icon>
+      </cluster>
+    </card>
+    <!-- Pending -->
+    <card class="friend-item pending">
+      <cluster>
+        <div class="avatar-sm-placeholder">D</div>
+        <stack gap="none">
+          <strong>Diana</strong>
+          <badge variant="warning">wants to be friends</badge>
+        </stack>
+      </cluster>
+    </card>
+  </stack>
+
+  <hr>
+
+  <!-- Conversation List Demo -->
+  <h2>4. Conversation List</h2>
+  <stack gap="sm" class="conversation-items">
+    <card class="conversation-item" style="position: relative;">
+      <cluster>
+        <img class="avatar-sm" id="convo-avatar-1" src="" alt="" style="display: none" />
+        <div class="avatar-sm-placeholder" id="convo-placeholder-1">B</div>
+        <stack gap="none" style="flex: 1">
+          <strong>Bob</strong>
+          <span style="color: var(--text-secondary); font-size: 14px">You: Hey, how's it going?</span>
+        </stack>
+        <ry-icon name="chevron-right"></ry-icon>
+      </cluster>
+    </card>
+    <card class="conversation-item" style="position: relative;">
+      <cluster>
+        <div class="avatar-sm-placeholder">C</div>
+        <stack gap="none" style="flex: 1">
+          <strong>Charlie</strong>
+          <span style="color: var(--text-secondary); font-size: 14px; font-style: italic">No messages yet</span>
+        </stack>
+        <ry-icon name="chevron-right"></ry-icon>
+      </cluster>
+    </card>
+    <card class="conversation-item" style="position: relative;">
+      <cluster>
+        <div class="avatar-sm-placeholder"><ry-icon name="star" style="font-size: 16px"></ry-icon></div>
+        <stack gap="none" style="flex: 1">
+          <strong>Team Chat</strong>
+          <span style="color: var(--text-secondary); font-size: 14px">Alice: Let's meet tomorrow</span>
+        </stack>
+        <ry-icon name="chevron-right"></ry-icon>
+      </cluster>
+    </card>
+  </stack>
+
+  <hr>
+
+  <!-- Chat Header Demo -->
+  <h2>5. Chat Header</h2>
+  <div style="background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px;">
+    <header style="display: flex; align-items: center; gap: 12px;">
+      <a href="#" class="back"><ry-icon name="chevron-left"></ry-icon> Back</a>
+      <cluster gap="xs" style="flex: 1; justify-content: center;">
+        <img class="avatar-sm" id="chat-avatar" src="" alt="" style="display: none" />
+        <div class="avatar-sm-placeholder" id="chat-placeholder">B</div>
+        <h1 style="font-size: 20px; margin: 0;">Bob</h1>
+      </cluster>
+    </header>
+  </div>
+
+  <hr>
+
+  <h2>6. Dark Mode Toggle</h2>
+  <button id="toggle-theme">Toggle Dark Mode</button>
+
+  <div style="height: 60px"></div>
+</div>
+</ry-page>
+
+<script>
+  // Avatar upload demo
+  const avatarBtn = document.getElementById('change-avatar-btn');
+  const avatarInput = document.getElementById('avatar-input');
+  const avatarDisplay = document.getElementById('avatar-display');
+
+  avatarBtn.addEventListener('click', () => avatarInput.click());
+
+  avatarInput.addEventListener('change', () => {
+    const file = avatarInput.files[0];
+    if (!file) return;
+
+    // Simulate compressImage by using canvas
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      const maxDim = 200;
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (w > maxDim || h > maxDim) {
+        const scale = Math.min(maxDim / w, maxDim / h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      canvas.toBlob((blob) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result;
+
+          // Update Edit Profile preview
+          const newImg = document.createElement('img');
+          newImg.className = 'avatar-preview';
+          newImg.src = dataUrl;
+          newImg.alt = 'Avatar';
+          newImg.style.cssText = 'width: 120px; height: 120px; border-radius: 50%; object-fit: cover;';
+          avatarDisplay.replaceWith(newImg);
+
+          // Update View Profile
+          const profileAvatar = document.getElementById('profile-avatar-display');
+          profileAvatar.outerHTML = `<img class="avatar" src="${dataUrl}" alt="Avatar" style="width: 120px; height: 120px; border-radius: 50%; object-fit: cover; margin: 0 auto" />`;
+
+          // Update Friend List (Bob's avatar)
+          document.getElementById('friend-avatar-1').src = dataUrl;
+          document.getElementById('friend-avatar-1').style.display = '';
+          document.getElementById('friend-placeholder-1').style.display = 'none';
+
+          // Update Conversation List (Bob's avatar)
+          document.getElementById('convo-avatar-1').src = dataUrl;
+          document.getElementById('convo-avatar-1').style.display = '';
+          document.getElementById('convo-placeholder-1').style.display = 'none';
+
+          // Update Chat Header
+          document.getElementById('chat-avatar').src = dataUrl;
+          document.getElementById('chat-avatar').style.display = '';
+          document.getElementById('chat-placeholder').style.display = 'none';
+
+          console.log('Avatar updated across all views! Data URL size:', Math.round(dataUrl.length / 1024), 'KB');
+        };
+        reader.readAsDataURL(blob);
+      }, 'image/jpeg', 0.7);
+    };
+    img.src = url;
+  });
+
+  // Dark mode toggle
+  document.getElementById('toggle-theme').addEventListener('click', () => {
+    const html = document.documentElement;
+    const current = html.getAttribute('data-ry-theme');
+    html.setAttribute('data-ry-theme', current === 'dark' ? 'light' : 'dark');
+  });
+</script>
+</body>
+</html>

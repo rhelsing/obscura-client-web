@@ -5,6 +5,16 @@ import { init, setClient } from './views/index.js';
 import { ObscuraClient } from './lib/ObscuraClient.js';
 import { fullSchema } from './lib/schema.js';
 
+// Auto-reload on stale chunk errors (happens after deploys when cached HTML references old hashes)
+window.addEventListener('vite:preloadError', () => {
+  window.location.reload();
+});
+window.addEventListener('unhandledrejection', (e) => {
+  if (e.reason?.message?.includes('dynamically imported module')) {
+    window.location.reload();
+  }
+});
+
 async function bootstrap() {
   // Initialize theme from localStorage
   const savedTheme = localStorage.getItem('ry-theme') || 'light';

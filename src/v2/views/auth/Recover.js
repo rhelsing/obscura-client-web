@@ -149,10 +149,12 @@ export function mount(container, client, router) {
   container.innerHTML = render({ step: 'upload' });
   router.updatePageLinks();
 
+  // Always attach upload handler immediately so the form works right away
+  setupUploadStep();
+
   if (pendingClient) {
+    // Async: check for server backup and enhance UI if found
     checkServerBackup();
-  } else {
-    setupUploadStep();
   }
 
   async function checkServerBackup() {
@@ -166,12 +168,12 @@ export function mount(container, client, router) {
         router.updatePageLinks();
         setupUploadStep();
         setupServerRestoreButton();
-        return;
       }
     } catch (err) {
       console.error('[Recover] Failed to check server backup:', err);
     }
-    setupUploadStep();
+    // Note: setupUploadStep() already called synchronously in mount(),
+    // only re-called above if DOM was re-rendered with serverBackup option
   }
 
   function setupServerRestoreButton() {

@@ -8,6 +8,21 @@ syntax = "proto3";
 package obscura.v2;
 
 // =============================================================================
+// Signal Protocol Envelope (client-side, opaque to server)
+// The server treats this as raw bytes in Envelope.message / Submission.message.
+// =============================================================================
+
+message EncryptedMessage {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    TYPE_PREKEY_MESSAGE = 1;
+    TYPE_ENCRYPTED_MESSAGE = 2;
+  }
+  Type type = 1;
+  bytes content = 2;
+}
+
+// =============================================================================
 // Main Message Wrapper
 // =============================================================================
 

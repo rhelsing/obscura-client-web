@@ -57,24 +57,17 @@ export class SyncManager {
       authorDeviceId: entry.authorDeviceId,
     };
 
-    // Send to all targets
-    let sent = 0;
-    let failed = 0;
-
+    // Queue all targets into a single batch
     for (const targetUserId of targets) {
-      try {
-        await this.client.messenger.sendMessage(targetUserId, {
-          type: 'MODEL_SYNC',
-          modelSync,
-        });
-        sent++;
-      } catch (e) {
-        console.warn(`Failed to sync to ${targetUserId}:`, e.message);
-        failed++;
-      }
+      await this.client.messenger.queueMessage(targetUserId, {
+        type: 'MODEL_SYNC',
+        modelSync,
+      });
     }
 
-    return { sent, failed };
+    // Flush in one HTTP request
+    const result = await this.client.messenger.flushMessages();
+    return { sent: result.sent, failed: result.failed };
   }
 
   /**

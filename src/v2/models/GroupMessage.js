@@ -3,6 +3,7 @@ import { BaseModel } from './BaseModel.js';
 export class GroupMessage extends BaseModel {
   static fields = {
     text: 'string',
+    mediaUrl: 'string?',
   };
 
   static sync = 'g-set';

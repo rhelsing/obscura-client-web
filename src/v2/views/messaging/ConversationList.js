@@ -144,7 +144,7 @@ export async function mount(container, client, router) {
             .exec();
           if (messages.length > 0) {
             const last = messages[0];
-            const text = last.data?.text || '';
+            const text = last.data?.text || (last.data?.mediaUrl ? '[Attachment]' : '');
             lastMessage = text.length > 40 ? text.slice(0, 40) + '...' : text;
             // Prefix with author if not self
             if (last.authorDeviceId !== client.deviceUUID) {

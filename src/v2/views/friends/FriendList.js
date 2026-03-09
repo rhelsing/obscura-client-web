@@ -58,11 +58,10 @@ export function render({ friends = [], pendingCount = 0 } = {}) {
                   <stack gap="none">
                     <strong>${f.displayName || f.username}</strong>
                     ${f.status === 'pending_outgoing' ? `<badge variant="warning">pending</badge>` : ''}
-                    ${f.isVerified ? `<badge variant="success">verified</badge>` : ''}
                   </stack>
                 </cluster>
                 <cluster gap="sm" style="align-items: center;">
-                  ${f.status === 'accepted' ? `<a class="verify-btn" data-username="${f.username}" style="font-size: 0.85em; color: var(--primary); cursor: pointer;">${f.isVerified ? 'Re-verify' : 'Verify'}</a>` : ''}
+                  ${f.status === 'accepted' ? `<a class="verify-btn" data-username="${f.username}" title="${f.isVerified ? 'Re-verify' : 'Verify'}" style="cursor: pointer; color: ${f.isVerified ? 'var(--success, #22c55e)' : 'var(--text-muted, #888)'}; font-size: 1.1em;"><ry-icon name="check"></ry-icon></a>` : ''}
                   <ry-icon name="chevron-right"></ry-icon>
                 </cluster>
               </cluster>

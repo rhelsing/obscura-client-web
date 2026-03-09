@@ -267,17 +267,29 @@ export function createClient(baseUrl = API_URL) {
     },
 
     /**
-     * Get WebSocket gateway URL
+     * Get a short-lived, single-use ticket for WebSocket authentication.
+     * Uses the Authorization header (encrypted via TLS) instead of exposing
+     * the long-lived JWT as a query parameter.
+     * @returns {Promise<string>} The ticket string
      */
-    getGatewayUrl() {
+    async getGatewayTicket() {
+      const result = await request('/v1/gateway/ticket', { method: 'POST' });
+      return result.ticket;
+    },
+
+    /**
+     * Get WebSocket gateway URL using a ticket
+     * @param {string} ticket - Short-lived ticket from getGatewayTicket()
+     */
+    getGatewayUrl(ticket) {
       // In dev mode with proxy, use /ws proxy path
       if (baseUrl === '/api') {
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        return `${wsProtocol}//${window.location.host}/ws/v1/gateway?token=${encodeURIComponent(token)}`;
+        return `${wsProtocol}//${window.location.host}/ws/v1/gateway?ticket=${encodeURIComponent(ticket)}`;
       }
       // Direct connection
       const wsBase = baseUrl.replace('https://', 'wss://').replace('http://', 'ws://');
-      return `${wsBase}/v1/gateway?token=${encodeURIComponent(token)}`;
+      return `${wsBase}/v1/gateway?ticket=${encodeURIComponent(ticket)}`;
     },
 
     /**

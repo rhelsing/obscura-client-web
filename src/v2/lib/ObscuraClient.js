@@ -738,6 +738,11 @@ export class ObscuraClient {
     await this.messenger.loadProto();
     this._shouldReconnect = true;
 
+    // Fetch a short-lived, single-use ticket for WebSocket auth
+    const apiClient = createClient(this.apiUrl);
+    apiClient.setToken(this.token);
+    const ticket = await apiClient.getGatewayTicket();
+
     // Import ws for Node.js environment
     let WS;
     if (typeof WebSocket !== 'undefined') {
@@ -747,7 +752,7 @@ export class ObscuraClient {
     }
 
     return new Promise((resolve, reject) => {
-      const url = `${this.wsUrl}/v1/gateway?token=${encodeURIComponent(this.token)}`;
+      const url = `${this.wsUrl}/v1/gateway?ticket=${encodeURIComponent(ticket)}`;
       console.log('[ObscuraClient] Connecting to WebSocket:', url);
       console.log('[ObscuraClient] wsUrl:', this.wsUrl);
       this.ws = new WS(url);

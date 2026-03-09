@@ -137,12 +137,6 @@ export async function mount(container, client, router) {
       const displayName = container.querySelector('#display-name').value.trim();
       const bio = container.querySelector('#bio').value.trim();
 
-      if (!displayName) {
-        container.innerHTML = render({ profile, error: 'Display name is required' });
-        mount(container, client, router);
-        return;
-      }
-
       container.innerHTML = render({ profile, saving: true });
 
       try {
@@ -150,18 +144,16 @@ export async function mount(container, client, router) {
           throw new Error('Profile model not defined');
         }
 
+        const profileData = {
+          ...(displayName ? { displayName } : {}),
+          bio: bio || undefined,
+          avatarUrl: avatarUrl || undefined
+        };
+
         if (profileId) {
-          await client.profile.upsert(profileId, {
-            displayName,
-            bio: bio || undefined,
-            avatarUrl: avatarUrl || undefined
-          });
+          await client.profile.upsert(profileId, profileData);
         } else {
-          await client.profile.create({
-            displayName,
-            bio: bio || undefined,
-            avatarUrl: avatarUrl || undefined
-          });
+          await client.profile.create(profileData);
         }
 
         navigate('/profile');

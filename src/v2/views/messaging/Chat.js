@@ -18,17 +18,27 @@ let audioRecorder = null;
 let isRecording = false;
 let recordingStartTime = 0;
 
-export function render({ username = '', displayName = '', messages = [], sending = false, streakCount = 0, recording = false, recordingTime = 0 } = {}) {
+function renderSmallAvatar(avatarUrl, name) {
+  if (avatarUrl) {
+    return `<img class="avatar-sm" src="${avatarUrl}" alt="" />`;
+  }
+  const letter = (name || 'U')[0].toUpperCase();
+  return `<div class="avatar-sm-placeholder">${letter}</div>`;
+}
+
+export function render({ username = '', displayName = '', avatarUrl = null, messages = [], sending = false, streakCount = 0, recording = false, recordingTime = 0 } = {}) {
   const title = displayName || username;
   return `
     <div class="view chat">
       <header>
         <a href="/messages" data-navigo class="back"><ry-icon name="chevron-left"></ry-icon> Back</a>
-        <cluster gap="xs" style="flex: 1; justify-content: center;">
-          <h1>${title}</h1>
-          ${streakCount > 0 ? `<span class="streak-badge">🔥 ${streakCount}</span>` : ''}
-        </cluster>
-        <a href="/profile/${username}" data-navigo><button variant="ghost" size="sm"><ry-icon name="user"></ry-icon></button></a>
+        <a href="/profile/${username}" data-navigo style="text-decoration: none; color: inherit;">
+          <cluster gap="xs" style="flex: 1; justify-content: center;">
+            ${renderSmallAvatar(avatarUrl, title)}
+            <h1>${title}</h1>
+            ${streakCount > 0 ? `<span class="streak-badge">🔥 ${streakCount}</span>` : ''}
+          </cluster>
+        </a>
       </header>
 
       <div class="messages-container" id="messages">
@@ -137,23 +147,16 @@ export async function mount(container, client, router, params) {
   // Mark conversation as read
   markConversationRead(username);
 
-  // Look up displayName from profiles
+  // Look up displayName and avatar from profiles
   let displayName = null;
-  if (client.profile && client.friends?.friends) {
-    const friend = client.friends.friends.get(username);
-    if (friend?.devices) {
-      try {
-        const profiles = await client.profile.where({}).exec();
-        const profileMap = new Map(profiles.map(p => [p.authorDeviceId, p.data?.displayName]));
-        for (const device of friend.devices) {
-          if (device.deviceUUID && profileMap.has(device.deviceUUID)) {
-            displayName = profileMap.get(device.deviceUUID);
-            break;
-          }
-        }
-      } catch (err) {
-        console.warn('Failed to load profile for chat:', err);
-      }
+  let avatarUrl = null;
+  if (client.getProfileData) {
+    try {
+      const profileData = await client.getProfileData(username);
+      displayName = profileData.displayName;
+      avatarUrl = profileData.avatarUrl;
+    } catch (err) {
+      console.warn('Failed to load profile for chat:', err);
     }
   }
 
@@ -171,7 +174,7 @@ export async function mount(container, client, router, params) {
   }
 
   // Show loading state first
-  container.innerHTML = render({ username, displayName, messages: [], sending: false, streakCount });
+  container.innerHTML = render({ username, displayName, avatarUrl, messages: [], sending: false, streakCount });
 
   // Load existing messages from IndexedDB (or in-memory fallback)
   try {
@@ -213,7 +216,7 @@ export async function mount(container, client, router, params) {
       .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
   }
 
-  container.innerHTML = render({ username, displayName, messages, streakCount });
+  container.innerHTML = render({ username, displayName, avatarUrl, messages, streakCount });
 
   // Get messagesContainer and helpers
   const getMessagesContainer = () => container.querySelector('#messages');
@@ -230,7 +233,7 @@ export async function mount(container, client, router, params) {
   const rerender = () => {
     const mc = getMessagesContainer();
     const scrollPos = mc ? mc.scrollTop : 0;
-    container.innerHTML = render({ username, displayName, messages, streakCount, recording: isRecording, recordingTime });
+    container.innerHTML = render({ username, displayName, avatarUrl, messages, streakCount, recording: isRecording, recordingTime });
     const newMc = getMessagesContainer();
     if (newMc) newMc.scrollTop = scrollPos;
   };

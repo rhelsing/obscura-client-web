@@ -3,6 +3,7 @@
  * - Edit displayName, bio, avatarUrl
  */
 import { navigate } from '../index.js';
+import { compressImage } from '../../lib/media.js';
 
 let cleanup = null;
 
@@ -99,12 +100,33 @@ export async function mount(container, client, router) {
       avatarInput.click();
     });
 
-    avatarInput.addEventListener('change', () => {
+    avatarInput.addEventListener('change', async () => {
       const file = avatarInput.files[0];
-      if (file) {
-        // TODO: Upload and get URL
-        // For now just show that a file was selected
-        alert('Avatar upload not yet implemented');
+      if (!file) return;
+
+      try {
+        // Compress to small profile picture size (max 200px, aggressive quality)
+        const compressed = await compressImage(file, 50 * 1024, 200);
+        const reader = new FileReader();
+        reader.onload = () => {
+          avatarUrl = reader.result;
+          // Update preview in the form
+          const section = container.querySelector('.avatar-section');
+          if (section) {
+            const existing = section.querySelector('.avatar-preview, .avatar-placeholder');
+            if (existing) {
+              const img = document.createElement('img');
+              img.className = 'avatar-preview';
+              img.src = avatarUrl;
+              img.alt = 'Avatar';
+              img.style.cssText = 'width: 120px; height: 120px; border-radius: 50%; object-fit: cover;';
+              existing.replaceWith(img);
+            }
+          }
+        };
+        reader.readAsDataURL(compressed);
+      } catch (err) {
+        console.error('Failed to process avatar:', err);
       }
     });
 

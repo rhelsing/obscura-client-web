@@ -746,9 +746,14 @@ export class ObscuraClient {
       WS = (await import('ws')).default;
     }
 
+    // Fetch a single-use gateway ticket before connecting
+    const apiClient = createClient(this.apiUrl);
+    apiClient.setToken(this.token);
+    const ticket = await apiClient.fetchGatewayTicket();
+
     return new Promise((resolve, reject) => {
-      const url = `${this.wsUrl}/v1/gateway?token=${encodeURIComponent(this.token)}`;
-      console.log('[ObscuraClient] Connecting to WebSocket:', url);
+      const url = `${this.wsUrl}/v1/gateway?ticket=${encodeURIComponent(ticket)}`;
+      console.log('[ObscuraClient] Connecting to WebSocket (ticket-based)');
       console.log('[ObscuraClient] wsUrl:', this.wsUrl);
       this.ws = new WS(url);
 

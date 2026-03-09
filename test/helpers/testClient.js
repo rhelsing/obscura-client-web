@@ -391,8 +391,12 @@ export class TestClient {
   async connectWebSocket() {
     await this.loadProto();
 
+    // Fetch a single-use gateway ticket
+    const ticketResult = await this.request('/v1/gateway/ticket', { method: 'POST' });
+    const ticket = ticketResult.ticket;
+
     return new Promise((resolve, reject) => {
-      const url = `${this.wsUrl}/v1/gateway?token=${encodeURIComponent(this.token)}`;
+      const url = `${this.wsUrl}/v1/gateway?ticket=${encodeURIComponent(ticket)}`;
       this.ws = new WebSocket(url);
 
       this.ws.on('open', () => {

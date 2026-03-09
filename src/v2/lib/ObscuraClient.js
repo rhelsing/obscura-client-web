@@ -1530,6 +1530,11 @@ export class ObscuraClient {
 
     const parsed = parseLinkCode(linkCode);
 
+    // Reject link codes from different accounts
+    if (parsed.accountUsername && parsed.accountUsername !== this.username) {
+      throw new Error('This link code belongs to a different account');
+    }
+
     // Check expiry (if present - for backwards compat)
     if (parsed.expiresAt && Date.now() > parsed.expiresAt) {
       throw new Error('Link code expired');

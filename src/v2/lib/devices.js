@@ -192,6 +192,7 @@ export function parseLinkCode(linkCode) {
       challenge: base64ToUint8Array(data.c),
       signature: data.s ? base64ToUint8Array(data.s) : null,  // Signature proving ownership
       expiresAt: data.e || null,  // Expiry timestamp (ms)
+      accountUsername: data.a || null,  // Account username for ownership verification
     };
   } catch (e) {
     throw new Error('Invalid link code');

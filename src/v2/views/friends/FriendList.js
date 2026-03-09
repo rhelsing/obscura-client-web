@@ -52,15 +52,19 @@ export function render({ friends = [], pendingCount = 0 } = {}) {
             </card>
           ` : `
             <card class="friend-item" data-username="${f.username}">
-              <cluster>
-                ${renderSmallAvatar(f.avatarUrl, f.displayName || f.username)}
-                <stack gap="none">
-                  <strong>${f.displayName || f.username}</strong>
-                  ${f.status === 'pending_outgoing' ? `<badge variant="warning">pending</badge>` : ''}
-                  ${f.isVerified ? `<badge variant="success">verified</badge>` : ''}
-                </stack>
-                ${f.status === 'accepted' ? `<button variant="ghost" size="sm" class="verify-btn" data-username="${f.username}">${f.isVerified ? 'Re-verify' : 'Verify'}</button>` : ''}
-                <ry-icon name="chevron-right"></ry-icon>
+              <cluster style="justify-content: space-between; align-items: center;">
+                <cluster>
+                  ${renderSmallAvatar(f.avatarUrl, f.displayName || f.username)}
+                  <stack gap="none">
+                    <strong>${f.displayName || f.username}</strong>
+                    ${f.status === 'pending_outgoing' ? `<badge variant="warning">pending</badge>` : ''}
+                    ${f.isVerified ? `<badge variant="success">verified</badge>` : ''}
+                  </stack>
+                </cluster>
+                <cluster gap="sm" style="align-items: center;">
+                  ${f.status === 'accepted' ? `<a class="verify-btn" data-username="${f.username}" style="font-size: 0.85em; color: var(--primary); cursor: pointer;">${f.isVerified ? 'Re-verify' : 'Verify'}</a>` : ''}
+                  <ry-icon name="chevron-right"></ry-icon>
+                </cluster>
               </cluster>
             </card>
           `).join('')}

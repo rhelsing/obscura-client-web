@@ -34,6 +34,8 @@ export class FriendManager {
           status,
           addedAt: f.createdAt,
           recoveryPublicKey: f.recoveryPublicKey || null,
+          isVerified: f.isVerified || false,
+          verifiedAt: f.verifiedAt || null,
         });
       }
       console.log(`[FriendManager] Loaded ${friends.length} friends from IndexedDB`);
@@ -73,6 +75,8 @@ export class FriendManager {
       await this._store.addFriend(userId, f.username, storeStatus, {
         devices: f.devices,
         recoveryPublicKey: f.recoveryPublicKey,
+        isVerified: f.isVerified || false,
+        verifiedAt: f.verifiedAt || null,
       });
     } catch (e) {
       console.warn('[FriendManager] Failed to persist friend:', e.message);
@@ -120,6 +124,8 @@ export class FriendManager {
       status,
       addedAt: existing?.addedAt || Date.now(),
       recoveryPublicKey: recoveryPublicKey || existing?.recoveryPublicKey || null,
+      isVerified: existing?.isVerified || false,
+      verifiedAt: existing?.verifiedAt || null,
     });
     // Persist to IndexedDB (fire-and-forget but logged)
     this._persistFriend(username);
@@ -137,6 +143,18 @@ export class FriendManager {
    */
   get(username) {
     return this.friends.get(username);
+  }
+
+  /**
+   * Mark a friend as verified (persists to IndexedDB)
+   * @param {string} username
+   */
+  markVerified(username) {
+    const friend = this.friends.get(username);
+    if (!friend) return;
+    friend.isVerified = true;
+    friend.verifiedAt = Date.now();
+    this._persistFriend(username);
   }
 
   /**

@@ -98,6 +98,8 @@ export function createFriendStore(userId) {
         devices: options.devices || existing?.devices || [],
         recoveryPublicKey: options.recoveryPublicKey || existing?.recoveryPublicKey,
         devicesUpdatedAt: options.devicesUpdatedAt || existing?.devicesUpdatedAt || 0,
+        isVerified: options.isVerified ?? existing?.isVerified ?? false,
+        verifiedAt: options.verifiedAt ?? existing?.verifiedAt ?? null,
         createdAt: existing?.createdAt || Date.now(),
         updatedAt: Date.now(),
       }));

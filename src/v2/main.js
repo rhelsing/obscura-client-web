@@ -46,9 +46,18 @@ async function bootstrap() {
       init(app, client);
     } catch (e) {
       console.warn('[main] Failed to restore connection:', e.message);
-      // Clear bad session and start fresh
-      ObscuraClient.clearSession();
-      init(app, null);
+
+      // Only clear session for auth failures (401/403).
+      // Network errors (e.g. fetch aborted by page navigation) should NOT
+      // destroy the session — the user is still logged in.
+      if (e.status === 401 || e.status === 403) {
+        ObscuraClient.clearSession();
+        init(app, null);
+      } else {
+        // Transient error — initialize with the restored client anyway.
+        // The WebSocket will reconnect automatically.
+        init(app, client);
+      }
     }
   } else {
     // No saved session, start fresh

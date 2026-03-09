@@ -267,17 +267,27 @@ export function createClient(baseUrl = API_URL) {
     },
 
     /**
-     * Get WebSocket gateway URL
+     * Fetch a single-use gateway ticket for WebSocket authentication.
+     * @returns {Promise<string>} Short-lived ticket string
      */
-    getGatewayUrl() {
+    async fetchGatewayTicket() {
+      const result = await request('/v1/gateway/ticket', { method: 'POST' });
+      return result.ticket;
+    },
+
+    /**
+     * Get WebSocket gateway URL using a pre-fetched ticket
+     * @param {string} ticket - Single-use gateway ticket from fetchGatewayTicket()
+     */
+    getGatewayUrl(ticket) {
       // In dev mode with proxy, use /ws proxy path
       if (baseUrl === '/api') {
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        return `${wsProtocol}//${window.location.host}/ws/v1/gateway?token=${encodeURIComponent(token)}`;
+        return `${wsProtocol}//${window.location.host}/ws/v1/gateway?ticket=${encodeURIComponent(ticket)}`;
       }
       // Direct connection
       const wsBase = baseUrl.replace('https://', 'wss://').replace('http://', 'ws://');
-      return `${wsBase}/v1/gateway?token=${encodeURIComponent(token)}`;
+      return `${wsBase}/v1/gateway?ticket=${encodeURIComponent(ticket)}`;
     },
 
     /**

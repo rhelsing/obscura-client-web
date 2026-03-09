@@ -71,8 +71,9 @@ export async function mount(container, client, router, params) {
 
       container.innerHTML = render({ myCode, theirCode, username: displayName });
 
-      // Match button - codes verified, go back to friends
+      // Match button - codes verified, persist and go back to friends
       container.querySelector('#match-btn').addEventListener('click', () => {
+        client.friends.markVerified(username);
         delete window.__verifyRequest;
         navigate('/friends');
       });

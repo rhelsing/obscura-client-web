@@ -11,6 +11,14 @@ import { generateVerifyCodeFromDevices } from '../../crypto/signatures.js';
 
 let cleanup = null;
 
+function renderSmallAvatar(avatarUrl, name) {
+  if (avatarUrl) {
+    return `<img class="avatar-sm" src="${avatarUrl}" alt="" />`;
+  }
+  const letter = (name || 'U')[0].toUpperCase();
+  return `<div class="avatar-sm-placeholder">${letter}</div>`;
+}
+
 export function render({ friends = [], pendingCount = 0 } = {}) {
   return `
     <div class="view friend-list">
@@ -31,7 +39,7 @@ export function render({ friends = [], pendingCount = 0 } = {}) {
           ${friends.map(f => f.status === 'pending_incoming' ? `
             <card class="friend-item pending" data-username="${f.username}">
               <cluster>
-                <ry-icon name="user"></ry-icon>
+                ${renderSmallAvatar(f.avatarUrl, f.displayName || f.username)}
                 <stack gap="none">
                   <strong>${f.displayName || f.username}</strong>
                   <badge variant="warning">wants to be friends</badge>
@@ -45,12 +53,13 @@ export function render({ friends = [], pendingCount = 0 } = {}) {
           ` : `
             <card class="friend-item" data-username="${f.username}">
               <cluster>
-                <ry-icon name="user"></ry-icon>
+                ${renderSmallAvatar(f.avatarUrl, f.displayName || f.username)}
                 <stack gap="none">
                   <strong>${f.displayName || f.username}</strong>
                   ${f.status === 'pending_outgoing' ? `<badge variant="warning">pending</badge>` : ''}
+                  ${f.isVerified ? `<badge variant="success">verified</badge>` : ''}
                 </stack>
-                ${f.status === 'accepted' ? `<button variant="ghost" size="sm" class="verify-btn" data-username="${f.username}">Verify</button>` : ''}
+                ${f.status === 'accepted' ? `<button variant="ghost" size="sm" class="verify-btn" data-username="${f.username}">${f.isVerified ? 'Re-verify' : 'Verify'}</button>` : ''}
                 <ry-icon name="chevron-right"></ry-icon>
               </cluster>
             </card>
@@ -78,9 +87,11 @@ export async function mount(container, client, router) {
     }
   }
 
-  // Look up display names for all friends
+  // Look up display names and avatars for all friends
   for (const f of friends) {
-    f.displayName = await client.getDisplayName(f.username);
+    const profileData = await client.getProfileData(f.username);
+    f.displayName = profileData.displayName || null;
+    f.avatarUrl = profileData.avatarUrl || null;
   }
 
   container.innerHTML = render({ friends, pendingCount });

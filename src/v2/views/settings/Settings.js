@@ -12,6 +12,8 @@ import { ObscuraClient } from '../../lib/ObscuraClient.js';
 import { unlinkDevice } from '../../lib/auth.js';
 import { createBackupManager } from '../../backup/BackupManager.js';
 import { createClient } from '../../api/client.js';
+import { createDeviceStore } from '../../store/deviceStore.js';
+import { deriveRecoveryKeypair } from '../../crypto/signatures.js';
 import { logger } from '../../lib/logger.js';
 
 let cleanup = null;
@@ -173,6 +175,22 @@ export function render({ settings = null, loading = false, saving = false, isFir
         </actions>
       </ry-modal>
 
+      <ry-modal id="recovery-key-modal" title="Recovery Phrase Required">
+        <stack gap="md">
+          <p>To encrypt backups, your recovery key is needed. Enter your 12-word recovery phrase to store the key on this device.</p>
+          <div>
+            <label for="backup-recovery-phrase">Recovery Phrase (12 words)</label>
+            <textarea id="backup-recovery-phrase" rows="3" placeholder="Enter your 12-word recovery phrase..."></textarea>
+          </div>
+          <p class="hint">Only the public key will be stored. Your phrase is never saved.</p>
+          <p id="recovery-key-error" class="error" style="display: none;"></p>
+        </stack>
+        <actions slot="footer">
+          <button variant="ghost" close>Cancel</button>
+          <button variant="primary" id="confirm-recovery-key">Save Key & Continue</button>
+        </actions>
+      </ry-modal>
+
       ${renderNav('more', getBadgeCounts())}
     </div>
   `;
@@ -222,6 +240,104 @@ export async function mount(container, client, router) {
       }
     });
 
+    // Recovery key modal elements
+    const recoveryKeyModal = container.querySelector('#recovery-key-modal');
+    const confirmRecoveryKeyBtn = container.querySelector('#confirm-recovery-key');
+    const backupRecoveryPhraseInput = container.querySelector('#backup-recovery-phrase');
+    const recoveryKeyError = container.querySelector('#recovery-key-error');
+
+    /**
+     * Ensure the recovery public key exists in the deviceStore.
+     * If missing, prompts the user for their recovery phrase via modal.
+     * Returns true if the key is now available, false if the user cancelled.
+     */
+    function ensureRecoveryKey() {
+      return new Promise(async (resolve) => {
+        // Check deviceStore directly (same source BackupManager reads from)
+        const deviceStore = createDeviceStore(client.username);
+        try {
+          const identity = await deviceStore.getIdentity();
+          if (identity?.recoveryPublicKey) {
+            deviceStore.close();
+            resolve(true);
+            return;
+          }
+        } catch (e) {
+          // Fall through to prompt
+        }
+        deviceStore.close();
+
+        // No recovery key — show modal
+        recoveryKeyError.style.display = 'none';
+        backupRecoveryPhraseInput.value = '';
+        recoveryKeyModal.open?.() || recoveryKeyModal.setAttribute('open', '');
+
+        // One-shot handlers for this prompt
+        const onConfirm = async () => {
+          const phrase = backupRecoveryPhraseInput.value.trim();
+          if (!phrase) {
+            recoveryKeyError.textContent = 'Please enter your 12-word recovery phrase';
+            recoveryKeyError.style.display = 'block';
+            return;
+          }
+
+          confirmRecoveryKeyBtn.disabled = true;
+          confirmRecoveryKeyBtn.textContent = 'Verifying...';
+          recoveryKeyError.style.display = 'none';
+
+          try {
+            const keypair = await deriveRecoveryKeypair(phrase);
+
+            // Store only the public key in the deviceStore
+            const ds = createDeviceStore(client.username);
+            const existing = await ds.getIdentity();
+            if (existing) {
+              await ds.updateIdentity({ recoveryPublicKey: keypair.publicKey });
+            } else {
+              await ds.storeIdentity({
+                coreUsername: client.username,
+                deviceUsername: client.deviceUsername,
+                deviceUUID: client.deviceUUID,
+                recoveryPublicKey: keypair.publicKey,
+              });
+            }
+            ds.close();
+
+            // Also update the client instance
+            client.recoveryPublicKey = keypair.publicKey;
+
+            // Zero out private key
+            keypair.privateKey.fill(0);
+
+            cleanup();
+            recoveryKeyModal.close?.();
+            resolve(true);
+          } catch (err) {
+            recoveryKeyError.textContent = err.message || 'Invalid recovery phrase';
+            recoveryKeyError.style.display = 'block';
+          } finally {
+            confirmRecoveryKeyBtn.disabled = false;
+            confirmRecoveryKeyBtn.textContent = 'Save Key & Continue';
+          }
+        };
+
+        const onCancel = () => {
+          cleanup();
+          resolve(false);
+        };
+
+        function cleanup() {
+          confirmRecoveryKeyBtn.removeEventListener('click', onConfirm);
+          recoveryKeyModal.removeEventListener('ry:close', onCancel);
+          // Clear phrase from memory
+          backupRecoveryPhraseInput.value = '';
+        }
+
+        confirmRecoveryKeyBtn.addEventListener('click', onConfirm);
+        recoveryKeyModal.addEventListener('ry:close', onCancel);
+      });
+    }
+
     // Web backup toggle
     const webBackupToggle = container.querySelector('#web-backup-toggle');
     const webBackupStatus = container.querySelector('#web-backup-status');
@@ -237,6 +353,15 @@ export async function mount(container, client, router) {
       }
 
       if (enabled) {
+        // Ensure recovery key is available before attempting backup
+        const hasKey = await ensureRecoveryKey();
+        if (!hasKey) {
+          // User cancelled — revert the toggle
+          webBackupToggle.removeAttribute('checked');
+          try { await saveSettings({ webBackupEnabled: false }); } catch (_) {}
+          return;
+        }
+
         // Trigger an immediate upload
         webBackupStatus.style.display = 'block';
         webBackupStatus.textContent = 'Uploading backup...';
@@ -305,6 +430,10 @@ export async function mount(container, client, router) {
     // Export backup button
     const exportBackupBtn = container.querySelector('#export-backup');
     exportBackupBtn.addEventListener('click', async () => {
+      // Ensure recovery key is available before attempting export
+      const hasKey = await ensureRecoveryKey();
+      if (!hasKey) return;
+
       exportBackupBtn.disabled = true;
       exportBackupBtn.querySelector('span').textContent = 'Exporting...';
 

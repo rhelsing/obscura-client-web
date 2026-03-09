@@ -305,8 +305,8 @@ export class ObscuraClient {
         shellRefreshToken: session.shellRefreshToken,
       });
 
-      // Load recoveryPublicKey and p2pIdentity from deviceStore asynchronously
-      client._loadIdentityKeys();
+      // Load recoveryPublicKey and p2pIdentity from deviceStore
+      await client._loadIdentityKeys();
 
       logger.logSessionRestore({ username: session.username, tokenWasExpired,
         refreshAttempted: tokenWasExpired, refreshSucceeded: true,
@@ -632,6 +632,39 @@ export class ObscuraClient {
   }
 
   /**
+   * Get profile data for a friend (displayName + avatarUrl)
+   * Looks up synced Profile by matching friend's deviceUUID to profile's authorDeviceId
+   * @param {string} username - Friend's username
+   * @returns {Promise<{displayName: string|null, avatarUrl: string|null}>}
+   */
+  async getProfileData(username) {
+    const result = { displayName: null, avatarUrl: null };
+
+    const friend = this.friends?.friends?.get(username);
+    if (!friend?.devices?.length) return result;
+
+    if (this.profile) {
+      try {
+        const profiles = await this.profile.all();
+        for (const device of friend.devices) {
+          if (device.deviceUUID) {
+            const profile = profiles.find(p => p.authorDeviceId === device.deviceUUID);
+            if (profile?.data) {
+              result.displayName = profile.data.displayName || null;
+              result.avatarUrl = profile.data.avatarUrl || null;
+              return result;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to look up profile data:', err);
+      }
+    }
+
+    return result;
+  }
+
+  /**
    * Persist a message to IndexedDB (and in-memory cache)
    * @private
    */
@@ -932,6 +965,13 @@ export class ObscuraClient {
 
       const settingsRecord = await this.settings.where({}).first();
       if (!settingsRecord?.data?.webBackupEnabled) return;
+
+      // Skip if recovery public key is not available (user needs to provide
+      // their recovery phrase via Settings to store the key on this device)
+      if (!this.recoveryPublicKey) {
+        console.warn('[ObscuraClient] Skipping web backup — recovery public key not available');
+        return;
+      }
 
       const backupToken = this.shellToken || this.token;
       tokenSource = this.shellToken ? 'shell' : 'device';

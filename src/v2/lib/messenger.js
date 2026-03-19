@@ -188,10 +188,8 @@ export class Messenger {
    * @param {number} [registrationId] - Target device's registrationId (default: fetches bundles)
    */
   async encrypt(targetUserId, plaintext, registrationId = 1) {
-    // Check if session already exists at this address
     const address = new SignalProtocolAddress(targetUserId, registrationId);
     const existingSession = await this.store.loadSession(address.toString());
-
     if (!existingSession) {
       const bundles = await this.fetchPreKeyBundles(targetUserId);
       const bundle = bundles.find(b => b.registrationId === registrationId) || bundles[0];
@@ -285,7 +283,9 @@ export class Messenger {
       if (hasSession) withSession.push(regId);
       else withoutSession.push(regId);
     }
-    const orderedRegIds = [...withSession, ...withoutSession];
+    const orderedRegIds = messageType === PROTO_PREKEY_MESSAGE
+      ? [...withoutSession, ...withSession]
+      : [...withSession, ...withoutSession];
 
     let lastError = null;
     for (const regId of orderedRegIds) {
@@ -356,7 +356,11 @@ export class Messenger {
     }
 
     // All attempts failed
-    throw lastError || new Error(`Failed to decrypt message from ${sourceUserId}`);
+    if (!lastError) {
+      // No candidates had sessions — equivalent to "No record"
+      throw new Error(`No record for ${sourceUserId}`);
+    }
+    throw lastError;
   }
 
 

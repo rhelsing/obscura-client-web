@@ -160,7 +160,7 @@ export function mount(container, client, router) {
   async function checkServerBackup() {
     try {
       const apiClient = createClient(pendingClient.apiUrl);
-      apiClient.setToken(pendingClient.shellToken || pendingClient.token);
+      apiClient.setToken(pendingClient.token);
       const check = await apiClient.checkBackup();
       if (check.exists) {
         serverBackup = { size: check.size, etag: check.etag, apiClient };

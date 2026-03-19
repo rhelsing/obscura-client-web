@@ -36,6 +36,7 @@ export class FriendManager {
             deviceUUID: d.deviceUUID,
             deviceName: d.deviceName,
             signalIdentityKey: d.signalIdentityKey,
+            registrationId: d.registrationId || null,
           })),
           status,
           addedAt: f.createdAt,
@@ -114,11 +115,14 @@ export class FriendManager {
     // Check if friend already exists - preserve devices if new ones are empty
     const existing = this.friends.get(username);
     const newDevices = devices.map(d => {
+      // Preserve registrationId from existing device record if not in new data
+      const existingDevice = existing?.devices?.find(ed => ed.deviceId === d.deviceId);
       return {
         deviceId: d.deviceId,
-        deviceUUID: d.deviceUUID || d.deviceId, // For story/model filtering
+        deviceUUID: d.deviceUUID || d.deviceId,
         deviceName: d.deviceName || d.deviceId,
         signalIdentityKey: d.signalIdentityKey,
+        registrationId: d.registrationId || existingDevice?.registrationId || null,
       };
     });
 

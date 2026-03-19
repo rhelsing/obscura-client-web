@@ -188,8 +188,18 @@ export class Messenger {
    * @param {number} [registrationId] - Target device's registrationId (default: fetches bundles)
    */
   async encrypt(targetUserId, plaintext, registrationId = 1) {
-    const address = new SignalProtocolAddress(targetUserId, registrationId);
-    const existingSession = await this.store.loadSession(address.toString());
+    // Check if session already exists at this address
+    let address = new SignalProtocolAddress(targetUserId, registrationId);
+    let existingSession = await this.store.loadSession(address.toString());
+
+    // If no session at requested regId, check if one exists at regId=1 (legacy)
+    if (!existingSession && registrationId !== 1) {
+      const legacySession = await this.store.loadSession(`${targetUserId}.1`);
+      if (legacySession) {
+        address = new SignalProtocolAddress(targetUserId, 1);
+        existingSession = legacySession;
+      }
+    }
 
     if (!existingSession) {
       const bundles = await this.fetchPreKeyBundles(targetUserId);
@@ -251,13 +261,36 @@ export class Messenger {
    * @param {number} [senderRegId] - Sender's registrationId (if known)
    */
   async decrypt(sourceUserId, content, messageType, senderRegId) {
-    // Use registrationId=1 for now (consistent with encrypt side)
-    // Multi-device will need per-device registrationIds on both sides
-    const regId = senderRegId || 1;
+    // Find an existing session for this sender — try known regIds
+    const candidateRegIds = [senderRegId, 1]; // explicit, then fallback
+    for (const [, info] of this._deviceMap) {
+      if (info.userId === sourceUserId && info.registrationId) {
+        candidateRegIds.push(info.registrationId);
+      }
+    }
+
+    let regId = 1;
+    for (const rid of candidateRegIds) {
+      if (!rid) continue;
+      const existing = await this.store.loadSession(`${sourceUserId}.${rid}`);
+      if (existing) {
+        regId = rid;
+        break;
+      }
+    }
+    // For PreKey messages (new session), use regId from map/bundles if no existing session found
+    if (messageType === PROTO_PREKEY_MESSAGE && regId === 1) {
+      // Check map for sender's regId
+      for (const [, info] of this._deviceMap) {
+        if (info.userId === sourceUserId && info.registrationId) {
+          regId = info.registrationId;
+          break;
+        }
+      }
+    }
+
     const address = new SignalProtocolAddress(sourceUserId, regId);
     const cipher = new SessionCipher(this.store, address);
-
-    // Check if session exists
     const hasSession = await this.store.loadSession(address.toString());
 
     let contentBuffer;
@@ -621,12 +654,13 @@ export class Messenger {
   async queueMessage(targetDeviceId, opts, targetUserId) {
     await this.loadProto();
 
-    // Resolve userId from device map (registrationId=1 for now, multi-device will use actual regId)
+    // Resolve userId + registrationId from device map
     const mapped = this._deviceMap.get(targetDeviceId);
     const encryptUserId = targetUserId || mapped?.userId || targetDeviceId;
+    const registrationId = mapped?.registrationId || 1;
 
     const clientMsgBytes = this.encodeClientMessage(opts);
-    const encrypted = await this.encrypt(encryptUserId, clientMsgBytes);
+    const encrypted = await this.encrypt(encryptUserId, clientMsgBytes, registrationId);
 
     const encMsg = this.EncryptedMessage.create({
       type: encrypted.protoType,

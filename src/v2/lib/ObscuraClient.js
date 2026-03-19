@@ -696,7 +696,7 @@ export class ObscuraClient {
     await this.friends.loadFromStore();
     await this.devices.loadFromStore();
 
-    // Populate deviceId → (userId, registrationId) map from loaded friends
+    // Populate deviceId → (userId, registrationId) map from loaded data
     for (const [, friend] of this.friends.friends) {
       if (friend.userId && friend.devices) {
         for (const d of friend.devices) {
@@ -704,8 +704,7 @@ export class ObscuraClient {
         }
       }
     }
-
-    // Also register own devices (including self) in the map
+    // Own devices
     if (this.deviceId && this.userId) {
       const ownRegId = await this.store.getLocalRegistrationId?.() || 1;
       this.messenger.mapDevice(this.deviceId, this.userId, ownRegId);
@@ -1183,6 +1182,26 @@ export class ObscuraClient {
     // Log every incoming message
     console.log('[ws] Message:', msg.type, 'from:', msg.sourceUserId?.slice(-8) || 'unknown');
 
+    // Sync registrationIds from messenger's device map back to friend records
+    if (msg.sourceUserId) {
+      const friendUsername = this.friends.getUsernameFromDeviceId(msg.sourceUserId);
+      if (friendUsername) {
+        const friend = this.friends.get(friendUsername);
+        if (friend) {
+          let updated = false;
+          for (const device of friend.devices) {
+            const mapped = this.messenger._deviceMap.get(device.deviceId);
+            if (mapped?.registrationId && !device.registrationId) {
+              console.log(`[routeMsg] syncing regId=${mapped.registrationId} to ${friendUsername} device ${device.deviceId?.slice(-8)}`);
+              device.registrationId = mapped.registrationId;
+              updated = true;
+            }
+          }
+          if (updated) this.friends._persistFriend(friendUsername);
+        }
+      }
+    }
+
     // Populate deviceId → userId map from device announce (if present)
     if (msg.deviceAnnounce?.devices && msg.sourceUserId) {
       for (const d of msg.deviceAnnounce.devices) {
@@ -1604,9 +1623,9 @@ export class ObscuraClient {
       }
     }
 
-    // Register new device in the messenger's device map (same user)
-    // We don't know their registrationId yet — will be resolved when fetching bundles
-    this.messenger.mapDevice(parsed.deviceId, this.userId, null);
+    // Fetch own prekey bundles to discover all device registrationIds
+    // This populates the deviceId → (userId, registrationId) map
+    await this.messenger.fetchPreKeyBundles(this.userId);
 
     // Add new device to our list FIRST so it's included in the approval
     const newDeviceInfo = {

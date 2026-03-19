@@ -584,9 +584,9 @@ export async function mount(container, client, router, params) {
 
   // Incoming attachments - auto-download and display
   const handleAttachment = async (att) => {
-    // att.from is deviceId (UUID), need to check if it matches this friend
-    const friend = client.friends.get(username);
-    const isFromFriend = friend?.devices?.some(d => d.deviceId === att.from);
+    // att.from is userId (from Envelope.sender_id), check if it matches this friend
+    const fromUsername = client.friends.getUsernameFromDeviceId(att.from);
+    const isFromFriend = fromUsername === username;
     if (isFromFriend) {
       // Convert contentReference to mediaUrl (includes fileName from proto)
       const mediaUrl = createMediaUrl(att.contentReference);

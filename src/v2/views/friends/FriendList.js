@@ -7,7 +7,7 @@
 import { navigate, clearClient, getBadgeCounts } from '../index.js';
 import { renderNav, initNav } from '../components/Nav.js';
 import { ObscuraClient } from '../../lib/ObscuraClient.js';
-import { generateVerifyCodeFromDevices } from '../../crypto/signatures.js';
+import { generateVerifyCodeFromRecoveryKey } from '../../crypto/signatures.js';
 
 let cleanup = null;
 
@@ -123,8 +123,8 @@ export async function mount(container, client, router) {
         window.__verifyRequest = {
           username,
           async getVerifyCode() {
-            if (!devices || devices.length === 0) return '----';
-            return generateVerifyCodeFromDevices(devices);
+            if (!friend.recoveryPublicKey) return '----';
+            return generateVerifyCodeFromRecoveryKey(friend.recoveryPublicKey);
           },
         };
         navigate(`/friends/verify/${username}`);

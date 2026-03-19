@@ -8,7 +8,7 @@
  * The server dumps queued messages on connect, so requests may already exist.
  */
 import { navigate } from '../index.js';
-import { generateVerifyCodeFromDevices } from '../../crypto/signatures.js';
+import { generateVerifyCodeFromRecoveryKey } from '../../crypto/signatures.js';
 
 let cleanup = null;
 let pendingRequests = [];
@@ -32,8 +32,8 @@ function reconstructRequest(friend, client) {
     sourceUserId: primaryDevice?.deviceId,
 
     async getVerifyCode() {
-      if (!devices || devices.length === 0) return null;
-      return generateVerifyCodeFromDevices(devices);
+      if (!friend.recoveryPublicKey) return null;
+      return generateVerifyCodeFromRecoveryKey(friend.recoveryPublicKey);
     },
 
     async accept() {

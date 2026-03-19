@@ -19,7 +19,7 @@ import {
   verifyRecoverySignature,
   verifyLinkChallenge,
   serializeAnnounceForSigning,
-  generateVerifyCodeFromDevices,
+  generateVerifyCodeFromRecoveryKey,
 } from '../crypto/signatures.js';
 import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
 import { bytesToUuid, uuidToBytes } from '../crypto/uuid.js';
@@ -527,21 +527,12 @@ export class ObscuraClient {
 
   /**
    * Get my 4-digit verify code for sharing with friends
-   * They can use this to verify friend requests came from me
-   * Concatenates all device keys (sorted by deviceUUID) and hashes for consistency
+   * Uses recovery public key — stable across all devices, doesn't change when devices are added/removed
    * @returns {Promise<string>} 4-digit code ("0000" - "9999")
    */
   async getMyVerifyCode() {
-    // Get all own devices including current
-    const allDevices = this.devices.buildFullList(this.deviceInfo || {
-      deviceId: this.deviceId || this.userId,
-      deviceUUID: this.deviceUUID,
-      deviceName: this.username,
-      signalIdentityKey: this.deviceInfo?.signalIdentityKey,
-    });
-
-    if (!allDevices || allDevices.length === 0) return null;
-    return generateVerifyCodeFromDevices(allDevices);
+    if (!this.recoveryPublicKey) return null;
+    return generateVerifyCodeFromRecoveryKey(this.recoveryPublicKey);
   }
 
   // === Message Persistence ===
@@ -1712,6 +1703,7 @@ export class ObscuraClient {
         devices: data.devices,
         status: data.status,
         addedAt: data.addedAt,
+        recoveryPublicKey: data.recoveryPublicKey,
       });
     }
     return result;
@@ -1968,7 +1960,7 @@ export class ObscuraClient {
       // Restore friends
       if (data.friends) {
         for (const friend of data.friends) {
-          this.friends.store(friend.username, friend.devices, friend.status);
+          this.friends.store(friend.username, friend.devices, friend.status, friend.recoveryPublicKey);
           // Restore userId if present in sync data
           if (friend.userId) {
             const restored = this.friends.get(friend.username);

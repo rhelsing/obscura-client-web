@@ -239,3 +239,22 @@ export async function generateVerifyCodeFromDevices(devices) {
   const code = ((bytes[0] << 8) | bytes[1]) % 10000;
   return code.toString().padStart(4, '0');
 }
+
+/**
+ * Generate a 4-digit verification code from a recovery public key
+ * Recovery key is per-user (not per-device), so the code is stable across all devices
+ *
+ * @param {Uint8Array|ArrayBuffer|Array|string} recoveryPublicKey - Ed25519 public key (32 bytes)
+ * @returns {Promise<string>} 4-digit code ("0000" - "9999")
+ */
+export async function generateVerifyCodeFromRecoveryKey(recoveryPublicKey) {
+  const keyBytes = normalizeKeyToUint8Array(recoveryPublicKey);
+  if (!keyBytes || keyBytes.length === 0) {
+    throw new Error('Invalid recoveryPublicKey');
+  }
+
+  const hash = await crypto.subtle.digest('SHA-256', keyBytes);
+  const bytes = new Uint8Array(hash);
+  const code = ((bytes[0] << 8) | bytes[1]) % 10000;
+  return code.toString().padStart(4, '0');
+}

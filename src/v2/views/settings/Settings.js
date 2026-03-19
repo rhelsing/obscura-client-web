@@ -296,7 +296,7 @@ export async function mount(container, client, router) {
             } else {
               await ds.storeIdentity({
                 coreUsername: client.username,
-                deviceUsername: client.deviceUsername,
+                deviceId: client.deviceId,
                 deviceUUID: client.deviceUUID,
                 recoveryPublicKey: keypair.publicKey,
               });

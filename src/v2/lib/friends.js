@@ -30,6 +30,7 @@ export class FriendManager {
 
         this.friends.set(f.username, {
           username: f.username,
+          userId: f.userAccountId || null, // User account UUID (for Signal encryption)
           devices: (f.devices || []).map(d => ({
             deviceId: d.deviceId,
             deviceUUID: d.deviceUUID,
@@ -62,10 +63,8 @@ export class FriendManager {
     if (storeStatus === 'pending_incoming') storeStatus = 'pending_received';
     if (storeStatus === 'pending_outgoing') storeStatus = 'pending_sent';
 
-    // Determine the userId key for IndexedDB
-    // First, check if there's an existing entry by scanning all friends
-    // to avoid creating duplicates with different keys
-    let userId = f.devices[0]?.deviceId || username;
+    // Use username as the IndexedDB key (stable across sessions)
+    let userId = username;
 
     try {
       // Check if a friend with this username already exists under a different key
@@ -80,6 +79,7 @@ export class FriendManager {
       await this._store.addFriend(userId, f.username, storeStatus, {
         devices: f.devices,
         recoveryPublicKey: f.recoveryPublicKey,
+        userAccountId: f.userId || null, // User account UUID for Signal encryption
         isVerified: f.isVerified || false,
         verifiedAt: f.verifiedAt || null,
       });
@@ -127,6 +127,7 @@ export class FriendManager {
 
     this.friends.set(username, {
       username,
+      userId: existing?.userId || null, // Preserved from processRequest
       devices: finalDevices,
       status,
       addedAt: existing?.addedAt || Date.now(),
@@ -165,15 +166,16 @@ export class FriendManager {
   }
 
   /**
-   * Reverse lookup: find username from a device's deviceId
-   * @param {string} deviceId - Device ID to look up
+   * Reverse lookup: find username from a deviceId or userId
+   * @param {string} id - Device ID or User ID to look up
    * @returns {string|null} Username or null if not found
    */
-  getUsernameFromDeviceId(deviceId) {
+  getUsernameFromDeviceId(id) {
     for (const [username, friend] of this.friends) {
-      if (friend.devices.some(d => d.deviceId === deviceId)) {
-        return username;
-      }
+      // Match by userId (Envelope.sender_id)
+      if (friend.userId === id) return username;
+      // Match by deviceId (in device list)
+      if (friend.devices.some(d => d.deviceId === id)) return username;
     }
     return null;
   }
@@ -303,8 +305,15 @@ export class FriendManager {
     );
     const senderIdentityKey = sortedDevices[0]?.signalIdentityKey;
 
-    // Store recovery key with pending request so it survives page reloads
+    // Store with pending status
     this.store(senderUsername, senderDevices, 'pending_incoming', senderRecoveryKey);
+
+    // Set sender's userId (from Envelope.sender_id) AFTER store() so it's on the record
+    const friend = this.friends.get(senderUsername);
+    if (friend) {
+      friend.userId = msg.sourceUserId;
+    }
+
     logger.logFriendRequestReceived(senderUsername, msg.sourceUserId, senderDevices.length).catch(() => {});
 
     const self = this;
@@ -360,9 +369,15 @@ export class FriendManager {
 
     if (accepted) {
       this.store(senderUsername, senderDevices, 'accepted', senderRecoveryKey);
+      // Set userId from Envelope.sender_id
+      const friend = this.friends.get(senderUsername);
+      if (friend) {
+        friend.userId = msg.sourceUserId;
+        this._persistFriend(senderUsername);
+      }
       // Store friend's recovery key for verifying revocation signatures
       if (senderRecoveryKey && this._store) {
-        const userId = senderDevices[0]?.deviceId || senderUsername;
+        const userId = msg.sourceUserId || senderDevices[0]?.deviceId || senderUsername;
         this._store.setFriendRecoveryKey(userId, senderRecoveryKey).catch(e => {
           console.warn('Failed to store friend recovery key:', e.message);
         });

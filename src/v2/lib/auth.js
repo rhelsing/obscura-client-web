@@ -154,7 +154,7 @@ export async function login(username, password, opts = {}) {
 
   // Check for stored device identity (from previous session on this browser)
   const storedIdentity = await store.getDeviceIdentity();
-  const storedDeviceId = storedIdentity?.deviceId || storedIdentity?.deviceUsername; // backwards compat
+  const storedDeviceId = storedIdentity?.deviceId;
 
   // Login — include deviceId if we have one for device-scoped token
   const loginBody = { username, password };

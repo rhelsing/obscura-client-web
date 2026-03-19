@@ -33,14 +33,12 @@ export const Obscura = {
       refreshToken: result.refreshToken,
       userId: result.userId,
       username: result.username,
-      deviceUsername: result.deviceUsername,
+      deviceId: result.deviceId,
       deviceUUID: result.deviceUUID,
       deviceInfo: result.deviceInfo,
       p2pIdentity: result.p2pIdentity,
-      recoveryPublicKey: result.recoveryPublicKey,  // Only public key, never private
+      recoveryPublicKey: result.recoveryPublicKey,
       recoveryPhrase: result.getRecoveryPhrase(),
-      shellToken: result.shellToken,
-      shellRefreshToken: result.shellRefreshToken,
     });
   },
 
@@ -65,13 +63,11 @@ export const Obscura = {
           refreshToken: result.client.refreshToken,
           userId: result.client.userId,
           username: result.client.username || username,
-          deviceUsername: result.client.deviceUsername,
+          deviceId: result.client.deviceId,
           deviceUUID: result.client.deviceUUID,
           deviceInfo: result.client.deviceInfo,
           recoveryPublicKey: result.client.recoveryPublicKey,
           p2pIdentity: result.client.p2pIdentity,
-          shellToken: result.client.shellToken,
-          shellRefreshToken: result.client.shellRefreshToken,
         }),
       };
     }
@@ -88,12 +84,10 @@ export const Obscura = {
           refreshToken: result.client.refreshToken,
           userId: result.client.userId,
           username: result.client.username || username,
-          deviceUsername: result.client.deviceUsername,
+          deviceId: result.client.deviceId,
           deviceUUID: result.client.deviceUUID,
           deviceInfo: result.client.deviceInfo,
           linkCode: result.linkCode,
-          shellToken: result.client.shellToken,
-          shellRefreshToken: result.client.shellRefreshToken,
         }),
       };
     }

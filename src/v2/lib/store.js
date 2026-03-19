@@ -35,7 +35,7 @@ export class InMemoryStore {
     this.trustedIdentities = new Map();
 
     // Device identity (stored locally)
-    this.deviceUsername = null;
+    this.deviceId = null;
     this.deviceUUID = null;
     this.coreUsername = null;
     this.isFirstDevice = false;
@@ -133,9 +133,9 @@ export class InMemoryStore {
   // === Device Identity Storage ===
 
   async getDeviceIdentity() {
-    if (!this.deviceUsername) return null;
+    if (!this.deviceId) return null;
     return {
-      deviceUsername: this.deviceUsername,
+      deviceId: this.deviceId,
       deviceUUID: this.deviceUUID,
       coreUsername: this.coreUsername,
       isFirstDevice: this.isFirstDevice,
@@ -143,8 +143,8 @@ export class InMemoryStore {
     };
   }
 
-  async storeDeviceIdentity({ deviceUsername, deviceUUID, coreUsername, isFirstDevice, userId }) {
-    this.deviceUsername = deviceUsername;
+  async storeDeviceIdentity({ deviceId, deviceUUID, coreUsername, isFirstDevice, userId }) {
+    this.deviceId = deviceId;
     this.deviceUUID = deviceUUID;
     this.coreUsername = coreUsername;
     this.isFirstDevice = isFirstDevice ?? false;
@@ -152,7 +152,7 @@ export class InMemoryStore {
   }
 
   async clearDeviceIdentity() {
-    this.deviceUsername = null;
+    this.deviceId = null;
     this.deviceUUID = null;
     this.coreUsername = null;
     this.isFirstDevice = false;
@@ -222,7 +222,7 @@ export class InMemoryStore {
     this.signedPreKeys.clear();
     this.sessions.clear();
     this.trustedIdentities.clear();
-    this.deviceUsername = null;
+    this.deviceId = null;
     this.deviceUUID = null;
     this.coreUsername = null;
     this.isFirstDevice = false;

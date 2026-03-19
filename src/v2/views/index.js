@@ -357,7 +357,7 @@ function setupGlobalEventHandlers() {
   client.on('message', (msg) => {
     console.log('[Global] Message from:', msg.sourceUserId || msg.from);
     if (typeof RyToast !== 'undefined') {
-      const from = msg.conversationId || client.friends.getUsernameFromServerId(msg.sourceUserId) || msg.sourceUserId;
+      const from = msg.conversationId || client.friends.getUsernameFromDeviceId(msg.sourceUserId) || msg.sourceUserId;
       RyToast.info(`New message from ${from}`);
     }
     refreshChatsBadge();
@@ -385,20 +385,20 @@ function setupGlobalEventHandlers() {
         case 'story':
           // Only toast for new stories (op=0 is create), not updates/deletes
           if (sync.op === 0 && !sync.data?._deleted) {
-            const storyAuthor = client.friends.getUsernameFromServerId(sync.sourceUserId) || sync.sourceUserId;
+            const storyAuthor = client.friends.getUsernameFromDeviceId(sync.sourceUserId) || sync.sourceUserId;
             RyToast.info(`New story from ${storyAuthor}`);
           }
           break;
         case 'pix':
           // Only toast for new pix where I'm the recipient (not view updates)
           if (sync.data?.recipientUsername === client.username && !sync.data?.viewedAt) {
-            const pixSender = client.friends.getUsernameFromServerId(sync.sourceUserId) || sync.sourceUserId;
+            const pixSender = client.friends.getUsernameFromDeviceId(sync.sourceUserId) || sync.sourceUserId;
             RyToast.info(`New pix from ${pixSender}`);
           }
           refreshPixBadge();
           break;
         case 'groupMessage':
-          const groupMsgSender = client.friends.getUsernameFromServerId(sync.sourceUserId) || sync.sourceUserId;
+          const groupMsgSender = client.friends.getUsernameFromDeviceId(sync.sourceUserId) || sync.sourceUserId;
           // Look up group name
           if (sync.data?.groupId && client.group) {
             client.group.find(sync.data.groupId).then(group => {

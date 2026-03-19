@@ -47,6 +47,17 @@ export class Messenger {
     this.proto = null;
     this.clientProto = null;
     this._queue = []; // Pending submissions for batch sending
+    // deviceId → userId mapping for Signal session key resolution
+    // Signal sessions are keyed by userId (Envelope.sender_id = userId),
+    // but message routing uses deviceId. This map bridges the two.
+    this._deviceToUser = new Map();
+  }
+
+  /**
+   * Register a deviceId → userId mapping for Signal session resolution
+   */
+  mapDeviceToUser(deviceId, userId) {
+    this._deviceToUser.set(deviceId, userId);
   }
 
   setToken(token) {
@@ -153,6 +164,8 @@ export class Messenger {
           publicKey: toArrayBuffer(b.oneTimePreKey.publicKey),
         } : undefined,
       };
+      // Auto-populate deviceId → userId map for Signal session resolution
+      this._deviceToUser.set(b.deviceId, userId);
       logger.logPrekeyFetch(userId, !!bundle.preKey, bundle.registrationId);
       return bundle;
     });
@@ -587,13 +600,13 @@ export class Messenger {
    *
    * @param {string} targetDeviceId - Target device UUID (for server routing)
    * @param {object} opts - Message options
-   * @param {string} targetUserId - Target user UUID (for Signal encryption)
+   * @param {string} [targetUserId] - Optional target user UUID override for Signal encryption
    */
   async queueMessage(targetDeviceId, opts, targetUserId) {
     await this.loadProto();
 
-    // Signal encryption uses userId (server puts userId in Envelope.sender_id)
-    const encryptUserId = targetUserId || targetDeviceId; // fallback for backwards compat
+    // Resolve userId for Signal session: explicit arg > map > fallback to deviceId
+    const encryptUserId = targetUserId || this._deviceToUser.get(targetDeviceId) || targetDeviceId;
     const clientMsgBytes = this.encodeClientMessage(opts);
     const encrypted = await this.encrypt(encryptUserId, clientMsgBytes);
 

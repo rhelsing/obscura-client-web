@@ -181,17 +181,15 @@ export class DeviceManager {
 /**
  * Parse link code from another device
  * @param {string} linkCode - Base64 encoded link code
- * @returns {object} { userId, deviceId, deviceUUID, deviceUsername, signalIdentityKey, challenge, signature, expiresAt }
+ * @returns {object} { userId, deviceId, deviceUUID, signalIdentityKey, challenge, signature, expiresAt }
  */
 export function parseLinkCode(linkCode) {
   try {
     const data = JSON.parse(atob(linkCode));
     return {
-      userId: data.i,             // UUID for server API calls
-      deviceId: data.i,           // Device UUID
-      deviceUUID: data.d || data.i, // Full device UUID (fallback to deviceId for backwards compat)
-      deviceUsername: data.u,     // Username for display
-      deviceName: data.u,         // Alias for display
+      userId: data.i,             // User UUID
+      deviceId: data.u,           // Server-assigned device UUID
+      deviceUUID: data.d,         // Client device UUID
       signalIdentityKey: base64ToUint8Array(data.k),
       challenge: base64ToUint8Array(data.c),
       signature: data.s ? base64ToUint8Array(data.s) : null,  // Signature proving ownership

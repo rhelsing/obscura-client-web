@@ -88,14 +88,14 @@ export function createDeviceStore(coreUsername) {
 
     /**
      * Store device identity
-     * Per identity.md: coreUsername, deviceUsername, deviceUUID, p2pIdentity, recoveryPublicKey
+     * Store: coreUsername, deviceId, deviceUUID, p2pIdentity, recoveryPublicKey
      */
     async storeIdentity(identity) {
       const store = await getStore(STORES.IDENTITY, 'readwrite');
       return promisify(store.put({
         id: 'current', // Singleton key
         coreUsername: identity.coreUsername,
-        deviceUsername: identity.deviceUsername,
+        deviceId: identity.deviceId,
         deviceUUID: identity.deviceUUID,
         p2pPublicKey: identity.p2pPublicKey,
         p2pPrivateKey: identity.p2pPrivateKey,

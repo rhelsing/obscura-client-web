@@ -51,7 +51,7 @@ export class ObscuraClient {
     this.refreshToken = opts.refreshToken;
     this.userId = opts.userId;
     this.username = opts.username;
-    this.deviceId = opts.deviceId || opts.deviceUsername;  // backwards compat
+    this.deviceId = opts.deviceId;
     this.deviceUUID = opts.deviceUUID;
     this.deviceInfo = opts.deviceInfo;
     this.p2pIdentity = opts.p2pIdentity;
@@ -284,7 +284,7 @@ export class ObscuraClient {
         refreshToken: session.refreshToken,
         userId: session.userId,
         username: session.username,
-        deviceId: session.deviceId || session.deviceUsername,  // backwards compat
+        deviceId: session.deviceId,
         deviceUUID: session.deviceUUID,
         deviceInfo,
       });
@@ -695,6 +695,15 @@ export class ObscuraClient {
     // Load persisted state from IndexedDB before connecting
     await this.friends.loadFromStore();
     await this.devices.loadFromStore();
+
+    // Populate deviceId → userId map from loaded friends
+    for (const [, friend] of this.friends.friends) {
+      if (friend.userId && friend.devices) {
+        for (const d of friend.devices) {
+          if (d.deviceId) this.messenger.mapDeviceToUser(d.deviceId, friend.userId);
+        }
+      }
+    }
 
     await this.messenger.loadProto();
     this._shouldReconnect = true;
@@ -1165,10 +1174,17 @@ export class ObscuraClient {
     // Log every incoming message
     console.log('[ws] Message:', msg.type, 'from:', msg.sourceUserId?.slice(-8) || 'unknown');
 
+    // Populate deviceId → userId map from device announce (if present)
+    if (msg.deviceAnnounce?.devices && msg.sourceUserId) {
+      for (const d of msg.deviceAnnounce.devices) {
+        if (d.deviceId) this.messenger.mapDeviceToUser(d.deviceId, msg.sourceUserId);
+      }
+    }
+
     switch (msg.type) {
       case 'FRIEND_REQUEST':
-        const request = this.friends.processRequest(msg, (userId, username, accepted) => {
-          return this._sendFriendResponse(userId, username, accepted);
+        const request = this.friends.processRequest(msg, (deviceId, username, accepted) => {
+          return this._sendFriendResponse(deviceId, username, accepted);
         });
         this._emit('friendRequest', request);
         break;
@@ -1332,6 +1348,7 @@ export class ObscuraClient {
 
   /**
    * Send a friend request
+   * Fetches target user's device bundles, sends to each device
    */
   async befriend(userId, username) {
     // Include ALL linked devices so recipient knows about all our devices
@@ -1348,19 +1365,30 @@ export class ObscuraClient {
       recoveryPublicKey: this.recoveryPublicKey || new Uint8Array(0),
     };
 
-    await this.messenger.sendMessage(userId, {
-      type: 'FRIEND_REQUEST',
-      username: this.username,
-      deviceAnnounce: myDeviceAnnounce,
-    });
+    // Fetch target's device bundles to discover their deviceIds
+    // This also populates the deviceId → userId map in messenger
+    const bundles = await this.messenger.fetchPreKeyBundles(userId);
+
+    // Send friend request to each of the target's devices
+    for (const bundle of bundles) {
+      await this.messenger.queueMessage(bundle.deviceId, {
+        type: 'FRIEND_REQUEST',
+        username: this.username,
+        deviceAnnounce: myDeviceAnnounce,
+      });
+    }
+    await this.messenger.flushMessages();
 
     this.friends.store(username, [], 'pending_outgoing');
   }
 
   /**
    * Send friend response (internal)
+   * @param {string} targetDeviceId - Target's device UUID (for routing)
+   * @param {string} username - Target's username (for friend lookup)
+   * @param {boolean} accepted - Accept or reject
    */
-  async _sendFriendResponse(userId, username, accepted) {
+  async _sendFriendResponse(targetDeviceId, username, accepted) {
     // Include ALL linked devices so requester knows about all our devices
     const myDeviceAnnounce = accepted ? {
       devices: this.devices.buildFullList(this.deviceInfo || {
@@ -1375,14 +1403,17 @@ export class ObscuraClient {
       recoveryPublicKey: this.recoveryPublicKey || new Uint8Array(0),
     } : null;
 
-    await this.messenger.sendMessage(userId, {
+    // Look up the friend's userId for Signal encryption
+    const friend = this.friends.get(username);
+    const targetUserId = friend?.userId || friend?.sourceUserId;
+
+    await this.messenger.sendMessage(targetDeviceId, {
       type: 'FRIEND_RESPONSE',
       username: this.username,
       accepted,
       deviceAnnounce: myDeviceAnnounce,
-    });
+    }, targetUserId);
 
-    // Log friend accept/reject AFTER the message is sent
     if (accepted) {
       await logger.logFriendAccept(username);
     } else {
@@ -1960,7 +1991,7 @@ export class ObscuraClient {
             // Create new identity (new device case)
             await self._deviceStore.storeIdentity({
               coreUsername: self.username,
-              deviceUsername: self.deviceId,
+              deviceId: self.deviceId,
               deviceUUID: self.deviceUUID,
               recoveryPublicKey: approval.recoveryPublicKey,
               p2pPublicKey: approval.p2pPublicKey,

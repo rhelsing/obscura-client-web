@@ -97,6 +97,7 @@ export function createFriendStore(userId) {
         status,
         devices: options.devices || existing?.devices || [],
         recoveryPublicKey: options.recoveryPublicKey || existing?.recoveryPublicKey,
+        userAccountId: options.userAccountId || existing?.userAccountId || null,
         devicesUpdatedAt: options.devicesUpdatedAt || existing?.devicesUpdatedAt || 0,
         isVerified: options.isVerified ?? existing?.isVerified ?? false,
         verifiedAt: options.verifiedAt ?? existing?.verifiedAt ?? null,

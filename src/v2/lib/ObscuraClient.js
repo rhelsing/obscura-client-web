@@ -1620,7 +1620,11 @@ export class ObscuraClient {
 
     // Fetch own prekey bundles to discover all device registrationIds
     // This populates the deviceId → (userId, registrationId) map
-    await this.messenger.fetchPreKeyBundles(this.userId);
+    const ownBundles = await this.messenger.fetchPreKeyBundles(this.userId);
+
+    // Find the new device's registrationId from the bundle
+    const newDeviceBundle = ownBundles.find(b => b.deviceId === parsed.deviceId);
+    const newDeviceRegId = newDeviceBundle?.registrationId;
 
     // Add new device to our list FIRST so it's included in the approval
     const newDeviceInfo = {
@@ -1628,6 +1632,7 @@ export class ObscuraClient {
       deviceUUID: parsed.deviceUUID || parsed.deviceId,
       deviceName: parsed.deviceName || 'New Device',
       signalIdentityKey: parsed.signalIdentityKey,
+      registrationId: newDeviceRegId,
     };
     await this.devices.add(newDeviceInfo);
     console.log(`[approveLink] step 1: device added ${parsed.deviceId.slice(-8)}`);

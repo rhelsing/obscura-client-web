@@ -256,6 +256,10 @@ export class Messenger {
     const candidateRegIds = new Set();
     if (senderRegId) candidateRegIds.add(senderRegId);
     candidateRegIds.add(1); // legacy fallback
+    // Add own registrationId (for self-sync: other device encrypted with our regId)
+    const ownRegId = await this.store.getLocalRegistrationId?.();
+    if (ownRegId) candidateRegIds.add(ownRegId);
+    // Add all known regIds for this userId from device map
     for (const [, info] of this._deviceMap) {
       if (info.userId === sourceUserId && info.registrationId) {
         candidateRegIds.add(info.registrationId);

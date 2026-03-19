@@ -151,6 +151,7 @@ export function createDeviceStore(coreUsername) {
         deviceId: device.deviceId,
         deviceName: device.deviceName,
         signalIdentityKey: device.signalIdentityKey,
+        registrationId: device.registrationId,
         addedAt: device.addedAt || Date.now(),
       }));
     },
@@ -193,6 +194,7 @@ export function createDeviceStore(coreUsername) {
           deviceId: device.deviceId,
           deviceName: device.deviceName,
           signalIdentityKey: device.signalIdentityKey,
+          registrationId: device.registrationId,
           addedAt: device.addedAt || Date.now(),
         }));
       }

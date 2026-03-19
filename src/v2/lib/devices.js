@@ -29,6 +29,7 @@ export class DeviceManager {
           deviceUUID: d.deviceUUID,
           deviceName: d.deviceName || 'Unknown Device',
           signalIdentityKey: d.signalIdentityKey,
+          registrationId: d.registrationId,
         }));
       console.log(`[DeviceManager] Loaded ${this.ownDevices.length} own devices from IndexedDB`);
     } catch (e) {
@@ -75,10 +76,10 @@ export class DeviceManager {
       const deviceName = device.deviceName || 'Unknown Device';
       this.ownDevices.push({
         deviceId: did,
-        // Handle both proto (deviceUuid) and JS (deviceUUID) naming
         deviceUUID,
         deviceName,
         signalIdentityKey: device.signalIdentityKey,
+        registrationId: device.registrationId,
       });
       // Persist to IndexedDB - await to ensure it completes before navigation
       await this._persistDevices();
@@ -98,10 +99,10 @@ export class DeviceManager {
         const did = d.deviceId;
         return {
           deviceId: did,
-          // Handle both proto (deviceUuid) and JS (deviceUUID) naming
           deviceUUID: d.deviceUUID || d.deviceUuid || did,
           deviceName: d.deviceName || 'Unknown Device',
           signalIdentityKey: d.signalIdentityKey,
+          registrationId: d.registrationId,
         };
       });
     // Persist to IndexedDB

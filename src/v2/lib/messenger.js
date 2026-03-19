@@ -189,17 +189,8 @@ export class Messenger {
    */
   async encrypt(targetUserId, plaintext, registrationId = 1) {
     // Check if session already exists at this address
-    let address = new SignalProtocolAddress(targetUserId, registrationId);
-    let existingSession = await this.store.loadSession(address.toString());
-
-    // If no session at requested regId, check if one exists at regId=1 (legacy)
-    if (!existingSession && registrationId !== 1) {
-      const legacySession = await this.store.loadSession(`${targetUserId}.1`);
-      if (legacySession) {
-        address = new SignalProtocolAddress(targetUserId, 1);
-        existingSession = legacySession;
-      }
-    }
+    const address = new SignalProtocolAddress(targetUserId, registrationId);
+    const existingSession = await this.store.loadSession(address.toString());
 
     if (!existingSession) {
       const bundles = await this.fetchPreKeyBundles(targetUserId);
@@ -261,37 +252,15 @@ export class Messenger {
    * @param {number} [senderRegId] - Sender's registrationId (if known)
    */
   async decrypt(sourceUserId, content, messageType, senderRegId) {
-    // Find an existing session for this sender — try known regIds
-    const candidateRegIds = [senderRegId, 1]; // explicit, then fallback
+    // Collect all candidate registrationIds for this sender
+    const candidateRegIds = new Set();
+    if (senderRegId) candidateRegIds.add(senderRegId);
+    candidateRegIds.add(1); // legacy fallback
     for (const [, info] of this._deviceMap) {
       if (info.userId === sourceUserId && info.registrationId) {
-        candidateRegIds.push(info.registrationId);
+        candidateRegIds.add(info.registrationId);
       }
     }
-
-    let regId = 1;
-    for (const rid of candidateRegIds) {
-      if (!rid) continue;
-      const existing = await this.store.loadSession(`${sourceUserId}.${rid}`);
-      if (existing) {
-        regId = rid;
-        break;
-      }
-    }
-    // For PreKey messages (new session), use regId from map/bundles if no existing session found
-    if (messageType === PROTO_PREKEY_MESSAGE && regId === 1) {
-      // Check map for sender's regId
-      for (const [, info] of this._deviceMap) {
-        if (info.userId === sourceUserId && info.registrationId) {
-          regId = info.registrationId;
-          break;
-        }
-      }
-    }
-
-    const address = new SignalProtocolAddress(sourceUserId, regId);
-    const cipher = new SessionCipher(this.store, address);
-    const hasSession = await this.store.loadSession(address.toString());
 
     let contentBuffer;
     if (content instanceof ArrayBuffer) {
@@ -302,57 +271,82 @@ export class Messenger {
       contentBuffer = toArrayBuffer(content);
     }
 
-    let decrypted;
-    try {
-      if (messageType === PROTO_PREKEY_MESSAGE) {
-        console.log('[Messenger] Decrypting PreKey:', {
-          sourceUserId: sourceUserId?.slice(-8),
-          contentSize: contentBuffer?.byteLength,
-          hasSession: !!hasSession,
-        });
-        decrypted = await cipher.decryptPreKeyWhisperMessage(contentBuffer, 'binary');
-      } else {
-        decrypted = await cipher.decryptWhisperMessage(contentBuffer, 'binary');
+    // Try each candidate address — return first successful decrypt
+    // Sort: try addresses WITH existing sessions first to avoid corrupting sessions
+    const sortedRegIds = [...candidateRegIds];
+    const withSession = [];
+    const withoutSession = [];
+    for (const regId of sortedRegIds) {
+      const hasSession = await this.store.loadSession(`${sourceUserId}.${regId}`);
+      if (hasSession) withSession.push(regId);
+      else withoutSession.push(regId);
+    }
+    const orderedRegIds = [...withSession, ...withoutSession];
+
+    let lastError = null;
+    for (const regId of orderedRegIds) {
+      const address = new SignalProtocolAddress(sourceUserId, regId);
+      const hasSession = await this.store.loadSession(address.toString());
+
+      // For Whisper messages, skip if no session at this address
+      if (messageType !== PROTO_PREKEY_MESSAGE && !hasSession) continue;
+
+      const cipher = new SessionCipher(this.store, address);
+      try {
+        let decrypted;
+        if (messageType === PROTO_PREKEY_MESSAGE) {
+          decrypted = await cipher.decryptPreKeyWhisperMessage(contentBuffer, 'binary');
+        } else {
+          decrypted = await cipher.decryptWhisperMessage(contentBuffer, 'binary');
+        }
+
+        // Success — convert and return
+        let bytes;
+        if (decrypted instanceof ArrayBuffer) {
+          bytes = new Uint8Array(decrypted);
+        } else if (decrypted instanceof Uint8Array) {
+          bytes = decrypted;
+        } else if (typeof decrypted === 'string') {
+          bytes = new Uint8Array(decrypted.length);
+          for (let i = 0; i < decrypted.length; i++) {
+            bytes[i] = decrypted.charCodeAt(i);
+          }
+        } else {
+          throw new Error(`Unknown decrypted type: ${typeof decrypted}`);
+        }
+        return bytes;
+      } catch (e) {
+        lastError = e;
+        // Try next regId
       }
-    } catch (e) {
-      // Add diagnostic info for sending chain errors
-      if (e.message?.includes('sending chain')) {
-        const msgTypeName = messageType === PROTO_PREKEY_MESSAGE ? 'PreKey' : 'Whisper';
-        await logger.logDecryptError(sourceUserId, e, msgTypeName, true);
-        console.warn('[Messenger] Decrypt error - sending chain issue:', {
-          sourceUserId: sourceUserId?.slice(-8),
-          messageType: msgTypeName,
-          hasSession: !!hasSession,
-          error: e.message,
-        });
-        // Re-throw with more context
-        const err = new Error(`Sending chain error from ${sourceUserId?.slice(-8)} (type=${messageType}, session=${!!hasSession})`);
-        err.name = 'SendingChainError';
-        err.originalError = e;
-        throw err;
-      }
-      // Log other decrypt errors too
-      const msgTypeName = messageType === PROTO_PREKEY_MESSAGE ? 'PreKey' : 'Whisper';
-      await logger.logDecryptError(sourceUserId, e, msgTypeName, false);
-      throw e;
     }
 
-    let bytes;
-    if (decrypted instanceof ArrayBuffer) {
-      bytes = new Uint8Array(decrypted);
-    } else if (decrypted instanceof Uint8Array) {
-      bytes = decrypted;
-    } else if (typeof decrypted === 'string') {
-      bytes = new Uint8Array(decrypted.length);
-      for (let i = 0; i < decrypted.length; i++) {
-        bytes[i] = decrypted.charCodeAt(i);
+    // All candidates failed — try PreKey decrypt at a fresh address from fetched bundles
+    if (messageType === PROTO_PREKEY_MESSAGE) {
+      try {
+        const bundles = await this.fetchPreKeyBundles(sourceUserId);
+        if (bundles.length > 0) {
+          const freshRegId = bundles[0].registrationId;
+          if (!candidateRegIds.has(freshRegId)) {
+            const address = new SignalProtocolAddress(sourceUserId, freshRegId);
+            const cipher = new SessionCipher(this.store, address);
+            const decrypted = await cipher.decryptPreKeyWhisperMessage(contentBuffer, 'binary');
+            let bytes;
+            if (decrypted instanceof ArrayBuffer) bytes = new Uint8Array(decrypted);
+            else if (decrypted instanceof Uint8Array) bytes = decrypted;
+            else { bytes = new Uint8Array(decrypted.length); for (let i = 0; i < decrypted.length; i++) bytes[i] = decrypted.charCodeAt(i); }
+            return bytes;
+          }
+        }
+      } catch (e) {
+        lastError = e;
       }
-    } else {
-      throw new Error(`Unknown decrypted type: ${typeof decrypted}`);
     }
 
-    return bytes;
+    // All attempts failed
+    throw lastError || new Error(`Failed to decrypt message from ${sourceUserId}`);
   }
+
 
   /**
    * Encode a client message to protobuf

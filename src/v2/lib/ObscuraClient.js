@@ -1075,8 +1075,9 @@ export class ObscuraClient {
         );
 
         // Check if this is from one of our own devices (self-sync)
-        const isFromOwnDevice = this.devices.getAll().some(d => d.deviceId === senderId);
+        // senderId is userId (from Envelope.sender_id), so own device = same userId
         const isFromSelf = senderId === this.userId;
+        const isFromOwnDevice = isFromSelf;
 
         // Log diagnostic info for debugging session issues
         if (isFromOwnDevice || isFromSelf) {
@@ -1151,15 +1152,10 @@ export class ObscuraClient {
       const errEnvelopeId = frame.envelope?.id ? bytesToUuid(frame.envelope.id) : null;
 
       if (isNoRecord && isWhisper && errSenderId) {
-        console.log('[ws] Auto-recovering: no session for sender, sending SESSION_RESET');
-        try {
-          await this.resetSessionWith(errSenderId, 'auto_no_record');
-          await logger.logSessionReset(errSenderId, 'auto_no_record');
-          this._acknowledge(errEnvelopeId);
-          return;
-        } catch (resetErr) {
-          console.error('[ws] Auto-reset failed:', resetErr.message);
-        }
+        // No session for this sender — don't ACK so server re-delivers later.
+        // The sender needs to establish a new session via PreKey message.
+        console.log('[ws] No session for sender, skipping (will re-deliver on reconnect)');
+        return;
       }
 
       // Enhanced diagnostic logging
@@ -1192,7 +1188,6 @@ export class ObscuraClient {
           for (const device of friend.devices) {
             const mapped = this.messenger._deviceMap.get(device.deviceId);
             if (mapped?.registrationId && !device.registrationId) {
-              console.log(`[routeMsg] syncing regId=${mapped.registrationId} to ${friendUsername} device ${device.deviceId?.slice(-8)}`);
               device.registrationId = mapped.registrationId;
               updated = true;
             }
@@ -1708,6 +1703,7 @@ export class ObscuraClient {
     for (const [username, data] of this.friends.friends.entries()) {
       result.push({
         username,
+        userId: data.userId,
         devices: data.devices,
         status: data.status,
         addedAt: data.addedAt,
@@ -1968,7 +1964,34 @@ export class ObscuraClient {
       if (data.friends) {
         for (const friend of data.friends) {
           this.friends.store(friend.username, friend.devices, friend.status);
+          // Restore userId if present in sync data
+          if (friend.userId) {
+            const restored = this.friends.get(friend.username);
+            if (restored) {
+              restored.userId = friend.userId;
+              this.friends._persistFriend(friend.username);
+            }
+          }
         }
+      }
+
+      // Populate deviceMap for restored friends
+      for (const [, friend] of this.friends.friends) {
+        if (friend.userId && friend.devices) {
+          for (const d of friend.devices) {
+            if (d.deviceId) this.messenger.mapDevice(d.deviceId, friend.userId, d.registrationId);
+          }
+          // Fetch bundles to get registrationIds
+          try {
+            await this.messenger.fetchPreKeyBundles(friend.userId);
+          } catch (e) { /* ignore - bundles will be fetched on first message */ }
+        }
+      }
+      // Also fetch own bundles for self-sync
+      if (this.userId) {
+        try {
+          await this.messenger.fetchPreKeyBundles(this.userId);
+        } catch (e) { /* ignore */ }
       }
 
       // Restore messages
@@ -2224,7 +2247,8 @@ export class ObscuraClient {
        */
       async apply() {
         // Check if this is from one of our own devices (self-sync)
-        const isFromOwnDevice = self.devices.getAll().some(d => d.deviceId === msg.sourceUserId);
+        // msg.sourceUserId is actually the sender's userId, so for own devices it matches self.userId
+        const isFromOwnDevice = msg.sourceUserId === self.userId;
 
         if (isFromOwnDevice) {
           // Self-sync: another of our devices sent this
@@ -2271,15 +2295,9 @@ export class ObscuraClient {
           return;
         }
 
-        // Find which friend this is from
-        let friend = null;
-        for (const f of self.friends.getAll()) {
-          const isFromFriend = f.devices.some(d => d.deviceId === msg.sourceUserId);
-          if (isFromFriend) {
-            friend = f;
-            break;
-          }
-        }
+        // Find which friend this is from (sourceUserId is a userId, not deviceId)
+        const friendUsername = self.friends.getUsernameFromDeviceId(msg.sourceUserId);
+        const friend = friendUsername ? self.friends.get(friendUsername) : null;
 
         if (!friend) return;
 
@@ -2349,6 +2367,28 @@ export class ObscuraClient {
         await logger.logDeviceAnnounce(announce.devices.length, announce.isRevocation, msg.sourceUserId);
 
         self.friends.setDevices(friend.username, announce.devices);
+
+        // Fetch fresh bundles to populate deviceMap with registrationIds for new devices
+        // This enables per-device Signal sessions for fan-out
+        const friendUserId = msg.sourceUserId;
+        if (friendUserId) {
+          try {
+            const bundles = await self.messenger.fetchPreKeyBundles(friendUserId);
+            // Update friend device records with registrationIds
+            const updatedFriend = self.friends.get(friend.username);
+            if (updatedFriend) {
+              for (const d of updatedFriend.devices) {
+                const bundle = bundles.find(b => b.deviceId === d.deviceId);
+                if (bundle && !d.registrationId) {
+                  d.registrationId = bundle.registrationId;
+                }
+              }
+              self.friends._persistFriend(friend.username);
+            }
+          } catch (e) {
+            console.warn(`[DeviceAnnounce] Failed to fetch bundles for ${friend.username}:`, e.message);
+          }
+        }
       },
     };
   }
@@ -2364,31 +2404,29 @@ export class ObscuraClient {
       return;
     }
 
-    // Find which friend sent this - first try by device, then by recovery key
-    let friend = null;
-    for (const f of this.friends.getAll()) {
-      // Check if sender is a known device
-      if (f.devices?.some(d => d.deviceId === msg.sourceUserId)) {
-        friend = f;
-        break;
-      }
-      // Check if recovery public key matches (for new recovery devices)
-      if (announce.recoveryPublicKey && f.recoveryPublicKey) {
-        try {
-          const announcedKey = announce.recoveryPublicKey instanceof Uint8Array
-            ? announce.recoveryPublicKey
-            : new Uint8Array(Object.values(announce.recoveryPublicKey));
-          const storedKey = f.recoveryPublicKey instanceof Uint8Array
-            ? f.recoveryPublicKey
-            : new Uint8Array(Object.values(f.recoveryPublicKey));
-          if (announcedKey.length === storedKey.length &&
-              announcedKey.every((b, i) => b === storedKey[i])) {
-            friend = f;
-            console.log(`[Recovery] Matched friend ${f.username} by recovery public key`);
-            break;
+    // Find which friend sent this - first try by userId, then by recovery key
+    const recoveryFriendName = this.friends.getUsernameFromDeviceId(msg.sourceUserId);
+    let friend = recoveryFriendName ? this.friends.get(recoveryFriendName) : null;
+    if (!friend) {
+      for (const f of this.friends.getAll()) {
+        // Check if recovery public key matches (for new recovery devices)
+        if (announce.recoveryPublicKey && f.recoveryPublicKey) {
+          try {
+            const announcedKey = announce.recoveryPublicKey instanceof Uint8Array
+              ? announce.recoveryPublicKey
+              : new Uint8Array(Object.values(announce.recoveryPublicKey));
+            const storedKey = f.recoveryPublicKey instanceof Uint8Array
+              ? f.recoveryPublicKey
+              : new Uint8Array(Object.values(f.recoveryPublicKey));
+            if (announcedKey.length === storedKey.length &&
+                announcedKey.every((b, i) => b === storedKey[i])) {
+              friend = f;
+              console.log(`[Recovery] Matched friend ${f.username} by recovery public key`);
+              break;
+            }
+          } catch (e) {
+            console.warn(`[Recovery] Error comparing keys for ${f.username}:`, e.message);
           }
-        } catch (e) {
-          console.warn(`[Recovery] Error comparing keys for ${f.username}:`, e.message);
         }
       }
     }

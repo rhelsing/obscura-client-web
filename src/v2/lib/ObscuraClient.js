@@ -1449,6 +1449,13 @@ export class ObscuraClient {
    */
   async send(friendUsername, opts) {
     const targets = this.friends.getFanOutTargets(friendUsername);
+    const friendRecord = this.friends.get(friendUsername);
+    let friendUserId = friendRecord?.userId;
+    // If userId not stored, try to resolve from device map
+    if (!friendUserId && friendRecord?.devices?.[0]?.deviceId) {
+      const mapped = this.messenger._deviceMap.get(friendRecord.devices[0].deviceId);
+      friendUserId = mapped?.userId;
+    }
     const messageId = this.messenger.generateMessageId();
     const timestamp = Date.now();
     const correlationId = logger.generateCorrelationId();
@@ -1465,8 +1472,8 @@ export class ObscuraClient {
     await logger.logSendStart(friendUsername, msgOpts.type, correlationId);
 
     // Queue fan-out to all friend devices
-    for (const targetUserId of targets) {
-      await this.messenger.queueMessage(targetUserId, msgOpts);
+    for (const targetDeviceId of targets) {
+      await this.messenger.queueMessage(targetDeviceId, msgOpts, friendUserId);
     }
 
     // Queue self-sync to own devices
@@ -1534,6 +1541,8 @@ export class ObscuraClient {
 
     // Fan-out to all friend devices
     const targets = this.friends.getFanOutTargets(friendUsername);
+    const attachFriend = this.friends.get(friendUsername);
+    const attachFriendUserId = attachFriend?.userId;
     const timestamp = Date.now();
 
     const messageType = isChunked ? 'CHUNKED_CONTENT_REFERENCE' : 'CONTENT_REFERENCE';
@@ -1541,12 +1550,12 @@ export class ObscuraClient {
       ? { chunkedContentReference: ref }
       : { contentReference: ref };
 
-    for (const targetUserId of targets) {
-      await this.messenger.queueMessage(targetUserId, {
+    for (const targetDeviceId of targets) {
+      await this.messenger.queueMessage(targetDeviceId, {
         type: messageType,
         ...messagePayload,
         timestamp,
-      });
+      }, attachFriendUserId);
     }
 
     // Self-sync to own devices (include mediaUrl for storage)
@@ -2194,7 +2203,7 @@ export class ObscuraClient {
           await this.messenger.sendMessage(device.deviceId, {
             type: 'DEVICE_RECOVERY_ANNOUNCE',
             deviceRecoveryAnnounce: announce,
-          });
+          }, friend.userId);
           friendCount++;
         } catch (e) {
           console.warn(`[Recovery] Failed to announce to ${device.deviceId?.slice(-8)}:`, e.message);

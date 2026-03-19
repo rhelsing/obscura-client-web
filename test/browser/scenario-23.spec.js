@@ -177,7 +177,7 @@ test.describe('Scenario 23: Web Backup Upload + Server Restore', () => {
       const backupCheck = await bobPage.evaluate(async () => {
         const { createClient } = await import('/src/v2/api/client.js');
         const apiClient = createClient(window.__client.apiUrl);
-        apiClient.setToken(window.__client.shellToken || window.__client.token);
+        apiClient.setToken(window.__client.token);
         const check = await apiClient.checkBackup();
         return { exists: check.exists, size: check.size };
       });

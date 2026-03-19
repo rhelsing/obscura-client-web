@@ -68,6 +68,7 @@ export function mount(container, client, router) {
         // New device needs approval
         // Store client temporarily for LinkPending view
         window.__pendingClient = result.client;
+        window.__pendingClient._loginPassword = password; // For recovery device takeover
         logger.logLogin({ username, result: 'newDevice', isNewDevice: true,
           hasShellToken: !!result.client.shellToken, hasShellRefreshToken: !!result.client.shellRefreshToken,
           hasDeviceIdentity: false });

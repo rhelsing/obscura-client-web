@@ -669,10 +669,10 @@ async function restoreBackupData(username, userId, backupData, signalStore) {
     const friendStore = createFriendStore(userId);
     for (const friend of backupData.friends) {
       await friendStore.addFriend(
-        friend.devices?.[0]?.deviceId || friend.username,
+        friend.userId || friend.devices?.[0]?.deviceId || friend.username,
         friend.username,
         friend.status || 'accepted',
-        { devices: friend.devices }
+        { devices: friend.devices, userAccountId: friend.userAccountId || friend.userId }
       );
     }
     friendStore.close();

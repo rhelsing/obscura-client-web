@@ -159,21 +159,70 @@ export function mount(container, client, router) {
 
   async function checkServerBackup() {
     try {
-      const apiClient = createClient(pendingClient.apiUrl);
-      apiClient.setToken(pendingClient.token);
-      const check = await apiClient.checkBackup();
-      if (check.exists) {
-        serverBackup = { size: check.size, etag: check.etag, apiClient };
-        container.innerHTML = render({ step: 'upload', serverBackup });
-        router.updatePageLinks();
-        setupUploadStep();
-        setupServerRestoreButton();
+      const apiUrl = pendingClient.apiUrl;
+      const apiClient = createClient(apiUrl);
+
+      // The pending client has a device-scoped JWT for a NEW device.
+      // Backups are per-device, so we need to find the OLD device that has a backup.
+      // Flow: login (user-scoped) → list devices → takeover each → check backup
+      const username = pendingClient.username;
+      const currentDeviceId = pendingClient.deviceId;
+      const loginPassword = pendingClient._loginPassword;
+
+      if (!loginPassword) {
+        console.log('[Recover] No password available for device scanning');
+        return;
       }
+
+      // Use the pending client's token to list devices
+      apiClient.setToken(pendingClient.token);
+      let devices;
+      try {
+        devices = await apiClient.listDevices();
+        devices = devices.devices || devices;
+      } catch (e) {
+        console.log('[Recover] Could not list devices:', e.message);
+        return;
+      }
+
+      // Try each OTHER device's backup (not the new one we just created)
+      for (const device of devices) {
+        if (device.deviceId === currentDeviceId) continue;
+
+        try {
+          // Login with this deviceId to get a device-scoped JWT
+          const loginRes = await apiClient.loginWithDevice(username, loginPassword, device.deviceId);
+          if (!loginRes?.token) continue;
+
+          // Check backup with this device's token
+          const deviceApiClient = createClient(apiUrl);
+          deviceApiClient.setToken(loginRes.token);
+          const check = await deviceApiClient.checkBackup();
+
+          if (check.exists) {
+            console.log(`[Recover] Found backup on device ${device.deviceId.slice(-8)} (${check.size} bytes)`);
+            serverBackup = {
+              size: check.size,
+              etag: check.etag,
+              apiClient: deviceApiClient,
+              deviceId: device.deviceId,
+              deviceToken: loginRes.token,
+            };
+            container.innerHTML = render({ step: 'upload', serverBackup });
+            router.updatePageLinks();
+            setupUploadStep();
+            setupServerRestoreButton();
+            return;
+          }
+        } catch (e) {
+          // This device has no backup or can't be accessed, try next
+          console.log(`[Recover] Device ${device.deviceId.slice(-8)}: ${e.message}`);
+        }
+      }
+      console.log('[Recover] No server backup found on any device');
     } catch (err) {
       console.error('[Recover] Failed to check server backup:', err);
     }
-    // Note: setupUploadStep() already called synchronously in mount(),
-    // only re-called above if DOM was re-rendered with serverBackup option
   }
 
   function setupServerRestoreButton() {

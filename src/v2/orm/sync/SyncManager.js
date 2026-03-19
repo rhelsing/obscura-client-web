@@ -57,12 +57,20 @@ export class SyncManager {
       authorDeviceId: entry.authorDeviceId,
     };
 
+    // Ensure device map has registrationIds for multi-device fan-out
+    if (targets.length > 1 && this.client.userId) {
+      try { await this.client.messenger.fetchPreKeyBundles(this.client.userId); } catch (e) { /* best effort */ }
+    }
+
     // Queue all targets into a single batch
-    for (const targetUserId of targets) {
-      await this.client.messenger.queueMessage(targetUserId, {
+    for (const targetDeviceId of targets) {
+      // Resolve userId for Signal encryption
+      const mapped = this.client.messenger._deviceMap.get(targetDeviceId);
+      const userId = mapped?.userId || this.client.userId;
+      await this.client.messenger.queueMessage(targetDeviceId, {
         type: 'MODEL_SYNC',
         modelSync,
-      });
+      }, userId);
     }
 
     // Flush in one HTTP request

@@ -43,6 +43,7 @@ export class Messenger {
     this.apiUrl = opts.apiUrl;
     this.store = opts.store;
     this.token = opts.token;
+    this.ownUserId = opts.ownUserId || null; // For fallback userId resolution
     this.protoBasePath = opts.protoBasePath;
     this.proto = null;
     this.clientProto = null;

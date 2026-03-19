@@ -82,6 +82,7 @@ export class ObscuraClient {
       apiUrl: this.apiUrl,
       store: this.store,
       token: this.token,
+      ownUserId: this.userId,
       protoBasePath: opts.protoBasePath,
     });
     // Attachment cache (browser only)

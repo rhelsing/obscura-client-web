@@ -1079,14 +1079,15 @@ export class ObscuraClient {
           });
         }
 
-        const decrypted = await this.messenger.decrypt(
+        const decryptResult = await this.messenger.decrypt(
           senderId,
           encMsg.content,
           encMsg.type
         );
 
-        const msg = this.messenger.decodeClientMessage(decrypted);
+        const msg = this.messenger.decodeClientMessage(decryptResult.bytes);
         msg.sourceUserId = senderId;
+        msg.senderDeviceId = decryptResult.senderDeviceId; // Which specific device sent this
         msg.envelopeId = envelopeId;
 
         await logger.logReceiveDecode(senderId, msg.type, correlationId);
@@ -1260,7 +1261,7 @@ export class ObscuraClient {
           contentReference: msg.contentReference,
           timestamp: msg.timestamp,
           isSent: false,
-          authorDeviceId: msg.sourceUserId, // Track which device sent this
+          authorDeviceId: msg.senderDeviceId || msg.sourceUserId,
         });
         this._emit('attachment', {
           from: msg.sourceUserId,
@@ -1320,7 +1321,7 @@ export class ObscuraClient {
           text: msg.text,
           timestamp: msg.timestamp,
           isSent: false,
-          authorDeviceId: msg.sourceUserId, // Track which device sent this
+          authorDeviceId: msg.senderDeviceId || msg.sourceUserId,
         });
         this._emit('message', { ...msg, conversationId });
         break;
@@ -1471,7 +1472,7 @@ export class ObscuraClient {
             messageId,
             timestamp,
             content: opts.text,
-            authorDeviceId: this.userId,
+            authorDeviceId: this.deviceId || this.userId,
           },
         });
       }
@@ -2488,14 +2489,13 @@ export class ObscuraClient {
   _processSentSync(msg) {
     const sync = msg.sentSync;
     // Persist to IndexedDB using conversationId as the key
-    // Use sourceUserId as authorDeviceId - that's the device that actually sent the message
     this._persistMessage(sync.conversationId, {
       conversationId: sync.conversationId,
       messageId: sync.messageId,
       timestamp: sync.timestamp,
       text: typeof sync.content === 'string' ? sync.content : new TextDecoder().decode(sync.content),
       isSent: true,
-      authorDeviceId: msg.sourceUserId, // Track which device sent this
+      authorDeviceId: msg.senderDeviceId || msg.sourceUserId,
     });
   }
 

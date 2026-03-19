@@ -265,8 +265,8 @@ test.describe('Scenario 7: Device Revocation', () => {
     console.log('--- 7.2: Revoke Bob2 ---');
 
     // Get bob2's deviceId
-    const bob2ServerUserId = await bob2Page.evaluate(() => window.__client.userId);
-    console.log('Bob2 deviceId:', bob2ServerUserId.slice(0, 8) + '...');
+    const bob2ServerUserId = await bob2Page.evaluate(() => window.__client.deviceUUID || window.__client.deviceId);
+    console.log('Bob2 deviceUUID:', bob2ServerUserId.slice(0, 8) + '...');
 
     // Set up listener for Alice to receive device announce
     const aliceRevokeAnnouncePromise = page.waitForEvent('console', {

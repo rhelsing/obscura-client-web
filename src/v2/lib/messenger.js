@@ -304,7 +304,7 @@ export class Messenger {
           decrypted = await cipher.decryptWhisperMessage(contentBuffer, 'binary');
         }
 
-        // Success — convert and return
+        // Success — convert and return with sender device info
         let bytes;
         if (decrypted instanceof ArrayBuffer) {
           bytes = new Uint8Array(decrypted);
@@ -318,7 +318,15 @@ export class Messenger {
         } else {
           throw new Error(`Unknown decrypted type: ${typeof decrypted}`);
         }
-        return bytes;
+        // Look up which deviceId this regId belongs to
+        let senderDeviceId = null;
+        for (const [deviceId, info] of this._deviceMap) {
+          if (info.userId === sourceUserId && info.registrationId === regId) {
+            senderDeviceId = deviceId;
+            break;
+          }
+        }
+        return { bytes, senderRegId: regId, senderDeviceId };
       } catch (e) {
         lastError = e;
         // Try next regId
@@ -339,7 +347,7 @@ export class Messenger {
             if (decrypted instanceof ArrayBuffer) bytes = new Uint8Array(decrypted);
             else if (decrypted instanceof Uint8Array) bytes = decrypted;
             else { bytes = new Uint8Array(decrypted.length); for (let i = 0; i < decrypted.length; i++) bytes[i] = decrypted.charCodeAt(i); }
-            return bytes;
+            return { bytes, senderRegId: freshRegId, senderDeviceId: bundles[0].deviceId };
           }
         }
       } catch (e) {

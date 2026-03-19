@@ -101,8 +101,8 @@ try {
 
   // Bob2 decrypts
   console.log('\nBob2 decrypting...');
-  const decrypted = await messenger2.decrypt(userId, encrypted.body, encrypted.protoType === 1 ? 1 : 2);
-  console.log(`  ✓ Decrypted: ${new TextDecoder().decode(new Uint8Array(decrypted))}`);
+  const decryptResult = await messenger2.decrypt(userId, encrypted.body, encrypted.protoType === 1 ? 1 : 2);
+  console.log(`  ✓ Decrypted: ${new TextDecoder().decode(new Uint8Array(decryptResult.bytes))}, senderDeviceId: ${decryptResult.senderDeviceId?.slice(-8)}`);
 
   // Check sessions
   console.log('\nSessions:');

@@ -147,8 +147,8 @@ export async function mount(container, client, router) {
           client.friends.store(username, devices, 'accepted');
           // Sync to own devices
           await client._syncFriendToOwnDevices(username, 'add', devices, 'accepted');
-          if (primaryDevice?.serverUserId) {
-            await client._sendFriendResponse(primaryDevice.serverUserId, username, true);
+          if (primaryDevice?.deviceId) {
+            await client._sendFriendResponse(primaryDevice.deviceId, username, true);
           }
         }
         // Re-mount to refresh the list
@@ -173,8 +173,8 @@ export async function mount(container, client, router) {
         if (friend) {
           const primaryDevice = friend.devices?.[0];
           client.friends.remove(username);
-          if (primaryDevice?.serverUserId) {
-            await client._sendFriendResponse(primaryDevice.serverUserId, username, false);
+          if (primaryDevice?.deviceId) {
+            await client._sendFriendResponse(primaryDevice.deviceId, username, false);
           }
         }
         mount(container, client, router);

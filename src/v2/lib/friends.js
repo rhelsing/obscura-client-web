@@ -9,7 +9,7 @@ import { logger } from './logger.js';
 
 export class FriendManager {
   constructor(store = null) {
-    // Map of username -> { username, devices: [{ serverUserId, deviceUUID, deviceName, signalIdentityKey }], status }
+    // Map of username -> { username, devices: [{ deviceId, deviceUUID, deviceName, signalIdentityKey }], status }
     this.friends = new Map();
     this._store = store;  // friendStore instance for IndexedDB persistence
   }
@@ -30,7 +30,12 @@ export class FriendManager {
 
         this.friends.set(f.username, {
           username: f.username,
-          devices: f.devices || [],
+          devices: (f.devices || []).map(d => ({
+            deviceId: d.deviceId,
+            deviceUUID: d.deviceUUID,
+            deviceName: d.deviceName,
+            signalIdentityKey: d.signalIdentityKey,
+          })),
           status,
           addedAt: f.createdAt,
           recoveryPublicKey: f.recoveryPublicKey || null,
@@ -60,7 +65,7 @@ export class FriendManager {
     // Determine the userId key for IndexedDB
     // First, check if there's an existing entry by scanning all friends
     // to avoid creating duplicates with different keys
-    let userId = f.devices[0]?.serverUserId || username;
+    let userId = f.devices[0]?.deviceId || username;
 
     try {
       // Check if a friend with this username already exists under a different key
@@ -90,7 +95,7 @@ export class FriendManager {
     if (!this._store) return;
     const f = this.friends.get(username);
     if (!f) return;
-    const userId = f.devices[0]?.serverUserId || username;
+    const userId = f.devices[0]?.deviceId || username;
     try {
       await this._store.removeFriend(userId);
     } catch (e) {
@@ -108,12 +113,14 @@ export class FriendManager {
   store(username, devices, status = 'accepted', recoveryPublicKey = null) {
     // Check if friend already exists - preserve devices if new ones are empty
     const existing = this.friends.get(username);
-    const newDevices = devices.map(d => ({
-      serverUserId: d.serverUserId,
-      deviceUUID: d.deviceUUID || d.serverUserId, // For story/model filtering
-      deviceName: d.deviceName || d.serverUserId,
-      signalIdentityKey: d.signalIdentityKey,
-    }));
+    const newDevices = devices.map(d => {
+      return {
+        deviceId: d.deviceId,
+        deviceUUID: d.deviceUUID || d.deviceId, // For story/model filtering
+        deviceName: d.deviceName || d.deviceId,
+        signalIdentityKey: d.signalIdentityKey,
+      };
+    });
 
     // Use new devices if provided, otherwise preserve existing
     const finalDevices = newDevices.length > 0 ? newDevices : (existing?.devices || []);
@@ -158,13 +165,13 @@ export class FriendManager {
   }
 
   /**
-   * Reverse lookup: find username from a device's serverUserId
-   * @param {string} serverUserId - Server user ID to look up
+   * Reverse lookup: find username from a device's deviceId
+   * @param {string} deviceId - Device ID to look up
    * @returns {string|null} Username or null if not found
    */
-  getUsernameFromServerId(serverUserId) {
+  getUsernameFromDeviceId(deviceId) {
     for (const [username, friend] of this.friends) {
-      if (friend.devices.some(d => d.serverUserId === serverUserId)) {
+      if (friend.devices.some(d => d.deviceId === deviceId)) {
         return username;
       }
     }
@@ -182,9 +189,9 @@ export class FriendManager {
   }
 
   /**
-   * Get all serverUserIds for a friend (for fan-out messaging)
+   * Get all deviceIds for a friend (for fan-out messaging)
    * @param {string} username - Friend's display username
-   * @returns {string[]} Array of serverUserIds
+   * @returns {string[]} Array of deviceIds
    */
   getFanOutTargets(username) {
     const friend = this.friends.get(username);
@@ -197,13 +204,13 @@ export class FriendManager {
     if (!friend.devices || friend.devices.length === 0) {
       throw new Error(`No devices known for ${username}`);
     }
-    return friend.devices.map(d => d.serverUserId);
+    return friend.devices.map(d => d.deviceId);
   }
 
   /**
    * Add a device to a friend's device list (from DeviceAnnounce)
    * @param {string} username - Friend's username
-   * @param {object} device - Device info { serverUserId, deviceName, signalIdentityKey }
+   * @param {object} device - Device info { deviceId, deviceName, signalIdentityKey }
    */
   addDevice(username, device) {
     const friend = this.friends.get(username);
@@ -212,12 +219,12 @@ export class FriendManager {
     }
 
     // Don't add duplicates
-    const exists = friend.devices.some(d => d.serverUserId === device.serverUserId);
+    const exists = friend.devices.some(d => d.deviceId === device.deviceId);
     if (!exists) {
       friend.devices.push({
-        serverUserId: device.serverUserId,
-        deviceUUID: device.deviceUUID || device.serverUserId, // For story/model filtering
-        deviceName: device.deviceName || device.serverUserId,
+        deviceId: device.deviceId,
+        deviceUUID: device.deviceUUID || device.deviceId, // For story/model filtering
+        deviceName: device.deviceName || device.deviceId,
         signalIdentityKey: device.signalIdentityKey,
       });
       // Persist updated device list
@@ -235,12 +242,14 @@ export class FriendManager {
     if (!friend) {
       throw new Error(`Not friends with ${username}`);
     }
-    friend.devices = devices.map(d => ({
-      serverUserId: d.serverUserId,
-      deviceUUID: d.deviceUUID || d.serverUserId, // For story/model filtering
-      deviceName: d.deviceName || d.serverUserId,
-      signalIdentityKey: d.signalIdentityKey,
-    }));
+    friend.devices = devices.map(d => {
+      return {
+        deviceId: d.deviceId,
+        deviceUUID: d.deviceUUID || d.deviceId, // For story/model filtering
+        deviceName: d.deviceName || d.deviceId,
+        signalIdentityKey: d.signalIdentityKey,
+      };
+    });
     // Persist updated device list
     this._persistFriend(username);
   }
@@ -319,19 +328,21 @@ export class FriendManager {
         self.store(senderUsername, senderDevices, 'accepted', senderRecoveryKey);
         // Store friend's recovery key for verifying revocation signatures
         if (senderRecoveryKey && self._store) {
-          const userId = senderDevices[0]?.serverUserId || senderUsername;
+          const userId = senderDevices[0]?.deviceId || senderUsername;
           self._store.setFriendRecoveryKey(userId, senderRecoveryKey).catch(e => {
             console.warn('Failed to store friend recovery key:', e.message);
           });
         }
         // Send response - logging happens in ObscuraClient._sendFriendResponse
-        return sendFn(senderDevices[0]?.serverUserId, senderUsername, true);
+        const firstDeviceId = senderDevices[0]?.deviceId;
+        return sendFn(firstDeviceId, senderUsername, true);
       },
 
       async reject() {
         self.remove(senderUsername);
         // Send response - logging happens in ObscuraClient._sendFriendResponse
-        return sendFn(senderDevices[0]?.serverUserId, senderUsername, false);
+        const firstDeviceId = senderDevices[0]?.deviceId;
+        return sendFn(firstDeviceId, senderUsername, false);
       },
     };
   }
@@ -351,7 +362,7 @@ export class FriendManager {
       this.store(senderUsername, senderDevices, 'accepted', senderRecoveryKey);
       // Store friend's recovery key for verifying revocation signatures
       if (senderRecoveryKey && this._store) {
-        const userId = senderDevices[0]?.serverUserId || senderUsername;
+        const userId = senderDevices[0]?.deviceId || senderUsername;
         this._store.setFriendRecoveryKey(userId, senderRecoveryKey).catch(e => {
           console.warn('Failed to store friend recovery key:', e.message);
         });

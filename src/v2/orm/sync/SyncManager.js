@@ -118,7 +118,7 @@ export class SyncManager {
     const allFriends = this.client.friends.getAll();
     for (const friend of allFriends) {
       for (const device of friend.devices) {
-        targets.add(device.serverUserId);
+        targets.add(device.deviceId);
       }
     }
 

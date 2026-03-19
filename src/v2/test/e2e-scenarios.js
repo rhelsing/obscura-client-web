@@ -117,7 +117,7 @@ async function scenario1_FirstDeviceRegistration() {
       deviceUsername,
       new Uint8Array(keys.signal.identityKeyPair.pubKey)
     );
-    if (!deviceInfo.deviceUUID || !deviceInfo.serverUserId) throw new Error('Invalid device info');
+    if (!deviceInfo.deviceUUID || !deviceInfo.deviceId) throw new Error('Invalid device info');
     pass('Device info structure valid');
 
     return { username, password, deviceUsername, keys, deviceToken: deviceLogin.token };
@@ -229,7 +229,7 @@ async function scenario3_NewDeviceDetection(firstDevice) {
 
     // Generate link code for existing device to scan
     const linkCode = generateLinkCode({
-      serverUserId: newDeviceUsername,
+      deviceId: newDeviceUsername,
       deviceUUID: newDeviceKeys.deviceUUID,
       signalIdentityKey: new Uint8Array(newDeviceKeys.signal.identityKeyPair.pubKey),
     });
@@ -316,17 +316,17 @@ async function scenario6_DeviceLinkApproval(firstDevice, newDevice) {
   try {
     // Parse the link code from new device
     const parsed = parseLinkCode(newDevice.linkCode);
-    if (parsed.serverUserId !== newDevice.newDeviceUsername) {
-      throw new Error('Link code serverUserId mismatch');
+    if (parsed.deviceId !== newDevice.newDeviceUsername) {
+      throw new Error('Link code deviceId mismatch');
     }
-    pass('Parse link code', parsed.serverUserId);
+    pass('Parse link code', parsed.deviceId);
 
-    // Verify deviceUUID is in the link code (not just serverUserId fallback)
+    // Verify deviceUUID is in the link code (not just deviceId fallback)
     if (!parsed.deviceUUID) {
       throw new Error('Link code missing deviceUUID');
     }
-    if (parsed.deviceUUID === parsed.serverUserId && newDevice.newDeviceKeys.deviceUUID !== parsed.serverUserId) {
-      throw new Error('Link code deviceUUID is just serverUserId fallback - should be full UUID');
+    if (parsed.deviceUUID === parsed.deviceId && newDevice.newDeviceKeys.deviceUUID !== parsed.deviceId) {
+      throw new Error('Link code deviceUUID is just deviceId fallback - should be full UUID');
     }
     if (parsed.deviceUUID !== newDevice.newDeviceKeys.deviceUUID) {
       throw new Error(`Link code deviceUUID mismatch: got ${parsed.deviceUUID}, expected ${newDevice.newDeviceKeys.deviceUUID}`);
@@ -358,10 +358,10 @@ async function scenario6_DeviceLinkApproval(firstDevice, newDevice) {
     if (existingDeviceOthers.length !== 1) {
       throw new Error(`Expected existing device to have 1 other device, got ${existingDeviceOthers.length}`);
     }
-    if (existingDeviceOthers[0].serverUserId !== newDevice.newDeviceUsername) {
+    if (existingDeviceOthers[0].deviceId !== newDevice.newDeviceUsername) {
       throw new Error('Existing device should see new device');
     }
-    // Verify deviceUUID is stored correctly (not just serverUserId)
+    // Verify deviceUUID is stored correctly (not just deviceId)
     if (existingDeviceOthers[0].deviceUUID !== newDevice.newDeviceKeys.deviceUUID) {
       throw new Error(`Existing device has wrong deviceUUID for new device: got ${existingDeviceOthers[0].deviceUUID}, expected ${newDevice.newDeviceKeys.deviceUUID}`);
     }
@@ -415,7 +415,7 @@ async function scenario6_DeviceLinkApproval(firstDevice, newDevice) {
     // Note: device/link.js uses deviceUUID (uppercase), real proto uses deviceUuid (lowercase)
     // setAll handles both cases, so we test with lowercase to simulate real proto decoding
     const protoStyleDevices = approval.ownDevices.map(d => ({
-      serverUserId: d.serverUserId,
+      deviceId: d.deviceId,
       deviceUuid: d.deviceUUID,  // Convert uppercase to lowercase (simulating proto decode)
       deviceName: d.deviceName,
       signalIdentityKey: d.signalIdentityKey,
@@ -427,10 +427,10 @@ async function scenario6_DeviceLinkApproval(firstDevice, newDevice) {
     if (newDeviceOthers.length !== 1) {
       throw new Error(`Expected new device to have 1 other device, got ${newDeviceOthers.length}`);
     }
-    if (newDeviceOthers[0].serverUserId !== firstDevice.deviceUsername) {
-      throw new Error(`New device should see existing device, got ${newDeviceOthers[0].serverUserId}`);
+    if (newDeviceOthers[0].deviceId !== firstDevice.deviceUsername) {
+      throw new Error(`New device should see existing device, got ${newDeviceOthers[0].deviceId}`);
     }
-    // Verify deviceUUID is stored correctly (not just serverUserId)
+    // Verify deviceUUID is stored correctly (not just deviceId)
     if (newDeviceOthers[0].deviceUUID !== firstDevice.keys.deviceUUID) {
       throw new Error(`New device has wrong deviceUUID for existing device: got ${newDeviceOthers[0].deviceUUID}, expected ${firstDevice.keys.deviceUUID}`);
     }
@@ -459,13 +459,13 @@ async function scenario7_DeviceAnnounceBroadcast(firstDevice, newDevice) {
     const devices = [
       {
         deviceUUID: firstDevice.keys.deviceUUID,
-        serverUserId: firstDevice.deviceUsername,
+        deviceId: firstDevice.deviceUsername,
         deviceName: 'Test Device 1',
         signalIdentityKey: new Uint8Array(firstDevice.keys.signal.identityKeyPair.pubKey),
       },
       {
         deviceUUID: newDevice.newDeviceKeys.deviceUUID,
-        serverUserId: newDevice.newDeviceUsername,
+        deviceId: newDevice.newDeviceUsername,
         deviceName: 'Test Device 2',
         signalIdentityKey: new Uint8Array(newDevice.newDeviceKeys.signal.identityKeyPair.pubKey),
       },
@@ -522,13 +522,13 @@ async function scenario8_DeviceRevocation(firstDevice, newDevice) {
     const currentDevices = [
       {
         deviceUUID: firstDevice.keys.deviceUUID,
-        serverUserId: firstDevice.deviceUsername,
+        deviceId: firstDevice.deviceUsername,
         deviceName: 'Test Device 1',
         signalIdentityKey: new Uint8Array(firstDevice.keys.signal.identityKeyPair.pubKey),
       },
       {
         deviceUUID: newDevice.newDeviceKeys.deviceUUID,
-        serverUserId: newDevice.newDeviceUsername,
+        deviceId: newDevice.newDeviceUsername,
         deviceName: 'Test Device 2',
         signalIdentityKey: new Uint8Array(newDevice.newDeviceKeys.signal.identityKeyPair.pubKey),
       },
@@ -580,8 +580,8 @@ async function scenario9_FanOutSend(firstDevice, newDevice) {
   try {
     // Simulate a friend with multiple devices
     const friendDevices = [
-      { serverUserId: 'friend_device_1', deviceName: 'Friend Phone' },
-      { serverUserId: 'friend_device_2', deviceName: 'Friend Laptop' },
+      { deviceId: 'friend_device_1', deviceName: 'Friend Phone' },
+      { deviceId: 'friend_device_2', deviceName: 'Friend Laptop' },
     ];
 
     // Fan-out logic: send to each friend device
@@ -589,7 +589,7 @@ async function scenario9_FanOutSend(firstDevice, newDevice) {
     for (const device of friendDevices) {
       // In real implementation: encrypt with Signal session, send via API
       // Here we verify the fan-out logic structure
-      sentTo.push(device.serverUserId);
+      sentTo.push(device.deviceId);
       await delay(50); // Simulate rate limiting
     }
 
@@ -601,7 +601,7 @@ async function scenario9_FanOutSend(firstDevice, newDevice) {
     // Verify the pattern matches spec
     const fanOutPattern = `
     for (const friendDevice of friend.devices) {
-      await client.sendMessage(friendDevice.serverUserId, encryptedMessage);
+      await client.sendMessage(friendDevice.deviceId, encryptedMessage);
     }`;
     pass('Fan-out pattern verified');
 
@@ -626,11 +626,11 @@ async function scenario10_SelfSync(firstDevice, newDevice) {
     const ownDevices = [
       {
         deviceUUID: firstDevice.keys.deviceUUID,
-        serverUserId: firstDevice.deviceUsername,
+        deviceId: firstDevice.deviceUsername,
       },
       {
         deviceUUID: newDevice.newDeviceKeys.deviceUUID,
-        serverUserId: newDevice.newDeviceUsername,
+        deviceId: newDevice.newDeviceUsername,
       },
     ];
 
@@ -645,7 +645,7 @@ async function scenario10_SelfSync(firstDevice, newDevice) {
     // Verify each target gets the message
     for (const device of syncTargets) {
       // In real implementation: encrypt and send
-      pass('Self-sync target', device.serverUserId);
+      pass('Self-sync target', device.deviceId);
     }
 
     pass('Self-sync pattern verified');

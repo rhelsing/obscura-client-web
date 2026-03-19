@@ -29,7 +29,7 @@ function reconstructRequest(friend, client) {
   return {
     username: friend.username,
     devices: devices,
-    sourceUserId: primaryDevice?.serverUserId,
+    sourceUserId: primaryDevice?.deviceId,
 
     async getVerifyCode() {
       if (!devices || devices.length === 0) return null;
@@ -40,15 +40,15 @@ function reconstructRequest(friend, client) {
       client.friends.store(friend.username, devices, 'accepted');
       // Sync to own devices
       await client._syncFriendToOwnDevices(friend.username, 'add', devices, 'accepted');
-      if (primaryDevice?.serverUserId) {
-        await client._sendFriendResponse(primaryDevice.serverUserId, friend.username, true);
+      if (primaryDevice?.deviceId) {
+        await client._sendFriendResponse(primaryDevice.deviceId, friend.username, true);
       }
     },
 
     async reject() {
       client.friends.remove(friend.username);
-      if (primaryDevice?.serverUserId) {
-        await client._sendFriendResponse(primaryDevice.serverUserId, friend.username, false);
+      if (primaryDevice?.deviceId) {
+        await client._sendFriendResponse(primaryDevice.deviceId, friend.username, false);
       }
     },
   };

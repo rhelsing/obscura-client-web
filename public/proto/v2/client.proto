@@ -110,7 +110,7 @@ message ClientMessage {
 // Information about a single device
 message DeviceInfo {
   string device_uuid = 1;           // Device UUID (e.g., "550e8400-e29b-41d4...")
-  string server_user_id = 2;        // Server username (e.g., "alice_abc123")
+  string device_id = 2;              // Server-assigned device UUID
   string device_name = 3;           // Human-readable name (e.g., "iPhone")
   bytes signal_identity_key = 4;    // Signal identity public key (33 bytes with 0x05 prefix)
 }

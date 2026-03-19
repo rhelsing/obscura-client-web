@@ -184,14 +184,14 @@ test.describe('Scenario 7: Device Revocation', () => {
         username: f.username,
         deviceCount: f.devices?.length || 0,
         status: f.status,
-        devices: f.devices?.map(d => ({ serverUserId: d.serverUserId?.slice(-8), deviceUUID: d.deviceUUID?.slice(-8) }))
+        devices: f.devices?.map(d => ({ deviceId: d.deviceId?.slice(-8), deviceUUID: d.deviceUUID?.slice(-8) }))
       }));
     });
     console.log('Bob2 friends synced:', JSON.stringify(bob2FriendInfo));
 
-    // Also log Alice's actual serverUserId for comparison
+    // Also log Alice's actual deviceId for comparison
     const aliceUserId = await page.evaluate(() => window.__client.userId);
-    console.log('Alice serverUserId:', aliceUserId);
+    console.log('Alice deviceId:', aliceUserId);
 
     // ============================================================
     // SCENARIO 7: Device Revocation
@@ -264,9 +264,9 @@ test.describe('Scenario 7: Device Revocation', () => {
     // --- 7.2: Bob1 revokes Bob2 ---
     console.log('--- 7.2: Revoke Bob2 ---');
 
-    // Get bob2's serverUserId
+    // Get bob2's deviceId
     const bob2ServerUserId = await bob2Page.evaluate(() => window.__client.userId);
-    console.log('Bob2 serverUserId:', bob2ServerUserId.slice(0, 8) + '...');
+    console.log('Bob2 deviceId:', bob2ServerUserId.slice(0, 8) + '...');
 
     // Set up listener for Alice to receive device announce
     const aliceRevokeAnnouncePromise = page.waitForEvent('console', {

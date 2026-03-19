@@ -191,8 +191,8 @@ function resolveAuthorName(story, client, profileMap = new Map()) {
     for (const [username, data] of client.friends.friends) {
       if (data.devices) {
         for (const device of data.devices) {
-          // Check both deviceUUID and serverUserId
-          if (device.deviceUUID === authorDeviceId || device.serverUserId === authorDeviceId) {
+          // Check both deviceUUID and deviceId
+          if (device.deviceUUID === authorDeviceId || device.deviceId === authorDeviceId) {
             return username;
           }
         }
@@ -234,7 +234,7 @@ export async function mount(container, client, router) {
     if (client.devices) {
       for (const d of client.devices.getAll()) {
         knownDeviceIds.add(d.deviceUUID);
-        knownDeviceIds.add(d.serverUserId);
+        knownDeviceIds.add(d.deviceId);
       }
     }
     if (client.friends && client.friends.friends) {
@@ -242,7 +242,7 @@ export async function mount(container, client, router) {
         if (data.devices) {
           for (const device of data.devices) {
             knownDeviceIds.add(device.deviceUUID);
-            knownDeviceIds.add(device.serverUserId);
+            knownDeviceIds.add(device.deviceId);
           }
         }
       }

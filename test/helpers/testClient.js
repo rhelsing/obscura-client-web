@@ -689,7 +689,7 @@ export class TestClient {
     const req = this.SendMessageRequest.create({
       messages: [{
         submissionId: uuidToBytes(randomUUID()),
-        recipientId: uuidToBytes(targetUserId),
+        deviceId: uuidToBytes(targetUserId),
         message: encryptedPayload,
       }],
     });

@@ -78,7 +78,7 @@ async function runTest() {
     await delay(300);
 
     // Bob accepts the friend request
-    await bob.sendFriendResponse(reqInfo.devices[0].serverUserId, alice.username, true);
+    await bob.sendFriendResponse(reqInfo.devices[0].deviceId, alice.username, true);
     console.log('  ✓ Bob sent FRIEND_RESPONSE (accepted)');
     await delay(300);
 

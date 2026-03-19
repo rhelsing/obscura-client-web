@@ -142,7 +142,7 @@ export async function registerFirstDevice(client, username, password, keys) {
 export function buildDeviceInfo(deviceUUID, deviceUsername, signalIdentityKey) {
   return {
     deviceUUID,
-    serverUserId: deviceUsername,
+    deviceId: deviceUsername,
     deviceName: detectDeviceName(),
     signalIdentityKey: signalIdentityKey,
   };

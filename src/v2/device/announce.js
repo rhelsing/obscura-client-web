@@ -21,7 +21,7 @@ export async function buildDeviceAnnounce({ devices, isRevocation, signingKey })
   // Serialize devices for signing
   const devicesData = devices.map(d => ({
     deviceUUID: d.deviceUUID,
-    serverUserId: d.serverUserId,
+    deviceId: d.deviceId,
     deviceName: d.deviceName,
     signalIdentityKey: uint8ArrayToBase64(d.signalIdentityKey),
   }));
@@ -56,7 +56,7 @@ export function parseDeviceAnnounce(payload) {
   return {
     devices: payload.devices.map(d => ({
       deviceUUID: d.deviceUUID,
-      serverUserId: d.serverUserId,
+      deviceId: d.deviceId,
       deviceName: d.deviceName,
       signalIdentityKey: base64ToUint8Array(d.signalIdentityKey),
     })),
@@ -79,7 +79,7 @@ export async function verifyDeviceAnnounce(announce, publicKey) {
     // Recreate signed data - ensure signalIdentityKey is base64 string
     const devicesData = announce.devices.map(d => ({
       deviceUUID: d.deviceUUID,
-      serverUserId: d.serverUserId,
+      deviceId: d.deviceId,
       deviceName: d.deviceName,
       signalIdentityKey: uint8ArrayToBase64(d.signalIdentityKey),
     }));
@@ -123,7 +123,7 @@ export async function buildDeviceAnnounceProto({ devices, isRevocation, signingK
   // Prepare devices with Uint8Array for signalIdentityKey
   const devicesData = devices.map(d => ({
     deviceUUID: d.deviceUUID,
-    serverUserId: d.serverUserId,
+    deviceId: d.deviceId,
     deviceName: d.deviceName,
     signalIdentityKey: ensureUint8Array(d.signalIdentityKey),
   }));
@@ -131,7 +131,7 @@ export async function buildDeviceAnnounceProto({ devices, isRevocation, signingK
   // Create data to sign (same format as base64 version for signature compatibility)
   const devicesForSigning = devices.map(d => ({
     deviceUUID: d.deviceUUID,
-    serverUserId: d.serverUserId,
+    deviceId: d.deviceId,
     deviceName: d.deviceName,
     signalIdentityKey: uint8ArrayToBase64(ensureUint8Array(d.signalIdentityKey)),
   }));
@@ -169,7 +169,7 @@ export async function verifyDeviceAnnounceProto(announce, publicKey) {
     // Recreate signed data - convert Uint8Array to base64 for signature verification
     const devicesData = announce.devices.map(d => ({
       deviceUUID: d.deviceUUID,
-      serverUserId: d.serverUserId,
+      deviceId: d.deviceId,
       deviceName: d.deviceName,
       signalIdentityKey: uint8ArrayToBase64(ensureUint8Array(d.signalIdentityKey)),
     }));
@@ -236,7 +236,7 @@ export function getFanOutTargets(friends) {
   for (const friend of friends) {
     if (friend.devices && Array.isArray(friend.devices)) {
       for (const device of friend.devices) {
-        targets.push(device.serverUserId);
+        targets.push(device.deviceId);
       }
     }
   }
@@ -248,13 +248,13 @@ export function getFanOutTargets(friends) {
  * Get list of own device server user IDs for self-sync fan-out
  * Used for SENT_SYNC messages to keep all devices in sync
  * @param {Array} ownDevices - List of all own devices
- * @param {string} currentDeviceId - Current device's serverUserId (to exclude)
- * @returns {Array} List of server user IDs for other own devices
+ * @param {string} currentDeviceId - Current device's deviceId (to exclude)
+ * @returns {Array} List of device IDs for other own devices
  */
 export function getOwnFanOutTargets(ownDevices, currentDeviceId) {
   return ownDevices
-    .filter(d => d.serverUserId !== currentDeviceId)
-    .map(d => d.serverUserId);
+    .filter(d => d.deviceId !== currentDeviceId)
+    .map(d => d.deviceId);
 }
 
 // Helper functions

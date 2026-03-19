@@ -109,7 +109,7 @@ export function serializeAnnounceForSigning(announce) {
   const data = {
     devices: announce.devices.map(d => ({
       deviceUUID: d.deviceUUID,
-      serverUserId: d.serverUserId,
+      deviceId: d.deviceId,
     })).sort((a, b) => a.deviceUUID.localeCompare(b.deviceUUID)),
     timestamp: announce.timestamp,
     isRevocation: announce.isRevocation,

@@ -99,7 +99,116 @@ export function createClient(baseUrl = API_URL) {
       token = null;
     },
 
+    // ===================================================================
+    // New API (v0.8.0) — Server-managed devices
+    // ===================================================================
+
     /**
+     * Register a new user account (no keys required)
+     * Returns User-Scoped JWT. Must then call provisionDevice() to get Device-Scoped JWT.
+     */
+    async registerUser(username, password) {
+      return request('/v1/users', {
+        method: 'POST',
+        auth: false,
+        body: JSON.stringify({ username, password }),
+      });
+    },
+
+    /**
+     * Provision a new device with Signal keys
+     * Requires User-Scoped or Device-Scoped JWT.
+     * Returns Device-Scoped JWT with deviceId claim.
+     */
+    async provisionDevice({ name, identityKey, registrationId, signedPreKey, oneTimePreKeys }) {
+      return request('/v1/devices', {
+        method: 'POST',
+        body: JSON.stringify({
+          name,
+          identityKey,
+          registrationId,
+          signedPreKey,
+          oneTimePreKeys,
+        }),
+      });
+    },
+
+    /**
+     * Login with optional deviceId for Device-Scoped token
+     */
+    async loginWithDevice(username, password, deviceId) {
+      const body = { username, password };
+      if (deviceId) body.deviceId = deviceId;
+      return request('/v1/sessions', {
+        method: 'POST',
+        auth: false,
+        body: JSON.stringify(body),
+      });
+    },
+
+    /**
+     * List all devices for the authenticated user
+     */
+    async listDevices() {
+      return request('/v1/devices');
+    },
+
+    /**
+     * Get a single device
+     */
+    async getDevice(deviceId) {
+      return request(`/v1/devices/${deviceId}`);
+    },
+
+    /**
+     * Update a device (e.g., rename)
+     */
+    async updateDevice(deviceId, { name }) {
+      return request(`/v1/devices/${deviceId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name }),
+      });
+    },
+
+    /**
+     * Delete a device (cascade deletes keys, messages, push tokens)
+     */
+    async deleteDevice(deviceId) {
+      return request(`/v1/devices/${deviceId}`, {
+        method: 'DELETE',
+      });
+    },
+
+    /**
+     * Upload PreKeys for the authenticated device
+     * POST /v1/devices/keys — requires Device-Scoped JWT
+     */
+    async uploadDeviceKeys({ identityKey, registrationId, signedPreKey, oneTimePreKeys }) {
+      return request('/v1/devices/keys', {
+        method: 'POST',
+        body: JSON.stringify({
+          identityKey,
+          registrationId,
+          signedPreKey,
+          oneTimePreKeys,
+        }),
+      });
+    },
+
+    /**
+     * Fetch PreKey Bundles for all of a user's devices
+     * GET /v1/users/{userId} — returns array of PreKeyBundleResponse
+     */
+    async fetchPreKeyBundles(userId) {
+      return request(`/v1/users/${userId}`);
+    },
+
+    // ===================================================================
+    // Legacy API (to be removed in Phase 7)
+    // ===================================================================
+
+    /**
+     * @deprecated Use registerUser() + provisionDevice() instead
      * Register a shell account (reserves namespace)
      * Per identity.md: Shell reserves namespace
      *
@@ -123,8 +232,8 @@ export function createClient(baseUrl = API_URL) {
     },
 
     /**
+     * @deprecated Use registerUser() + provisionDevice() instead
      * Register a device account (with Signal keys)
-     * Per identity.md: Device account used for all operations
      */
     async registerDevice({ username, password, identityKey, registrationId, signedPreKey, oneTimePreKeys }) {
       return request('/v1/users', {
@@ -174,6 +283,7 @@ export function createClient(baseUrl = API_URL) {
     },
 
     /**
+     * @deprecated Use uploadDeviceKeys() instead
      * Upload keys (prekey replenishment)
      */
     async uploadKeys({ identityKey, registrationId, signedPreKey, oneTimePreKeys }) {
@@ -189,6 +299,7 @@ export function createClient(baseUrl = API_URL) {
     },
 
     /**
+     * @deprecated Use fetchPreKeyBundles() instead (returns array)
      * Fetch prekey bundle for a user
      */
     async fetchPreKeyBundle(userId) {
@@ -417,6 +528,15 @@ export function createClient(baseUrl = API_URL) {
     getUserId(t = token) {
       const payload = this.decodeToken(t);
       return payload?.sub || payload?.user_id || payload?.userId || payload?.id || null;
+    },
+
+    /**
+     * Get device ID from token (device-scoped JWTs only)
+     * Server uses `device_id` claim (snake_case)
+     */
+    getDeviceId(t = token) {
+      const payload = this.decodeToken(t);
+      return payload?.device_id || payload?.deviceId || null;
     },
   };
 }

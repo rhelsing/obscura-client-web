@@ -47,7 +47,7 @@ export function createDeviceStore(coreUsername) {
         // Own devices store (list of linked devices)
         if (!database.objectStoreNames.contains(STORES.OWN_DEVICES)) {
           const store = database.createObjectStore(STORES.OWN_DEVICES, { keyPath: 'deviceUUID' });
-          store.createIndex('serverUserId', 'serverUserId', { unique: true });
+          store.createIndex('deviceId', 'deviceId', { unique: true });
         }
       };
     });
@@ -148,7 +148,7 @@ export function createDeviceStore(coreUsername) {
       const store = await getStore(STORES.OWN_DEVICES, 'readwrite');
       return promisify(store.put({
         deviceUUID: device.deviceUUID,
-        serverUserId: device.serverUserId,
+        deviceId: device.deviceId,
         deviceName: device.deviceName,
         signalIdentityKey: device.signalIdentityKey,
         addedAt: device.addedAt || Date.now(),
@@ -190,7 +190,7 @@ export function createDeviceStore(coreUsername) {
       for (const device of devices) {
         await promisify(store.put({
           deviceUUID: device.deviceUUID,
-          serverUserId: device.serverUserId,
+          deviceId: device.deviceId,
           deviceName: device.deviceName,
           signalIdentityKey: device.signalIdentityKey,
           addedAt: device.addedAt || Date.now(),

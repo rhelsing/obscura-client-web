@@ -168,8 +168,8 @@ function resolveAuthorName(authorDeviceId, client, profileMap = new Map()) {
     for (const [username, data] of client.friends.friends) {
       if (data.devices) {
         for (const device of data.devices) {
-          // Check both deviceUUID and serverUserId
-          if (device.deviceUUID === authorDeviceId || device.serverUserId === authorDeviceId) {
+          // Check both deviceUUID and deviceId
+          if (device.deviceUUID === authorDeviceId || device.deviceId === authorDeviceId) {
             return username;
           }
         }

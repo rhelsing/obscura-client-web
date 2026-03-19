@@ -114,12 +114,15 @@ export class Messenger {
   }
 
   /**
-   * Fetch pre-key bundle for a user
+   * Fetch PreKey bundles for all devices of a user
+   * New API: GET /v1/users/{userId} returns array of PreKeyBundleResponse
+   * @param {string} userId - User UUID
+   * @returns {Promise<Array>} Array of { deviceId, identityKey, registrationId, signedPreKey, preKey }
    */
-  async fetchPreKeyBundle(userId) {
+  async fetchPreKeyBundles(userId) {
     let res;
     try {
-      res = await fetch(`${this.apiUrl}/v1/keys/${userId}`, {
+      res = await fetch(`${this.apiUrl}/v1/users/${userId}`, {
         headers: { 'Authorization': `Bearer ${this.token}` },
       });
     } catch (e) {
@@ -128,38 +131,48 @@ export class Messenger {
     }
 
     if (!res.ok) {
-      const error = new Error(`Failed to fetch keys for ${userId}: ${res.status}`);
+      const error = new Error(`Failed to fetch bundles for ${userId}: ${res.status}`);
       await logger.logPrekeyFetchError(userId, error, res.status);
       throw error;
     }
 
-    const bundle = await res.json();
-    await logger.logPrekeyFetch(userId, !!bundle.preKey, bundle.registrationId);
+    const bundles = await res.json();
 
-    return {
-      identityKey: toArrayBuffer(bundle.identityKey),
-      registrationId: bundle.registrationId,
-      signedPreKey: {
-        keyId: bundle.signedPreKey.keyId,
-        publicKey: toArrayBuffer(bundle.signedPreKey.publicKey),
-        signature: toArrayBuffer(bundle.signedPreKey.signature),
-      },
-      preKey: bundle.preKey ? {
-        keyId: bundle.preKey.keyId,
-        publicKey: toArrayBuffer(bundle.preKey.publicKey),
-      } : undefined,
-    };
+    return bundles.map(b => {
+      const bundle = {
+        deviceId: b.deviceId,
+        identityKey: toArrayBuffer(b.identityKey),
+        registrationId: b.registrationId,
+        signedPreKey: {
+          keyId: b.signedPreKey.keyId,
+          publicKey: toArrayBuffer(b.signedPreKey.publicKey),
+          signature: toArrayBuffer(b.signedPreKey.signature),
+        },
+        preKey: b.oneTimePreKey ? {
+          keyId: b.oneTimePreKey.keyId,
+          publicKey: toArrayBuffer(b.oneTimePreKey.publicKey),
+        } : undefined,
+      };
+      logger.logPrekeyFetch(userId, !!bundle.preKey, bundle.registrationId);
+      return bundle;
+    });
   }
 
   /**
-   * Encrypt a message for a target user
+   * Encrypt a message for a target user.
+   * Signal sessions are keyed by userId (Envelope.sender_id = userId).
    */
   async encrypt(targetUserId, plaintext) {
     const address = new SignalProtocolAddress(targetUserId, 1);
     const existingSession = await this.store.loadSession(address.toString());
 
     if (!existingSession) {
-      const bundle = await this.fetchPreKeyBundle(targetUserId);
+      // Fetch all device bundles for user, use first one to build session
+      const bundles = await this.fetchPreKeyBundles(targetUserId);
+      if (!bundles || bundles.length === 0) {
+        throw new Error(`No prekey bundles found for user ${targetUserId}`);
+      }
+      const bundle = bundles[0];
       try {
         const sessionBuilder = new SessionBuilder(this.store, address);
         await sessionBuilder.processPreKey(bundle);
@@ -306,7 +319,7 @@ export class Messenger {
         challengeResponse: opts.deviceLinkApproval.challengeResponse,
         ownDevices: (opts.deviceLinkApproval.ownDevices || []).map(d => this.DeviceInfo.create({
           deviceUuid: d.deviceUUID || d.deviceUuid,
-          serverUserId: d.serverUserId,
+          deviceId: d.deviceId,
           deviceName: d.deviceName,
           signalIdentityKey: d.signalIdentityKey,
         })),
@@ -320,7 +333,7 @@ export class Messenger {
       msgData.deviceAnnounce = this.DeviceAnnounce.create({
         devices: (opts.deviceAnnounce.devices || []).map(d => this.DeviceInfo.create({
           deviceUuid: d.deviceUUID || d.deviceUuid,
-          serverUserId: d.serverUserId,
+          deviceId: d.deviceId,
           deviceName: d.deviceName,
           signalIdentityKey: d.signalIdentityKey,
         })),
@@ -335,7 +348,7 @@ export class Messenger {
       msgData.deviceRecoveryAnnounce = this.DeviceRecoveryAnnounce.create({
         newDevices: (opts.deviceRecoveryAnnounce.newDevices || []).map(d => this.DeviceInfo.create({
           deviceUuid: d.deviceUUID || d.deviceUuid,
-          serverUserId: d.serverUserId,
+          deviceId: d.deviceId,
           deviceName: d.deviceName,
           signalIdentityKey: d.signalIdentityKey,
         })),
@@ -416,7 +429,7 @@ export class Messenger {
         status: opts.friendSync.status || 'accepted',
         devices: (opts.friendSync.devices || []).map(d => this.DeviceInfo.create({
           deviceUuid: d.deviceUUID || d.deviceUuid,
-          serverUserId: d.serverUserId,
+          deviceId: d.deviceId,
           deviceName: d.deviceName,
           signalIdentityKey: d.signalIdentityKey,
         })),
@@ -456,7 +469,7 @@ export class Messenger {
         challengeResponse: msg.deviceLinkApproval.challengeResponse,
         ownDevices: (msg.deviceLinkApproval.ownDevices || []).map(d => ({
           deviceUUID: d.deviceUuid,
-          serverUserId: d.serverUserId,
+          deviceId: d.deviceId,
           deviceName: d.deviceName,
           signalIdentityKey: d.signalIdentityKey,
         })),
@@ -467,7 +480,7 @@ export class Messenger {
       result.deviceAnnounce = {
         devices: (msg.deviceAnnounce.devices || []).map(d => ({
           deviceUUID: d.deviceUuid,
-          serverUserId: d.serverUserId,
+          deviceId: d.deviceId,
           deviceName: d.deviceName,
           signalIdentityKey: d.signalIdentityKey,
         })),
@@ -482,7 +495,7 @@ export class Messenger {
       result.deviceRecoveryAnnounce = {
         newDevices: (msg.deviceRecoveryAnnounce.newDevices || []).map(d => ({
           deviceUUID: d.deviceUuid,
-          serverUserId: d.serverUserId,
+          deviceId: d.deviceId,
           deviceName: d.deviceName,
           signalIdentityKey: d.signalIdentityKey,
         })),
@@ -557,7 +570,7 @@ export class Messenger {
         status: msg.friendSync.status || 'accepted',
         devices: (msg.friendSync.devices || []).map(d => ({
           deviceUUID: d.deviceUuid,
-          serverUserId: d.serverUserId,
+          deviceId: d.deviceId,
           deviceName: d.deviceName,
           signalIdentityKey: d.signalIdentityKey,
         })),
@@ -571,12 +584,18 @@ export class Messenger {
   /**
    * Encrypt and queue a message for batch sending (no HTTP call).
    * Call flushMessages() after queueing all messages to send them in one request.
+   *
+   * @param {string} targetDeviceId - Target device UUID (for server routing)
+   * @param {object} opts - Message options
+   * @param {string} targetUserId - Target user UUID (for Signal encryption)
    */
-  async queueMessage(targetUserId, opts) {
+  async queueMessage(targetDeviceId, opts, targetUserId) {
     await this.loadProto();
 
+    // Signal encryption uses userId (server puts userId in Envelope.sender_id)
+    const encryptUserId = targetUserId || targetDeviceId; // fallback for backwards compat
     const clientMsgBytes = this.encodeClientMessage(opts);
-    const encrypted = await this.encrypt(targetUserId, clientMsgBytes);
+    const encrypted = await this.encrypt(encryptUserId, clientMsgBytes);
 
     const encMsg = this.EncryptedMessage.create({
       type: encrypted.protoType,
@@ -584,9 +603,10 @@ export class Messenger {
     });
     const encryptedPayload = this.EncryptedMessage.encode(encMsg).finish();
 
+    // Server routes by device_id
     this._queue.push({
       submissionId: uuidToBytes(generateDeviceUUID()),
-      recipientId: uuidToBytes(targetUserId),
+      deviceId: uuidToBytes(targetDeviceId),
       message: encryptedPayload,
     });
   }
@@ -646,10 +666,13 @@ export class Messenger {
   }
 
   /**
-   * Send an encrypted message to a single target user (convenience for non-batch cases).
+   * Send an encrypted message (convenience for non-batch cases).
+   * @param {string} targetDeviceId - Target device UUID (for routing)
+   * @param {object} opts - Message options
+   * @param {string} [targetUserId] - Target user UUID (for Signal encryption)
    */
-  async sendMessage(targetUserId, opts) {
-    await this.queueMessage(targetUserId, opts);
+  async sendMessage(targetDeviceId, opts, targetUserId) {
+    await this.queueMessage(targetDeviceId, opts, targetUserId);
     await this.flushMessages();
   }
 

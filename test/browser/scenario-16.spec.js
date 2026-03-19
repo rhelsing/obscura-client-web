@@ -678,10 +678,10 @@ test.describe('Scenario 16: Multi-Device Offline Sync (Bidirectional)', () => {
     // Compare devices - both should know about each other
     console.log('\n--- Devices comparison ---');
     const bob1Devices = await bob1Page.evaluate(() =>
-      window.__client.devices.getAll().map(d => d.serverUserId)
+      window.__client.devices.getAll().map(d => d.deviceId)
     );
     const bob2Devices = await bob2Page.evaluate(() =>
-      window.__client.devices.getAll().map(d => d.serverUserId)
+      window.__client.devices.getAll().map(d => d.deviceId)
     );
     const bob1UserId = await bob1Page.evaluate(() => window.__client.userId);
     const bob2UserId = await bob2Page.evaluate(() => window.__client.userId);
@@ -695,7 +695,7 @@ test.describe('Scenario 16: Multi-Device Offline Sync (Bidirectional)', () => {
     console.log('\n--- Alice device knowledge ---');
     const aliceKnowsBobDevices = await alicePage.evaluate((bobUsername) => {
       const bob = window.__client.friends.friends.get(bobUsername);
-      return bob?.devices?.map(d => d.serverUserId) || [];
+      return bob?.devices?.map(d => d.deviceId) || [];
     }, bobUsername);
     console.log('Alice knows Bob devices:', aliceKnowsBobDevices);
     expect(aliceKnowsBobDevices).toContain(bob1UserId);

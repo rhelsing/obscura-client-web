@@ -51,13 +51,11 @@ export class ObscuraClient {
     this.refreshToken = opts.refreshToken;
     this.userId = opts.userId;
     this.username = opts.username;
-    this.deviceUsername = opts.deviceUsername;
+    this.deviceId = opts.deviceId || opts.deviceUsername;  // backwards compat
     this.deviceUUID = opts.deviceUUID;
     this.deviceInfo = opts.deviceInfo;
     this.p2pIdentity = opts.p2pIdentity;
     this.recoveryPublicKey = opts.recoveryPublicKey;  // Only public key, never private
-    this.shellToken = opts.shellToken || null;  // Shell account token for backup API
-    this.shellRefreshToken = opts.shellRefreshToken || null;  // Shell refresh token
 
     // Recovery phrase - private, cleared after read
     this._recoveryPhrase = opts.recoveryPhrase || null;
@@ -169,17 +167,15 @@ export class ObscuraClient {
       refreshToken: this.refreshToken,
       userId: this.userId,
       username: this.username,
-      deviceUsername: this.deviceUsername,
+      deviceId: this.deviceId,
       deviceUUID: this.deviceUUID,
       // Store deviceInfo for verify codes (signalIdentityKey as array for JSON)
       deviceInfo: this.deviceInfo ? {
         deviceUUID: this.deviceInfo.deviceUUID,
-        serverUserId: this.deviceInfo.serverUserId,
+        deviceId: this.deviceInfo.deviceId,
         deviceName: this.deviceInfo.deviceName,
         signalIdentityKey: this.deviceInfo.signalIdentityKey ? Array.from(this.deviceInfo.signalIdentityKey) : null,
       } : null,
-      shellToken: this.shellToken,
-      shellRefreshToken: this.shellRefreshToken,
     };
     localStorage.setItem('obscura_session', JSON.stringify(session));
   }
@@ -260,17 +256,7 @@ export class ObscuraClient {
           session.refreshToken = result.refreshToken;
           console.log('[ObscuraClient] Token refreshed on restore');
 
-          // Also refresh shell token if available
-          if (session.shellRefreshToken) {
-            try {
-              const shellResult = await apiClient.refreshSession(session.shellRefreshToken);
-              session.shellToken = shellResult.token;
-              session.shellRefreshToken = shellResult.refreshToken;
-              console.log('[ObscuraClient] Shell token refreshed on restore');
-            } catch (shellErr) {
-              console.warn('[ObscuraClient] Shell refresh failed on restore:', shellErr.message);
-            }
-          }
+          // (shell tokens removed — single account model)
         } catch (e) {
           console.warn('[ObscuraClient] Refresh failed on restore:', e.message);
           logger.logSessionRestoreError({ error: e.message, username: session.username,
@@ -286,7 +272,7 @@ export class ObscuraClient {
       // Restore deviceInfo with signalIdentityKey as Uint8Array
       const deviceInfo = session.deviceInfo ? {
         deviceUUID: session.deviceInfo.deviceUUID,
-        serverUserId: session.deviceInfo.serverUserId,
+        deviceId: session.deviceInfo.deviceId,
         deviceName: session.deviceInfo.deviceName,
         signalIdentityKey: session.deviceInfo.signalIdentityKey ? new Uint8Array(session.deviceInfo.signalIdentityKey) : null,
       } : null;
@@ -298,20 +284,16 @@ export class ObscuraClient {
         refreshToken: session.refreshToken,
         userId: session.userId,
         username: session.username,
-        deviceUsername: session.deviceUsername,
+        deviceId: session.deviceId || session.deviceUsername,  // backwards compat
         deviceUUID: session.deviceUUID,
         deviceInfo,
-        shellToken: session.shellToken,
-        shellRefreshToken: session.shellRefreshToken,
       });
 
       // Load recoveryPublicKey and p2pIdentity from deviceStore
       await client._loadIdentityKeys();
 
       logger.logSessionRestore({ username: session.username, tokenWasExpired,
-        refreshAttempted: tokenWasExpired, refreshSucceeded: true,
-        hasShellToken: !!session.shellToken, hasShellRefreshToken: !!session.shellRefreshToken,
-        shellTokenExpired: ObscuraClient.isTokenExpired(session.shellToken, 0) });
+        refreshAttempted: tokenWasExpired, refreshSucceeded: true });
 
       return client;
     } catch (e) {
@@ -378,7 +360,7 @@ export class ObscuraClient {
     if (!this.refreshToken) {
       console.warn('[ObscuraClient] No refresh token available');
       logger.logTokenRefreshError({ tokenSource: 'device', error: 'No refresh token available',
-        hasRefreshToken: false, hasShellRefreshToken: !!this.shellRefreshToken });
+        hasRefreshToken: false });
       return false;
     }
 
@@ -390,34 +372,13 @@ export class ObscuraClient {
       this._updateToken(result.token, result.refreshToken);
       const expiresAt = new Date(result.expiresAt * 1000).toISOString();
       console.log('[ObscuraClient] Token refreshed, expires at:', expiresAt);
-      logger.logTokenRefresh({ tokenSource: 'device', expiresAt,
-        hasShellToken: !!this.shellToken, hasShellRefreshToken: !!this.shellRefreshToken });
-
-      // Also refresh shell token (used for backup API)
-      if (this.shellRefreshToken) {
-        try {
-          const shellResult = await apiClient.refreshSession(this.shellRefreshToken);
-          this.shellToken = shellResult.token;
-          this.shellRefreshToken = shellResult.refreshToken;
-          this.saveSession();
-          logger.logTokenRefresh({ tokenSource: 'shell',
-            expiresAt: new Date(shellResult.expiresAt * 1000).toISOString(),
-            hasShellToken: true, hasShellRefreshToken: true });
-        } catch (shellErr) {
-          console.warn('[ObscuraClient] Shell token refresh failed:', shellErr.message);
-          logger.logTokenRefreshError({ tokenSource: 'shell', error: shellErr.message,
-            status: shellErr.status, hasRefreshToken: true, hasShellRefreshToken: true });
-        }
-      } else {
-        logger.logTokenRefreshError({ tokenSource: 'shell', error: 'No shellRefreshToken — will go stale',
-          hasRefreshToken: true, hasShellRefreshToken: false });
-      }
+      logger.logTokenRefresh({ tokenSource: 'device', expiresAt });
 
       return true;
     } catch (e) {
       console.error('[ObscuraClient] Token refresh failed:', e.message);
       logger.logTokenRefreshError({ tokenSource: 'device', error: e.message,
-        status: e.status, hasRefreshToken: true, hasShellRefreshToken: !!this.shellRefreshToken });
+        status: e.status, hasRefreshToken: true });
       return false;
     }
   }
@@ -573,7 +534,7 @@ export class ObscuraClient {
   async getMyVerifyCode() {
     // Get all own devices including current
     const allDevices = this.devices.buildFullList(this.deviceInfo || {
-      serverUserId: this.userId,
+      deviceId: this.deviceId || this.userId,
       deviceUUID: this.deviceUUID,
       deviceName: this.username,
       signalIdentityKey: this.deviceInfo?.signalIdentityKey,
@@ -978,8 +939,8 @@ export class ObscuraClient {
         return;
       }
 
-      const backupToken = this.shellToken || this.token;
-      tokenSource = this.shellToken ? 'shell' : 'device';
+      const backupToken = this.token;
+      tokenSource = 'device';
       const tokenExpired = ObscuraClient.isTokenExpired(backupToken, 0);
 
       const backupManager = createBackupManager(this.username, this.userId);
@@ -1001,9 +962,8 @@ export class ObscuraClient {
     } catch (err) {
       console.error('[ObscuraClient] Web backup failed:', err);
       logger.logBackupUploadError({ error: err.message, tokenSource,
-        tokenExpired: ObscuraClient.isTokenExpired(this.shellToken || this.token, 0),
+        tokenExpired: ObscuraClient.isTokenExpired(this.token, 0),
         hasRecoveryPublicKey: !!this.recoveryPublicKey,
-        hasShellToken: !!this.shellToken, hasShellRefreshToken: !!this.shellRefreshToken,
         trigger: 'disconnect' });
     }
   }
@@ -1098,7 +1058,7 @@ export class ObscuraClient {
         );
 
         // Check if this is from one of our own devices (self-sync)
-        const isFromOwnDevice = this.devices.getAll().some(d => d.serverUserId === senderId);
+        const isFromOwnDevice = this.devices.getAll().some(d => d.deviceId === senderId);
         const isFromSelf = senderId === this.userId;
 
         // Log diagnostic info for debugging session issues
@@ -1260,8 +1220,8 @@ export class ObscuraClient {
         break;
 
       case 'CONTENT_REFERENCE':
-        // Look up username from serverUserId for correct conversationId (like TEXT messages)
-        const attachConversationId = this.friends.getUsernameFromServerId(msg.sourceUserId) || msg.sourceUserId;
+        // Look up username from deviceId for correct conversationId (like TEXT messages)
+        const attachConversationId = this.friends.getUsernameFromDeviceId(msg.sourceUserId) || msg.sourceUserId;
         // Persist attachment reference as a special message type
         this._persistMessage(attachConversationId, {
           from: msg.sourceUserId,
@@ -1282,7 +1242,7 @@ export class ObscuraClient {
 
       case 'CHUNKED_CONTENT_REFERENCE':
         // Large file - convert chunked ref to mediaUrl for storage
-        const chunkedConversationId = this.friends.getUsernameFromServerId(msg.sourceUserId) || msg.sourceUserId;
+        const chunkedConversationId = this.friends.getUsernameFromDeviceId(msg.sourceUserId) || msg.sourceUserId;
         const chunkedMediaUrl = createChunkedMediaUrl(msg.chunkedContentReference);
         await this._persistMessage(chunkedConversationId, {
           from: msg.sourceUserId,
@@ -1321,8 +1281,8 @@ export class ObscuraClient {
       case 'TEXT':
       case 'IMAGE':
       default:
-        // Look up username from serverUserId for correct conversationId
-        const conversationId = this.friends.getUsernameFromServerId(msg.sourceUserId) || msg.sourceUserId;
+        // Look up username from deviceId for correct conversationId
+        const conversationId = this.friends.getUsernameFromDeviceId(msg.sourceUserId) || msg.sourceUserId;
         this._persistMessage(conversationId, {
           from: msg.sourceUserId,
           conversationId,
@@ -1377,7 +1337,7 @@ export class ObscuraClient {
     // Include ALL linked devices so recipient knows about all our devices
     const myDeviceAnnounce = {
       devices: this.devices.buildFullList(this.deviceInfo || {
-        serverUserId: this.userId,
+        deviceId: this.deviceId || this.userId,
         deviceUUID: this.deviceUUID,
         deviceName: this.username,
         signalIdentityKey: this.deviceInfo?.signalIdentityKey || new Uint8Array(33),
@@ -1404,7 +1364,7 @@ export class ObscuraClient {
     // Include ALL linked devices so requester knows about all our devices
     const myDeviceAnnounce = accepted ? {
       devices: this.devices.buildFullList(this.deviceInfo || {
-        serverUserId: this.userId,
+        deviceId: this.deviceId || this.userId,
         deviceUUID: this.deviceUUID,
         deviceName: this.username,
         signalIdentityKey: this.deviceInfo?.signalIdentityKey || new Uint8Array(33),
@@ -1606,13 +1566,13 @@ export class ObscuraClient {
 
     // Add new device to our list FIRST so it's included in the approval
     const newDeviceInfo = {
-      serverUserId: parsed.serverUserId,
-      deviceUUID: parsed.deviceUUID || parsed.serverUserId,
+      deviceId: parsed.deviceId,
+      deviceUUID: parsed.deviceUUID || parsed.deviceId,
       deviceName: parsed.deviceName || 'New Device',
       signalIdentityKey: parsed.signalIdentityKey,
     };
     await this.devices.add(newDeviceInfo);
-    console.log(`[approveLink] step 1: device added ${parsed.serverUserId.slice(-8)}`);
+    console.log(`[approveLink] step 1: device added ${parsed.deviceId.slice(-8)}`);
 
     // Build approval with full device list (now includes new device)
     const approval = buildLinkApproval({
@@ -1620,26 +1580,26 @@ export class ObscuraClient {
       recoveryPublicKey: this.recoveryPublicKey || new Uint8Array(32),
       challenge: parsed.challenge,
       ownDevices: this.devices.buildFullList(this.deviceInfo || {
-        serverUserId: this.userId,
+        deviceId: this.deviceId || this.userId,
         deviceUUID: this.deviceUUID,
         deviceName: this.username,
       }),
     });
 
     // Send approval to new device
-    await this.messenger.sendMessage(parsed.serverUserId, {
+    await this.messenger.sendMessage(parsed.deviceId, {
       type: 'DEVICE_LINK_APPROVAL',
       deviceLinkApproval: approval,
     });
 
-    console.log(`[approveLink] step 2: approval sent to ${parsed.serverUserId.slice(-8)}`);
+    console.log(`[approveLink] step 2: approval sent to ${parsed.deviceId.slice(-8)}`);
 
     // Notify OTHER own devices about the new device (excluding new device we just sent to)
-    const otherDevices = this.devices.getAll().filter(d => d.serverUserId !== parsed.serverUserId);
+    const otherDevices = this.devices.getAll().filter(d => d.deviceId !== parsed.deviceId);
     if (otherDevices.length > 0) {
       const deviceAnnounce = {
         devices: this.devices.buildFullList(this.deviceInfo || {
-          serverUserId: this.userId,
+          deviceId: this.deviceId || this.userId,
           deviceUUID: this.deviceUUID,
           deviceName: this.username,
         }),
@@ -1648,7 +1608,7 @@ export class ObscuraClient {
         signature: new Uint8Array(64),
       };
       for (const device of otherDevices) {
-        await this.messenger.sendMessage(device.serverUserId, {
+        await this.messenger.sendMessage(device.deviceId, {
           type: 'DEVICE_ANNOUNCE',
           deviceAnnounce,
         });
@@ -1666,12 +1626,12 @@ export class ObscuraClient {
     };
     const compressedData = await compress(syncData);
 
-    await this.messenger.sendMessage(parsed.serverUserId, {
+    await this.messenger.sendMessage(parsed.deviceId, {
       type: 'SYNC_BLOB',
       syncBlob: { compressedData },
     });
 
-    console.log(`[approveLink] step 4: sync blob sent to ${parsed.serverUserId.slice(-8)}`);
+    console.log(`[approveLink] step 4: sync blob sent to ${parsed.deviceId.slice(-8)}`);
 
     // Announce updated device list to all friends
     await this.announceDevices();
@@ -1811,7 +1771,7 @@ export class ObscuraClient {
    * 3. User receives it, deletes their session with us
    * 4. Next message exchange uses fresh PreKey handshake
    *
-   * @param {string} userId - The user's serverUserId (device account)
+   * @param {string} userId - The user's deviceId (device account)
    * @param {string} reason - Optional reason for reset (for logging)
    * @returns {Promise<void>}
    */
@@ -1849,7 +1809,7 @@ export class ObscuraClient {
       // Include all devices for each friend
       if (friend.devices && friend.devices.length > 0) {
         for (const device of friend.devices) {
-          allDeviceIds.push(device.serverUserId);
+          allDeviceIds.push(device.deviceId);
         }
       }
     }
@@ -1911,9 +1871,9 @@ export class ObscuraClient {
 
   /**
    * Push full history (friends, messages, ORM models, settings) to a specific device
-   * @param {string} serverUserId - The target device's serverUserId
+   * @param {string} targetDeviceId - The target device's deviceId
    */
-  async pushHistoryToDevice(serverUserId) {
+  async pushHistoryToDevice(targetDeviceId) {
     const syncData = {
       friends: this._serializeFriends(),
       messages: this.messageStore ? await this.messageStore.exportAll() : this.messages,
@@ -1922,14 +1882,14 @@ export class ObscuraClient {
     };
     const compressedData = await compress(syncData);
 
-    await this.messenger.sendMessage(serverUserId, {
+    await this.messenger.sendMessage(targetDeviceId, {
       type: 'SYNC_BLOB',
       syncBlob: { compressedData },
     });
 
     const ormModelCount = Object.keys(syncData.orm).length;
-    console.log(`[ObscuraClient] Pushed history to device: ${serverUserId} (${ormModelCount} ORM models)`);
-    await logger.logSyncBlobSend(serverUserId, ormModelCount, compressedData.byteLength || compressedData.length);
+    console.log(`[ObscuraClient] Pushed history to device: ${targetDeviceId} (${ormModelCount} ORM models)`);
+    await logger.logSyncBlobSend(targetDeviceId, ormModelCount, compressedData.byteLength || compressedData.length);
   }
 
   /**
@@ -2000,7 +1960,7 @@ export class ObscuraClient {
             // Create new identity (new device case)
             await self._deviceStore.storeIdentity({
               coreUsername: self.username,
-              deviceUsername: self.deviceUsername,
+              deviceUsername: self.deviceId,
               deviceUUID: self.deviceUUID,
               recoveryPublicKey: approval.recoveryPublicKey,
               p2pPublicKey: approval.p2pPublicKey,
@@ -2018,7 +1978,7 @@ export class ObscuraClient {
         if (selfTargets.length > 0) {
           const deviceAnnounce = {
             devices: self.devices.buildFullList(self.deviceInfo || {
-              serverUserId: self.userId,
+              deviceId: self.deviceId || self.userId,
               deviceUUID: self.deviceUUID,
               deviceName: self.username,
             }),
@@ -2043,7 +2003,7 @@ export class ObscuraClient {
   async announceDevices() {
     const announce = {
       devices: this.devices.buildFullList(this.deviceInfo || {
-        serverUserId: this.userId,
+        deviceId: this.deviceId || this.userId,
         deviceUUID: this.deviceUUID,
         deviceName: this.username,
       }),
@@ -2055,7 +2015,7 @@ export class ObscuraClient {
     // Send to all friends
     for (const friend of this.friends.getAll()) {
       for (const device of friend.devices) {
-        await this.messenger.sendMessage(device.serverUserId, {
+        await this.messenger.sendMessage(device.deviceId, {
           type: 'DEVICE_ANNOUNCE',
           deviceAnnounce: announce,
         });
@@ -2074,7 +2034,7 @@ export class ObscuraClient {
     const announce = {
       newDevices: [{
         deviceUUID: this.deviceUUID,
-        serverUserId: this.userId,
+        deviceId: this.deviceId || this.userId,
         deviceName: this.deviceInfo?.deviceName || 'Recovery Device',
         signalIdentityKey: this.deviceInfo?.signalIdentityKey,
       }],
@@ -2087,7 +2047,7 @@ export class ObscuraClient {
     const dataToSign = new TextEncoder().encode(JSON.stringify({
       devices: announce.newDevices.map(d => ({
         deviceUUID: d.deviceUUID,
-        serverUserId: d.serverUserId,
+        deviceId: d.deviceId,
       })),
       timestamp: announce.timestamp,
       isFullRecovery: announce.isFullRecovery,
@@ -2100,13 +2060,13 @@ export class ObscuraClient {
     for (const friend of this.friends.getAll()) {
       for (const device of friend.devices) {
         try {
-          await this.messenger.sendMessage(device.serverUserId, {
+          await this.messenger.sendMessage(device.deviceId, {
             type: 'DEVICE_RECOVERY_ANNOUNCE',
             deviceRecoveryAnnounce: announce,
           });
           friendCount++;
         } catch (e) {
-          console.warn(`[Recovery] Failed to announce to ${device.serverUserId?.slice(-8)}:`, e.message);
+          console.warn(`[Recovery] Failed to announce to ${device.deviceId?.slice(-8)}:`, e.message);
         }
       }
     }
@@ -2123,30 +2083,30 @@ export class ObscuraClient {
    * @param {string} deviceUUID - UUID of device to revoke
    */
   async revokeDevice(recoveryPhrase, deviceUUID) {
-    // Find the device being revoked (to get serverUserId for message deletion)
+    // Find the device being revoked (to get deviceId for message deletion)
     const revokedDevice = this.devices.getAll().find(d =>
-      d.deviceUUID === deviceUUID || d.serverUserId === deviceUUID
+      d.deviceUUID === deviceUUID || d.deviceId === deviceUUID
     );
-    const revokedServerUserId = revokedDevice?.serverUserId || deviceUUID;
+    const revokedDeviceId = revokedDevice?.deviceId || deviceUUID;
 
     // Remove from local device list
     this.devices.remove(deviceUUID);
 
     // Delete messages from revoked device locally
     if (this.messageStore) {
-      const deleted = await this.messageStore.deleteMessagesByAuthorDevice(revokedServerUserId);
+      const deleted = await this.messageStore.deleteMessagesByAuthorDevice(revokedDeviceId);
       if (deleted > 0) {
-        console.log(`[Revocation] Deleted ${deleted} local messages from revoked device ${revokedServerUserId.slice(-8)}`);
-        await logger.logDeviceRevoke(revokedServerUserId, deleted);
+        console.log(`[Revocation] Deleted ${deleted} local messages from revoked device ${revokedDeviceId.slice(-8)}`);
+        await logger.logDeviceRevoke(revokedDeviceId, deleted);
       }
       // Also remove from in-memory cache
-      this.messages = this.messages.filter(m => m.authorDeviceId !== revokedServerUserId);
+      this.messages = this.messages.filter(m => m.authorDeviceId !== revokedDeviceId);
     }
 
     // Build revocation announcement with updated device list
     const announce = {
       devices: this.devices.buildFullList(this.deviceInfo || {
-        serverUserId: this.userId,
+        deviceId: this.deviceId || this.userId,
         deviceUUID: this.deviceUUID,
         deviceName: this.username,
       }),
@@ -2161,7 +2121,7 @@ export class ObscuraClient {
     // Broadcast to all friends
     for (const friend of this.friends.getAll()) {
       for (const device of friend.devices) {
-        await this.messenger.sendMessage(device.serverUserId, {
+        await this.messenger.sendMessage(device.deviceId, {
           type: 'DEVICE_ANNOUNCE',
           deviceAnnounce: announce,
         });
@@ -2172,8 +2132,8 @@ export class ObscuraClient {
     // Include the revoked device so it can self-brick
     const selfTargets = this.devices.getSelfSyncTargets();
     const allOwnDeviceTargets = [...selfTargets];
-    if (revokedServerUserId && !allOwnDeviceTargets.includes(revokedServerUserId)) {
-      allOwnDeviceTargets.push(revokedServerUserId);
+    if (revokedDeviceId && !allOwnDeviceTargets.includes(revokedDeviceId)) {
+      allOwnDeviceTargets.push(revokedDeviceId);
     }
     for (const targetUserId of allOwnDeviceTargets) {
       await this.messenger.sendMessage(targetUserId, {
@@ -2201,7 +2161,7 @@ export class ObscuraClient {
        */
       async apply() {
         // Check if this is from one of our own devices (self-sync)
-        const isFromOwnDevice = self.devices.getAll().some(d => d.serverUserId === msg.sourceUserId);
+        const isFromOwnDevice = self.devices.getAll().some(d => d.deviceId === msg.sourceUserId);
 
         if (isFromOwnDevice) {
           // Self-sync: another of our devices sent this
@@ -2225,8 +2185,8 @@ export class ObscuraClient {
             }
 
             // Find devices that were revoked (in old list but not in new)
-            const oldDeviceIds = new Set([self.userId, ...self.devices.getAll().map(d => d.serverUserId)]);
-            const newDeviceIds = new Set(announce.devices.map(d => d.serverUserId));
+            const oldDeviceIds = new Set([self.userId, ...self.devices.getAll().map(d => d.deviceId)]);
+            const newDeviceIds = new Set(announce.devices.map(d => d.deviceId));
             const revokedDeviceIds = [...oldDeviceIds].filter(id => !newDeviceIds.has(id));
 
             // Delete messages from revoked devices
@@ -2251,7 +2211,7 @@ export class ObscuraClient {
         // Find which friend this is from
         let friend = null;
         for (const f of self.friends.getAll()) {
-          const isFromFriend = f.devices.some(d => d.serverUserId === msg.sourceUserId);
+          const isFromFriend = f.devices.some(d => d.deviceId === msg.sourceUserId);
           if (isFromFriend) {
             friend = f;
             break;
@@ -2261,8 +2221,8 @@ export class ObscuraClient {
         if (!friend) return;
 
         // Track old device IDs for comparison
-        const oldDeviceIds = new Set(friend.devices.map(d => d.serverUserId));
-        const newDeviceIds = new Set(announce.devices.map(d => d.serverUserId));
+        const oldDeviceIds = new Set(friend.devices.map(d => d.deviceId));
+        const newDeviceIds = new Set(announce.devices.map(d => d.deviceId));
 
         // For revocations, verify signature if we have their recovery public key
         if (announce.isRevocation) {
@@ -2299,10 +2259,10 @@ export class ObscuraClient {
         }
 
         // Find NEW devices (in announce but not in old list)
-        // These might have sent messages before we knew about them, stored under serverUserId
+        // These might have sent messages before we knew about them, stored under deviceId
         const addedDeviceIds = [...newDeviceIds].filter(id => !oldDeviceIds.has(id));
 
-        // Migrate any messages that were stored under the raw serverUserId to the friend's username
+        // Migrate any messages that were stored under the raw deviceId to the friend's username
         if (addedDeviceIds.length > 0 && self.messageStore) {
           let totalMigrated = 0;
           for (const deviceId of addedDeviceIds) {
@@ -2345,7 +2305,7 @@ export class ObscuraClient {
     let friend = null;
     for (const f of this.friends.getAll()) {
       // Check if sender is a known device
-      if (f.devices?.some(d => d.serverUserId === msg.sourceUserId)) {
+      if (f.devices?.some(d => d.deviceId === msg.sourceUserId)) {
         friend = f;
         break;
       }
@@ -2381,7 +2341,7 @@ export class ObscuraClient {
       const dataToSign = new TextEncoder().encode(JSON.stringify({
         devices: announce.newDevices.map(d => ({
           deviceUUID: d.deviceUUID,
-          serverUserId: d.serverUserId,
+          deviceId: d.deviceId,
         })),
         timestamp: announce.timestamp,
         isFullRecovery: announce.isFullRecovery,
@@ -2403,9 +2363,9 @@ export class ObscuraClient {
     // If full recovery, delete all sessions with old devices
     if (announce.isFullRecovery) {
       for (const oldDevice of friend.devices) {
-        const address = `${oldDevice.serverUserId}.1`;
+        const address = `${oldDevice.deviceId}.1`;
         await this.store.removeSession(address);
-        console.log(`[Recovery] Deleted session with old device ${oldDevice.serverUserId?.slice(-8)}`);
+        console.log(`[Recovery] Deleted session with old device ${oldDevice.deviceId?.slice(-8)}`);
       }
     }
 
@@ -2414,7 +2374,7 @@ export class ObscuraClient {
 
     // Store recovery public key if provided
     if (announce.recoveryPublicKey && this._friendStore) {
-      const userId = announce.newDevices[0]?.serverUserId || friend.username;
+      const userId = announce.newDevices[0]?.deviceId || friend.username;
       await this._friendStore.setFriendRecoveryKey(userId, announce.recoveryPublicKey).catch(e => {
         console.warn('Failed to update friend recovery key:', e.message);
       });

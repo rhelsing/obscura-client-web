@@ -134,7 +134,7 @@ function resolveAuthorName(storyOrDeviceId, client, profileMap = new Map()) {
     for (const [username, data] of client.friends.friends) {
       if (data.devices) {
         for (const device of data.devices) {
-          if (device.deviceUUID === authorDeviceId || device.serverUserId === authorDeviceId) {
+          if (device.deviceUUID === authorDeviceId || device.deviceId === authorDeviceId) {
             return username;
           }
         }

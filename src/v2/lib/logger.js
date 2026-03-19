@@ -278,17 +278,17 @@ class Logger {
 
   // === DEVICE EVENTS ===
 
-  async logDeviceAdd(serverUserId, deviceName, deviceUUID) {
+  async logDeviceAdd(deviceId, deviceName, deviceUUID) {
     return this.log(LogEventType.DEVICE_ADD, {
-      serverUserId,
+      deviceId,
       deviceName,
       deviceUUID,
     });
   }
 
-  async logDeviceRemove(serverUserId, deviceUUID) {
+  async logDeviceRemove(deviceId, deviceUUID) {
     return this.log(LogEventType.DEVICE_REMOVE, {
-      serverUserId,
+      deviceId,
       deviceUUID,
     });
   }
@@ -300,10 +300,10 @@ class Logger {
     });
   }
 
-  async logDeviceLinkApprove(deviceUUID, serverUserId) {
+  async logDeviceLinkApprove(deviceUUID, deviceId) {
     return this.log(LogEventType.DEVICE_LINK_APPROVE, {
       deviceUUID,
-      serverUserId,
+      deviceId,
     });
   }
 

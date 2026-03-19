@@ -14,7 +14,7 @@ async function testGetProfileDataWithAvatar() {
         ['alice', {
           username: 'alice',
           devices: [
-            { deviceUUID: 'device-abc-123', serverUserId: 'user-1' }
+            { deviceUUID: 'device-abc-123', deviceId: 'user-1' }
           ],
           status: 'accepted'
         }]
@@ -78,7 +78,7 @@ async function testGetProfileDataNoProfile() {
       friends: new Map([
         ['bob', {
           username: 'bob',
-          devices: [{ deviceUUID: 'device-xyz-789', serverUserId: 'user-2' }],
+          devices: [{ deviceUUID: 'device-xyz-789', deviceId: 'user-2' }],
           status: 'accepted'
         }]
       ])
@@ -142,8 +142,8 @@ async function testGetProfileDataMultipleDevices() {
         ['charlie', {
           username: 'charlie',
           devices: [
-            { deviceUUID: 'device-no-profile', serverUserId: 'user-3a' },
-            { deviceUUID: 'device-with-profile', serverUserId: 'user-3b' },
+            { deviceUUID: 'device-no-profile', deviceId: 'user-3a' },
+            { deviceUUID: 'device-with-profile', deviceId: 'user-3b' },
           ],
           status: 'accepted'
         }]

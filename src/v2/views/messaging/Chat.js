@@ -584,9 +584,9 @@ export async function mount(container, client, router, params) {
 
   // Incoming attachments - auto-download and display
   const handleAttachment = async (att) => {
-    // att.from is serverUserId (UUID), need to check if it matches this friend
+    // att.from is deviceId (UUID), need to check if it matches this friend
     const friend = client.friends.get(username);
-    const isFromFriend = friend?.devices?.some(d => d.serverUserId === att.from);
+    const isFromFriend = friend?.devices?.some(d => d.deviceId === att.from);
     if (isFromFriend) {
       // Convert contentReference to mediaUrl (includes fileName from proto)
       const mediaUrl = createMediaUrl(att.contentReference);
@@ -725,7 +725,7 @@ export async function mount(container, client, router, params) {
   };
 
   // Handle messages migrated from unknown device to this conversation
-  // This happens when a DEVICE_ANNOUNCE reveals messages that were stored under a serverUserId
+  // This happens when a DEVICE_ANNOUNCE reveals messages that were stored under a deviceId
   const handleMessagesMigrated = async (event) => {
     if (event.conversationId === username) {
       console.log(`[Chat] ${event.count} messages migrated to this conversation, reloading`);

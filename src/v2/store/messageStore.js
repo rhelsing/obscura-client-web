@@ -232,7 +232,7 @@ export function createMessageStore(userId) {
 
     /**
      * Delete all messages from a specific device (for revocation)
-     * @param {string} authorDeviceId - The device's serverUserId
+     * @param {string} authorDeviceId - The device's deviceId
      * @returns {Promise<number>} Number of messages deleted
      */
     async deleteMessagesByAuthorDevice(authorDeviceId) {
@@ -251,9 +251,9 @@ export function createMessageStore(userId) {
 
     /**
      * Migrate messages from one conversationId to another
-     * Used when DEVICE_ANNOUNCE reveals that messages stored under a raw serverUserId
+     * Used when DEVICE_ANNOUNCE reveals that messages stored under a raw deviceId
      * actually belong to a known friend's conversation.
-     * @param {string} fromConversationId - Old conversation ID (typically a serverUserId)
+     * @param {string} fromConversationId - Old conversation ID (typically a deviceId)
      * @param {string} toConversationId - New conversation ID (friend's username)
      * @returns {Promise<number>} Number of messages migrated
      */

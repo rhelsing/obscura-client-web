@@ -116,14 +116,14 @@ async function main() {
   // Verify bob sees bob2 in other devices
   const bobOtherDevices = bob.devices.getAll();
   if (bobOtherDevices.length === 0) throw new Error('bob should see bob2 in other devices');
-  const bobSeesBob2 = bobOtherDevices.some(d => d.serverUserId === bob2.userId);
+  const bobSeesBob2 = bobOtherDevices.some(d => d.deviceId === bob2.userId);
   if (!bobSeesBob2) throw new Error('bob does not see bob2 in other devices list');
   ok('bob sees bob2 in other devices');
 
   // Verify bob2 sees bob in other devices
   const bob2OtherDevices = bob2.devices.getAll();
   if (bob2OtherDevices.length === 0) throw new Error('bob2 should see bob in other devices');
-  const bob2SeesBob = bob2OtherDevices.some(d => d.serverUserId === bob.userId);
+  const bob2SeesBob = bob2OtherDevices.some(d => d.deviceId === bob.userId);
   if (!bob2SeesBob) throw new Error('bob2 does not see bob in other devices list');
   ok('bob2 sees bob in other devices (BIDIRECTIONAL VERIFIED)');
 

@@ -361,12 +361,12 @@ async function testDeviceManagement() {
     crypto.getRandomValues(testKey.subarray(1));
 
     const linkCode = generateLinkCode({
-      serverUserId: 'alice_abc123',
+      deviceId: 'alice_abc123',
       signalIdentityKey: testKey,
     });
 
     const parsed = parseLinkCode(linkCode);
-    if (parsed.serverUserId === 'alice_abc123' && parsed.signalIdentityKey.length === 33) {
+    if (parsed.deviceId === 'alice_abc123' && parsed.signalIdentityKey.length === 33) {
       pass('Link code generation/parsing', `code length: ${linkCode.length}`);
     } else {
       fail('Link code generation/parsing', 'Data mismatch');
@@ -382,7 +382,7 @@ async function testDeviceManagement() {
     crypto.getRandomValues(testKey.subarray(1));
 
     const linkCode = generateLinkCode({
-      serverUserId: 'alice_abc123',
+      deviceId: 'alice_abc123',
       signalIdentityKey: testKey,
     });
 
@@ -401,7 +401,7 @@ async function testDeviceManagement() {
     const identity = await generateP2PIdentity();
     const devices = [{
       deviceUUID: generateDeviceUUID(),
-      serverUserId: 'alice_abc123',
+      deviceId: 'alice_abc123',
       deviceName: 'Test Device',
       signalIdentityKey: identity.publicKey,
     }];

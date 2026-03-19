@@ -93,7 +93,7 @@ async function becomeFriends(sender, receiver) {
 
   // Receiver accepts
   const senderDevice = receiver.getFriend(sender.username).devices[0];
-  await receiver.sendFriendResponse(senderDevice.serverUserId, sender.username, true);
+  await receiver.sendFriendResponse(senderDevice.deviceId, sender.username, true);
   await delay(300);
 
   // Sender gets the response
@@ -113,7 +113,7 @@ function addDeviceToFriend(client, friendUsername, device) {
   const friend = client.getFriend(friendUsername);
   if (!friend) throw new Error(`Not friends with ${friendUsername}`);
   friend.devices.push({
-    serverUserId: device.userId,
+    deviceId: device.userId,
     deviceName: device.username,
     signalIdentityKey: device.deviceInfo?.signalIdentityKey || new Uint8Array(33),
   });
@@ -248,12 +248,12 @@ async function runTests() {
     await delay(300);
 
     // A1 registers A2 as own device (Level 2 compliant - NOT using __self__ hack)
-    a1.addOwnDevice({ serverUserId: a2.userId, deviceName: a2.username });
+    a1.addOwnDevice({ deviceId: a2.userId, deviceName: a2.username });
 
     // Temporarily remove B2 from Bob's device list to avoid queueing messages
     const bobFriend = a1.getFriend(b1.username);
-    const b2Device = bobFriend.devices.find(d => d.serverUserId === b2.userId);
-    bobFriend.devices = bobFriend.devices.filter(d => d.serverUserId !== b2.userId);
+    const b2Device = bobFriend.devices.find(d => d.deviceId === b2.userId);
+    bobFriend.devices = bobFriend.devices.filter(d => d.deviceId !== b2.userId);
 
     // Fresh B1 for receiving
     b1 = await freshClient(b1);
@@ -295,8 +295,8 @@ async function runTests() {
       recoveryPublicKey: new Uint8Array(32),
       challenge: challenge,
       ownDevices: [
-        { deviceUUID: 'a1-uuid', serverUserId: a1.userId, deviceName: 'A1', signalIdentityKey: new Uint8Array(33).fill(0x05) },
-        { deviceUUID: 'a2-uuid', serverUserId: a2.userId, deviceName: 'A2', signalIdentityKey: new Uint8Array(33).fill(0x05) },
+        { deviceUUID: 'a1-uuid', deviceId: a1.userId, deviceName: 'A1', signalIdentityKey: new Uint8Array(33).fill(0x05) },
+        { deviceUUID: 'a2-uuid', deviceId: a2.userId, deviceName: 'A2', signalIdentityKey: new Uint8Array(33).fill(0x05) },
       ],
     });
     pass('Built approval payload');
@@ -341,8 +341,8 @@ async function runTests() {
 
     const announce = await buildDeviceAnnounceProto({
       devices: [
-        { deviceUUID: 'a1-uuid', serverUserId: a1.userId, deviceName: 'A1', signalIdentityKey: new Uint8Array(33).fill(0x05) },
-        { deviceUUID: 'a2-uuid', serverUserId: a2.userId, deviceName: 'A2', signalIdentityKey: new Uint8Array(33).fill(0x05) },
+        { deviceUUID: 'a1-uuid', deviceId: a1.userId, deviceName: 'A1', signalIdentityKey: new Uint8Array(33).fill(0x05) },
+        { deviceUUID: 'a2-uuid', deviceId: a2.userId, deviceName: 'A2', signalIdentityKey: new Uint8Array(33).fill(0x05) },
       ],
       isRevocation: false,
       signingKey: p2pIdentity.privateKey,
@@ -446,10 +446,10 @@ async function runTests() {
     await delay(300);
 
     // A1 registers A2 as own device (Level 2 compliant - from device link)
-    a1.addOwnDevice({ serverUserId: a2.userId, deviceName: 'A2' });
+    a1.addOwnDevice({ deviceId: a2.userId, deviceName: 'A2' });
 
     // Also set up the reverse: A2 knows about A1
-    a2.addOwnDevice({ serverUserId: a1.userId, deviceName: 'A1' });
+    a2.addOwnDevice({ deviceId: a1.userId, deviceName: 'A1' });
 
     // A2 needs to know about Bob to verify sync (copy A1's friend data)
     const a1BobFriend = a1.getFriend(b1.username);

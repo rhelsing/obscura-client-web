@@ -243,6 +243,7 @@ export class TestClient {
     this.token = null;
     this.refreshToken = null;
     this.userId = null;
+    this.deviceId = null; // Server-assigned device UUID
     this.username = null;
     this.password = null;
     this.store = new InMemorySignalStore();
@@ -255,14 +256,14 @@ export class TestClient {
     this.clientProto = null;
 
     // Level 2: Friend tracking (no cheating!)
-    // Map of username -> { username, devices: [{ serverUserId, ... }], status: 'pending'|'accepted' }
+    // Map of username -> { username, devices: [{ deviceId, ... }], status: 'pending'|'accepted' }
     this.friends = new Map();
 
     // This device's info (for sharing in friend requests)
     this.deviceInfo = null;
 
     // Level 2: Own device tracking (for self-sync)
-    // Array of { serverUserId, deviceName, ... } - other devices belonging to same user
+    // Array of { deviceId, deviceName, ... } - other devices belonging to same user
     this.ownDevices = [];
 
     // Message history (for sync verification)
@@ -285,9 +286,9 @@ export class TestClient {
   }
 
   /**
-   * Get all device userIds for a friend (for fan-out)
+   * Get all deviceIds for a friend (for fan-out)
    * @param {string} friendUsername - Friend's username
-   * @returns {string[]} Array of serverUserIds to send to
+   * @returns {string[]} Array of deviceIds to send to
    */
   getFanOutTargets(friendUsername) {
     const friend = this.friends.get(friendUsername);
@@ -300,7 +301,7 @@ export class TestClient {
     if (!friend.devices || friend.devices.length === 0) {
       throw new Error(`No devices known for ${friendUsername}`);
     }
-    return friend.devices.map(d => d.serverUserId);
+    return friend.devices.map(d => d.deviceId);
   }
 
   /**
@@ -335,18 +336,18 @@ export class TestClient {
 
   /**
    * Add an own device (from DEVICE_LINK_APPROVAL or manual setup)
-   * @param {object} deviceInfo - { serverUserId, deviceName, ... }
+   * @param {object} deviceInfo - { deviceId, deviceName, ... }
    */
   addOwnDevice(deviceInfo) {
     // Don't add self
-    if (deviceInfo.serverUserId === this.userId) {
+    if (deviceInfo.deviceId === this.deviceId) {
       return;
     }
     // Don't add duplicates
-    const existing = this.ownDevices.find(d => d.serverUserId === deviceInfo.serverUserId);
+    const existing = this.ownDevices.find(d => d.deviceId === deviceInfo.deviceId);
     if (!existing) {
       this.ownDevices.push(deviceInfo);
-      console.log(`  [OwnDevices] Added ${deviceInfo.deviceName || deviceInfo.serverUserId}`);
+      console.log(`  [OwnDevices] Added ${deviceInfo.deviceName || deviceInfo.deviceId}`);
     }
   }
 
@@ -355,16 +356,16 @@ export class TestClient {
    * @param {Array} devices - Array of device info objects
    */
   setOwnDevices(devices) {
-    this.ownDevices = devices.filter(d => d.serverUserId !== this.userId);
+    this.ownDevices = devices.filter(d => d.deviceId !== this.deviceId);
     console.log(`  [OwnDevices] Set ${this.ownDevices.length} other device(s)`);
   }
 
   /**
-   * Get serverUserIds of own devices for self-sync fan-out
-   * @returns {string[]} Array of serverUserIds (excluding self)
+   * Get deviceIds of own devices for self-sync fan-out
+   * @returns {string[]} Array of deviceIds (excluding self)
    */
   getOwnFanOutTargets() {
-    return this.ownDevices.map(d => d.serverUserId);
+    return this.ownDevices.map(d => d.deviceId);
   }
 
   /**
@@ -488,50 +489,61 @@ export class TestClient {
     this.username = username;
     this.password = password;
 
-    const keys = await this.generateKeys();
-
-    const result = await this.request('/v1/users', {
+    // Step 1: Register user account (no keys)
+    const userResult = await this.request('/v1/users', {
       method: 'POST',
       auth: false,
+      body: JSON.stringify({ username, password }),
+    });
+
+    this.token = userResult.token; // User-scoped JWT (needed for device provisioning)
+    this.userId = this.parseUserId(userResult.token);
+
+    // Step 2: Generate Signal keys
+    const keys = await this.generateKeys();
+
+    // Step 3: Provision device with Signal keys
+    const deviceResult = await this.request('/v1/devices', {
+      method: 'POST',
       body: JSON.stringify({
-        username,
-        password,
+        name: 'Test Device',
         ...keys,
       }),
     });
 
-    this.token = result.token;
-    this.refreshToken = result.refreshToken;
-    this.userId = this.parseUserId(result.token);
+    this.token = deviceResult.token; // Device-scoped JWT
+    this.refreshToken = deviceResult.refreshToken;
+    this.deviceId = this.parseDeviceId(deviceResult.token) || deviceResult.deviceId;
 
     // Store this device's info for Level 2 friend exchange
     const identityKeyPair = await this.store.getIdentityKeyPair();
     this.deviceInfo = {
-      serverUserId: this.userId,
+      deviceId: this.deviceId,
       username: this.username,
       signalIdentityKey: new Uint8Array(identityKeyPair.pubKey),
     };
 
-    console.log(`Registered user: ${username} (${this.userId})`);
+    console.log(`Registered user: ${username} (userId=${this.userId}, deviceId=${this.deviceId})`);
     await sleep(500); // Avoid rate limiting
     return this;
   }
 
   async login() {
+    const body = { username: this.username, password: this.password };
+    if (this.deviceId) body.deviceId = this.deviceId;
+
     const result = await this.request('/v1/sessions', {
       method: 'POST',
       auth: false,
-      body: JSON.stringify({
-        username: this.username,
-        password: this.password,
-      }),
+      body: JSON.stringify(body),
     });
 
     this.token = result.token;
     this.refreshToken = result.refreshToken;
     this.userId = this.parseUserId(result.token);
+    this.deviceId = this.parseDeviceId(result.token) || this.deviceId;
 
-    console.log(`Logged in: ${this.username}`);
+    console.log(`Logged in: ${this.username} (deviceId=${this.deviceId})`);
     await sleep(500); // Avoid rate limiting
     return this;
   }
@@ -558,13 +570,23 @@ export class TestClient {
     return decoded.sub || decoded.user_id || decoded.userId || decoded.id;
   }
 
+  parseDeviceId(token) {
+    const payload = token.split('.')[1];
+    const decoded = JSON.parse(atob(payload));
+    return decoded.device_id || decoded.deviceId || null;
+  }
+
   // === WebSocket Methods ===
 
   async connectWebSocket() {
     await this.loadProto();
 
+    // Fetch single-use ticket for WebSocket auth
+    const ticketResult = await this.request('/v1/gateway/ticket', { method: 'POST' });
+    const ticket = ticketResult.ticket;
+
     return new Promise((resolve, reject) => {
-      const url = `${this.wsUrl}/v1/gateway?token=${encodeURIComponent(this.token)}`;
+      const url = `${this.wsUrl}/v1/gateway?ticket=${encodeURIComponent(ticket)}`;
       this.ws = new WebSocket(url);
 
       this.ws.on('open', () => {
@@ -611,10 +633,11 @@ export class TestClient {
         // Decode client message
         const clientMsg = this.decodeClientMessage(decrypted);
 
-        // Add to queue
+        // Add to queue — senderId is now a deviceId
         this.messageQueue.push({
           envelopeId,
-          sourceUserId: senderId,
+          sourceDeviceId: senderId,
+          sourceUserId: senderId, // backwards compat alias
           ...clientMsg,
         });
 
@@ -679,24 +702,50 @@ export class TestClient {
 
   // === Encryption/Decryption ===
 
-  async fetchPreKeyBundle(userId) {
-    const bundle = await this.request(`/v1/keys/${userId}`);
-
-    return {
-      identityKey: toArrayBuffer(bundle.identityKey),
-      registrationId: bundle.registrationId,
+  /**
+   * Fetch PreKey bundles for all devices of a user
+   * @param {string} userId - User UUID
+   * @returns {Array} Array of { deviceId, identityKey, registrationId, signedPreKey, preKey }
+   */
+  async fetchPreKeyBundles(userId) {
+    const bundles = await this.request(`/v1/users/${userId}`);
+    return bundles.map(b => ({
+      deviceId: b.deviceId,
+      identityKey: toArrayBuffer(b.identityKey),
+      registrationId: b.registrationId,
       signedPreKey: {
-        keyId: bundle.signedPreKey.keyId,
-        publicKey: toArrayBuffer(bundle.signedPreKey.publicKey),
-        signature: toArrayBuffer(bundle.signedPreKey.signature),
+        keyId: b.signedPreKey.keyId,
+        publicKey: toArrayBuffer(b.signedPreKey.publicKey),
+        signature: toArrayBuffer(b.signedPreKey.signature),
       },
-      preKey: bundle.preKey ? {
-        keyId: bundle.preKey.keyId,
-        publicKey: toArrayBuffer(bundle.preKey.publicKey),
+      preKey: b.oneTimePreKey ? {
+        keyId: b.oneTimePreKey.keyId,
+        publicKey: toArrayBuffer(b.oneTimePreKey.publicKey),
       } : undefined,
-    };
+    }));
   }
 
+  /**
+   * Fetch PreKey bundle for a specific device
+   * @param {string} userId - User UUID
+   * @param {string} deviceId - Device UUID
+   * @returns {object} Signal-compatible bundle
+   */
+  async fetchPreKeyBundleForDevice(userId, deviceId) {
+    const bundles = await this.fetchPreKeyBundles(userId);
+    const bundle = bundles.find(b => b.deviceId === deviceId);
+    if (!bundle) {
+      throw new Error(`No bundle found for device ${deviceId} of user ${userId}`);
+    }
+    return bundle;
+  }
+
+  /**
+   * Encrypt plaintext for a target user.
+   * Signal sessions are keyed by userId (server puts userId in Envelope.sender_id).
+   * @param {string} targetUserId - Target user UUID (Signal address)
+   * @param {*} plaintext - Data to encrypt
+   */
   async encrypt(targetUserId, plaintext) {
     const address = new SignalProtocolAddress(targetUserId, 1);
 
@@ -704,8 +753,12 @@ export class TestClient {
     const existingSession = await this.store.loadSession(address.toString());
 
     if (!existingSession) {
-      // Need to establish session with X3DH
-      const bundle = await this.fetchPreKeyBundle(targetUserId);
+      // Fetch bundles for user, use first device's bundle to build session
+      const bundles = await this.fetchPreKeyBundles(targetUserId);
+      if (!bundles || bundles.length === 0) {
+        throw new Error(`No prekey bundles found for user ${targetUserId}`);
+      }
+      const bundle = bundles[0]; // Use first device's bundle
       const sessionBuilder = new SessionBuilder(this.store, address);
       await sessionBuilder.processPreKey(bundle);
     }
@@ -751,8 +804,8 @@ export class TestClient {
     };
   }
 
-  async decryptMessage(sourceUserId, content, messageType) {
-    const address = new SignalProtocolAddress(sourceUserId, 1);
+  async decryptMessage(senderUserId, content, messageType) {
+    const address = new SignalProtocolAddress(senderUserId, 1);
     const cipher = new SessionCipher(this.store, address);
 
     let contentBuffer;
@@ -818,7 +871,7 @@ export class TestClient {
         challengeResponse: opts.deviceLinkApproval.challengeResponse,
         ownDevices: (opts.deviceLinkApproval.ownDevices || []).map(d => this.DeviceInfo.create({
           deviceUuid: d.deviceUUID || d.deviceUuid,
-          serverUserId: d.serverUserId,
+          deviceId: d.deviceId,
           deviceName: d.deviceName,
           signalIdentityKey: d.signalIdentityKey,
         })),
@@ -833,7 +886,7 @@ export class TestClient {
       msgData.deviceAnnounce = this.DeviceAnnounce.create({
         devices: (opts.deviceAnnounce.devices || []).map(d => this.DeviceInfo.create({
           deviceUuid: d.deviceUUID || d.deviceUuid,
-          serverUserId: d.serverUserId,
+          deviceId: d.deviceId,
           deviceName: d.deviceName,
           signalIdentityKey: d.signalIdentityKey,
         })),
@@ -911,7 +964,7 @@ export class TestClient {
         challengeResponse: msg.deviceLinkApproval.challengeResponse,
         ownDevices: (msg.deviceLinkApproval.ownDevices || []).map(d => ({
           deviceUUID: d.deviceUuid,
-          serverUserId: d.serverUserId,
+          deviceId: d.deviceId,
           deviceName: d.deviceName,
           signalIdentityKey: d.signalIdentityKey,
         })),
@@ -925,7 +978,7 @@ export class TestClient {
       result.deviceAnnounce = {
         devices: (msg.deviceAnnounce.devices || []).map(d => ({
           deviceUUID: d.deviceUuid,
-          serverUserId: d.serverUserId,
+          deviceId: d.deviceId,
           deviceName: d.deviceName,
           signalIdentityKey: d.signalIdentityKey,
         })),
@@ -986,17 +1039,23 @@ export class TestClient {
 
   /**
    * Encrypt and queue a message for batch sending (no HTTP call).
+   * @param {string} targetDeviceId - Target device UUID (for server routing)
+   * @param {object} opts - Message options
+   * @param {string} targetUserId - Target user UUID (for Signal encryption)
    */
-  async queueMessage(targetUserId, opts) {
+  async queueMessage(targetDeviceId, opts, targetUserId) {
     await this.loadProto();
 
+    // Signal encryption uses userId (server puts userId in Envelope.sender_id)
+    const encryptUserId = targetUserId || targetDeviceId; // fallback for self-sync
     const clientMsgBytes = this.encodeClientMessage(opts);
-    const encrypted = await this.encrypt(targetUserId, clientMsgBytes);
+    const encrypted = await this.encrypt(encryptUserId, clientMsgBytes);
     const encryptedPayload = this.encodeOutgoingMessage(encrypted.body, encrypted.protoType);
 
+    // Server routing uses deviceId
     this._sendQueue.push({
       submissionId: uuidToBytes(randomUUID()),
-      recipientId: uuidToBytes(targetUserId),
+      deviceId: uuidToBytes(targetDeviceId),
       message: encryptedPayload,
     });
   }
@@ -1033,43 +1092,49 @@ export class TestClient {
 
   /**
    * Send a single message (convenience — queues + flushes immediately).
+   * @param {string} targetDeviceId - Target device UUID (server routing)
+   * @param {object} opts - Message options
+   * @param {string} targetUserId - Target user UUID (Signal encryption)
    */
-  async sendMessage(targetUserId, opts) {
-    await this.queueMessage(targetUserId, opts);
+  async sendMessage(targetDeviceId, opts, targetUserId) {
+    await this.queueMessage(targetDeviceId, opts, targetUserId);
     await this.flushMessages();
 
     const typeName = typeof opts.type === 'string' ? opts.type : MessageTypeName[opts.type];
-    console.log(`Sent ${typeName} to ${targetUserId}`);
+    console.log(`Sent ${typeName} to device ${targetDeviceId}`);
   }
 
   /**
    * Send FRIEND_REQUEST with our device info (Level 2 compliant)
-   * Per protocol-spec: Includes sender's device list so recipient knows where to respond
+   * @param {string} targetDeviceId - Target device UUID
+   * @param {string} targetUsername - Target username
+   * @param {string} targetUserId - Target user UUID (for fetching bundles)
    */
-  async sendFriendRequest(targetUserId, targetUsername) {
+  async sendFriendRequest(targetDeviceId, targetUsername, targetUserId) {
     // Include our device info so recipient knows our devices
     const myDeviceAnnounce = {
       devices: [{
-        deviceUUID: this.userId, // Using userId as device identifier for now
-        serverUserId: this.userId,
+        deviceUUID: this.deviceId,
+        deviceId: this.deviceId,
         deviceName: this.username,
         signalIdentityKey: this.deviceInfo.signalIdentityKey,
       }],
       timestamp: Date.now(),
       isRevocation: false,
-      signature: new Uint8Array(64), // Placeholder - would be signed in real impl
+      signature: new Uint8Array(64),
     };
 
-    await this.sendMessage(targetUserId, {
+    await this.sendMessage(targetDeviceId, {
       type: 'FRIEND_REQUEST',
       username: this.username,
       deviceAnnounce: myDeviceAnnounce,
-    });
+    }, targetUserId);
 
-    // Mark as pending friend
+    // Mark as pending friend (store userId for later encryption)
     this.friends.set(targetUsername, {
       username: targetUsername,
-      devices: [], // Don't know their devices yet
+      userId: targetUserId,
+      devices: [],
       status: 'pending_outgoing',
       addedAt: Date.now(),
     });
@@ -1079,13 +1144,16 @@ export class TestClient {
 
   /**
    * Send FRIEND_RESPONSE with our device info (Level 2 compliant)
-   * Per protocol-spec: If accepted, includes our device list
+   * @param {string} targetDeviceId - Target device UUID
+   * @param {string} targetUsername - Target username
+   * @param {boolean} accepted - Whether to accept
+   * @param {string} [targetUserId] - Target user UUID (for fetching bundles)
    */
-  async sendFriendResponse(targetUserId, targetUsername, accepted) {
+  async sendFriendResponse(targetDeviceId, targetUsername, accepted, targetUserId) {
     const myDeviceAnnounce = accepted ? {
       devices: [{
-        deviceUUID: this.userId,
-        serverUserId: this.userId,
+        deviceUUID: this.deviceId,
+        deviceId: this.deviceId,
         deviceName: this.username,
         signalIdentityKey: this.deviceInfo.signalIdentityKey,
       }],
@@ -1094,15 +1162,14 @@ export class TestClient {
       signature: new Uint8Array(64),
     } : null;
 
-    await this.sendMessage(targetUserId, {
+    await this.sendMessage(targetDeviceId, {
       type: 'FRIEND_RESPONSE',
       username: this.username,
       accepted,
       deviceAnnounce: myDeviceAnnounce,
-    });
+    }, targetUserId);
 
     if (accepted) {
-      // Get their devices from the pending request we stored
       const pending = this.friends.get(targetUsername);
       if (pending && pending.devices) {
         this.storeFriend(targetUsername, pending.devices, 'accepted');
@@ -1119,12 +1186,15 @@ export class TestClient {
   processFriendRequest(msg) {
     const senderUsername = msg.username;
     const senderDevices = msg.deviceAnnounce?.devices || [];
+    const senderUserId = msg.sourceUserId; // Envelope.sender_id = userId
 
+    // Store as pending incoming
     // Store as pending incoming
     this.friends.set(senderUsername, {
       username: senderUsername,
+      userId: senderUserId,
       devices: senderDevices.map(d => ({
-        serverUserId: d.serverUserId,
+        deviceId: d.deviceId,
         deviceName: d.deviceName,
         signalIdentityKey: d.signalIdentityKey,
       })),
@@ -1132,12 +1202,13 @@ export class TestClient {
       addedAt: Date.now(),
     });
 
-    console.log(`  [Friends] Received FRIEND_REQUEST from ${senderUsername} (${senderDevices.length} device(s))`);
+    console.log(`  [Friends] Received FRIEND_REQUEST from ${senderUsername} (${senderDevices.length} device(s), userId=${senderUserId})`);
 
     return {
       username: senderUsername,
+      userId: senderUserId,
       devices: senderDevices,
-      sourceUserId: msg.sourceUserId,
+      sourceDeviceId: senderDevices[0]?.deviceId,
     };
   }
 
@@ -1149,14 +1220,22 @@ export class TestClient {
     const senderUsername = msg.username;
     const accepted = msg.accepted;
     const senderDevices = msg.deviceAnnounce?.devices || [];
+    const senderUserId = msg.sourceUserId;
 
     if (accepted) {
-      this.storeFriend(senderUsername, senderDevices.map(d => ({
-        serverUserId: d.serverUserId,
+      const devices = senderDevices.map(d => ({
+        deviceId: d.deviceId,
         deviceName: d.deviceName,
         signalIdentityKey: d.signalIdentityKey,
-      })), 'accepted');
-      console.log(`  [Friends] ${senderUsername} ACCEPTED friend request (${senderDevices.length} device(s))`);
+      }));
+      this.friends.set(senderUsername, {
+        username: senderUsername,
+        userId: senderUserId,
+        devices,
+        status: 'accepted',
+        addedAt: Date.now(),
+      });
+      console.log(`  [Friends] ${senderUsername} ACCEPTED friend request (${senderDevices.length} device(s), userId=${senderUserId})`);
     } else {
       this.friends.delete(senderUsername);
       console.log(`  [Friends] ${senderUsername} REJECTED friend request`);
@@ -1168,22 +1247,28 @@ export class TestClient {
   /**
    * Send message to a friend using their device list (Level 2 - no cheating!)
    * Fans out to all their devices AND syncs to own devices
+   * @param {string} friendUsername - Friend's username
+   * @param {object} opts - Message options
+   * @param {string} [friendUserId] - Friend's user UUID (override, otherwise read from friend record)
    */
-  async sendToFriend(friendUsername, opts) {
+  async sendToFriend(friendUsername, opts, friendUserId) {
+    const friend = this.friends.get(friendUsername);
+    const userId = friendUserId || friend?.userId;
     const targets = this.getFanOutTargets(friendUsername);
     const messageId = this.generateMessageId();
     const timestamp = Date.now();
 
-    // Queue to friend's devices
-    for (const targetUserId of targets) {
-      await this.queueMessage(targetUserId, opts);
+    // Queue to friend's devices — deviceId for routing, userId for encryption
+    for (const targetDeviceId of targets) {
+      await this.queueMessage(targetDeviceId, opts, userId);
     }
 
     // Queue self-sync to own devices (Level 2 compliant)
+    // Own devices belong to same user, so encrypt with own userId
     const ownTargets = this.getOwnFanOutTargets();
     if (ownTargets.length > 0) {
-      for (const targetUserId of ownTargets) {
-        await this.queueMessage(targetUserId, {
+      for (const targetDeviceId of ownTargets) {
+        await this.queueMessage(targetDeviceId, {
           type: 'SENT_SYNC',
           sentSync: {
             conversationId: friendUsername,
@@ -1191,7 +1276,7 @@ export class TestClient {
             timestamp,
             content: opts.text || opts.content,
           },
-        });
+        }, this.userId);
       }
     }
 
@@ -1250,7 +1335,7 @@ export class TestClient {
   // === PreKey Replenishment ===
 
   async uploadKeys({ signedPreKey, oneTimePreKeys }) {
-    return this.request('/v1/keys', {
+    return this.request('/v1/devices/keys', {
       method: 'POST',
       body: JSON.stringify({
         signedPreKey,

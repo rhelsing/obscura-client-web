@@ -10,7 +10,7 @@ export class DeviceManager {
   constructor(currentUserId, store = null) {
     this.currentUserId = currentUserId;
     this._store = store;  // deviceStore instance for IndexedDB persistence
-    // Array of { serverUserId, deviceUUID, deviceName, signalIdentityKey }
+    // Array of { deviceId, deviceUUID, deviceName, signalIdentityKey }
     this.ownDevices = [];
   }
 
@@ -23,9 +23,9 @@ export class DeviceManager {
     try {
       const devices = await this._store.getOwnDevices();
       this.ownDevices = devices
-        .filter(d => d.serverUserId !== this.currentUserId)
+        .filter(d => d.deviceId !== this.currentUserId)
         .map(d => ({
-          serverUserId: d.serverUserId,
+          deviceId: d.deviceId,
           deviceUUID: d.deviceUUID,
           deviceName: d.deviceName || 'Unknown Device',
           signalIdentityKey: d.signalIdentityKey,
@@ -59,21 +59,22 @@ export class DeviceManager {
   /**
    * Add an own device (from DEVICE_LINK_APPROVAL)
    * Handles both proto field name (deviceUuid) and JS convention (deviceUUID)
-   * @param {object} device - { serverUserId, deviceUUID?, deviceName, signalIdentityKey? }
+   * @param {object} device - { deviceId, deviceUUID?, deviceName, signalIdentityKey? }
    */
   async add(device) {
+    const did = device.deviceId;
     // Don't add self
-    if (device.serverUserId === this.currentUserId) {
+    if (did === this.currentUserId) {
       return;
     }
 
     // Don't add duplicates
-    const exists = this.ownDevices.some(d => d.serverUserId === device.serverUserId);
+    const exists = this.ownDevices.some(d => d.deviceId === did);
     if (!exists) {
-      const deviceUUID = device.deviceUUID || device.deviceUuid || device.serverUserId;
+      const deviceUUID = device.deviceUUID || device.deviceUuid || did;
       const deviceName = device.deviceName || 'Unknown Device';
       this.ownDevices.push({
-        serverUserId: device.serverUserId,
+        deviceId: did,
         // Handle both proto (deviceUuid) and JS (deviceUUID) naming
         deviceUUID,
         deviceName,
@@ -81,7 +82,7 @@ export class DeviceManager {
       });
       // Persist to IndexedDB - await to ensure it completes before navigation
       await this._persistDevices();
-      logger.logDeviceAdd(device.serverUserId, deviceName, deviceUUID);
+      logger.logDeviceAdd(did, deviceName, deviceUUID);
     }
   }
 
@@ -92,14 +93,17 @@ export class DeviceManager {
    */
   setAll(devices) {
     this.ownDevices = devices
-      .filter(d => d.serverUserId !== this.currentUserId)
-      .map(d => ({
-        serverUserId: d.serverUserId,
-        // Handle both proto (deviceUuid) and JS (deviceUUID) naming
-        deviceUUID: d.deviceUUID || d.deviceUuid || d.serverUserId,
-        deviceName: d.deviceName || 'Unknown Device',
-        signalIdentityKey: d.signalIdentityKey,
-      }));
+      .filter(d => d.deviceId !== this.currentUserId)
+      .map(d => {
+        const did = d.deviceId;
+        return {
+          deviceId: did,
+          // Handle both proto (deviceUuid) and JS (deviceUUID) naming
+          deviceUUID: d.deviceUUID || d.deviceUuid || did,
+          deviceName: d.deviceName || 'Unknown Device',
+          signalIdentityKey: d.signalIdentityKey,
+        };
+      });
     // Persist to IndexedDB
     this._persistDevices();
     logger.logDeviceAnnounce(this.ownDevices.length, false, null);
@@ -114,38 +118,38 @@ export class DeviceManager {
   }
 
   /**
-   * Get serverUserIds of own devices for self-sync fan-out
-   * @returns {string[]} Array of serverUserIds (excluding current device)
+   * Get deviceIds of own devices for self-sync fan-out
+   * @returns {string[]} Array of deviceIds (excluding current device)
    */
   getSelfSyncTargets() {
-    return this.ownDevices.map(d => d.serverUserId);
+    return this.ownDevices.map(d => d.deviceId);
   }
 
   /**
    * Remove a device (revocation)
-   * @param {string} idOrUUID - serverUserId or deviceUUID
+   * @param {string} idOrUUID - deviceId or deviceUUID
    */
   async remove(idOrUUID) {
     const removed = this.ownDevices.find(d =>
-      d.serverUserId === idOrUUID || d.deviceUUID === idOrUUID
+      d.deviceId === idOrUUID || d.deviceUUID === idOrUUID
     );
     this.ownDevices = this.ownDevices.filter(d =>
-      d.serverUserId !== idOrUUID && d.deviceUUID !== idOrUUID
+      d.deviceId !== idOrUUID && d.deviceUUID !== idOrUUID
     );
     // Persist to IndexedDB - await to ensure it completes before navigation
     await this._persistDevices();
     if (removed) {
-      logger.logDeviceRemove(removed.serverUserId, removed.deviceUUID);
+      logger.logDeviceRemove(removed.deviceId, removed.deviceUUID);
     }
   }
 
   /**
-   * Get device by serverUserId
-   * @param {string} serverUserId
+   * Get device by deviceId
+   * @param {string} deviceId
    * @returns {object|undefined}
    */
-  get(serverUserId) {
-    return this.ownDevices.find(d => d.serverUserId === serverUserId);
+  get(deviceId) {
+    return this.ownDevices.find(d => d.deviceId === deviceId);
   }
 
   /**
@@ -164,7 +168,7 @@ export class DeviceManager {
   buildFullList(currentDeviceInfo) {
     return [
       {
-        serverUserId: currentDeviceInfo.serverUserId,
+        deviceId: currentDeviceInfo.deviceId,
         deviceUUID: currentDeviceInfo.deviceUUID,
         deviceName: currentDeviceInfo.deviceName || 'Current Device',
         signalIdentityKey: currentDeviceInfo.signalIdentityKey,
@@ -177,15 +181,15 @@ export class DeviceManager {
 /**
  * Parse link code from another device
  * @param {string} linkCode - Base64 encoded link code
- * @returns {object} { userId, serverUserId, deviceUUID, deviceUsername, signalIdentityKey, challenge, signature, expiresAt }
+ * @returns {object} { userId, deviceId, deviceUUID, deviceUsername, signalIdentityKey, challenge, signature, expiresAt }
  */
 export function parseLinkCode(linkCode) {
   try {
     const data = JSON.parse(atob(linkCode));
     return {
       userId: data.i,             // UUID for server API calls
-      serverUserId: data.i,       // Alias for userId
-      deviceUUID: data.d || data.i, // Full device UUID (fallback to serverUserId for backwards compat)
+      deviceId: data.i,           // Device UUID
+      deviceUUID: data.d || data.i, // Full device UUID (fallback to deviceId for backwards compat)
       deviceUsername: data.u,     // Username for display
       deviceName: data.u,         // Alias for display
       signalIdentityKey: base64ToUint8Array(data.k),
@@ -217,7 +221,7 @@ export function buildLinkApproval(opts) {
     challengeResponse,
     ownDevices: ownDevices.map(d => ({
       deviceUuid: d.deviceUUID,
-      serverUserId: d.serverUserId,
+      deviceId: d.deviceId,
       deviceName: d.deviceName,
       signalIdentityKey: d.signalIdentityKey,
     })),

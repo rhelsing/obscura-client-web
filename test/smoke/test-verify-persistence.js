@@ -102,7 +102,7 @@ try {
 
     // Step 1: Add a friend WITHOUT isVerified (simulates normal friend acceptance)
     await addFriend(db, 'user-123', 'bob', 'accepted', {
-      devices: [{ serverUserId: 'user-123', deviceUUID: 'dev-1', signalIdentityKey: 'key1' }],
+      devices: [{ deviceId: 'user-123', deviceUUID: 'dev-1', signalIdentityKey: 'key1' }],
     });
 
     const before = await getFriend(db, 'user-123');
@@ -265,7 +265,7 @@ try {
         let storeStatus = f.status;
         if (storeStatus === 'pending_incoming') storeStatus = 'pending_received';
         if (storeStatus === 'pending_outgoing') storeStatus = 'pending_sent';
-        const userId = f.devices[0]?.serverUserId || username;
+        const userId = f.devices[0]?.deviceId || username;
         await this._store.addFriend(userId, f.username, storeStatus, {
           devices: f.devices,
           recoveryPublicKey: f.recoveryPublicKey,
@@ -284,7 +284,7 @@ try {
     // 1. Create manager, add a friend (like accepting a friend request)
     const manager1 = new FriendManager(store);
     manager1.store('alice', [
-      { serverUserId: 'alice-srv-1', deviceUUID: 'alice-dev-1', signalIdentityKey: 'key-a1' }
+      { deviceId: 'alice-srv-1', deviceUUID: 'alice-dev-1', signalIdentityKey: 'key-a1' }
     ], 'accepted');
 
     // Wait for persistence
@@ -315,8 +315,8 @@ try {
 
     // 4. Simulate re-storing friend (like receiving a device update) - should NOT wipe verified
     manager2.store('alice', [
-      { serverUserId: 'alice-srv-1', deviceUUID: 'alice-dev-1', signalIdentityKey: 'key-a1' },
-      { serverUserId: 'alice-srv-2', deviceUUID: 'alice-dev-2', signalIdentityKey: 'key-a2' },
+      { deviceId: 'alice-srv-1', deviceUUID: 'alice-dev-1', signalIdentityKey: 'key-a1' },
+      { deviceId: 'alice-srv-2', deviceUUID: 'alice-dev-2', signalIdentityKey: 'key-a2' },
     ], 'accepted');
 
     await new Promise(r => setTimeout(r, 100));

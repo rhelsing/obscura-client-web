@@ -12,19 +12,19 @@ import { compress, decompress } from '../crypto/compress.js';
  * Per identity.md: New device displays this for existing device to scan
  *
  * @param {object} params
- * @param {string} params.serverUserId - Device's server username (e.g., "alice_def456")
+ * @param {string} params.deviceId - Device's server username (e.g., "alice_def456")
  * @param {string} params.deviceUUID - Full device UUID
  * @param {Uint8Array} params.signalIdentityKey - Device's Signal identity public key
  * @returns {string} Base58-encoded link code
  */
-export function generateLinkCode({ serverUserId, deviceUUID, signalIdentityKey }) {
+export function generateLinkCode({ deviceId, deviceUUID, signalIdentityKey }) {
   // Generate random challenge
   const challenge = new Uint8Array(16);
   crypto.getRandomValues(challenge);
 
   const linkData = {
-    serverUserId,
-    deviceUUID: deviceUUID || serverUserId, // Include full UUID, fallback for backwards compat
+    deviceId,
+    deviceUUID: deviceUUID || deviceId, // Include full UUID, fallback for backwards compat
     signalIdentityKey: uint8ArrayToBase64(signalIdentityKey),
     challenge: uint8ArrayToBase64(challenge),
     timestamp: Date.now(),
@@ -42,9 +42,9 @@ export function parseLinkCode(linkCode) {
   const data = decodeJSON(linkCode);
 
   return {
-    serverUserId: data.serverUserId,
-    deviceUUID: data.deviceUUID || data.serverUserId, // Fallback for backwards compat
-    deviceName: data.serverUserId, // Use serverUserId as display name
+    deviceId: data.deviceId,
+    deviceUUID: data.deviceUUID || data.deviceId, // Fallback for backwards compat
+    deviceName: data.deviceId, // Use deviceId as display name
     signalIdentityKey: base64ToUint8Array(data.signalIdentityKey),
     challenge: base64ToUint8Array(data.challenge),
     timestamp: data.timestamp,
@@ -68,7 +68,7 @@ export function validateLinkCode(linkCode, maxAgeMs = 5 * 60 * 1000) {
     }
 
     // Check required fields
-    if (!data.serverUserId || !data.signalIdentityKey || !data.challenge) {
+    if (!data.deviceId || !data.signalIdentityKey || !data.challenge) {
       return { valid: false, error: 'Invalid link code format' };
     }
 
@@ -106,7 +106,7 @@ export function buildLinkApproval({
     challengeResponse: uint8ArrayToBase64(challenge),
     ownDevices: ownDevices.map(d => ({
       deviceUUID: d.deviceUUID,
-      serverUserId: d.serverUserId,
+      deviceId: d.deviceId,
       deviceName: d.deviceName,
       signalIdentityKey: uint8ArrayToBase64(d.signalIdentityKey),
     })),
@@ -127,7 +127,7 @@ export function parseLinkApproval(payload) {
     challengeResponse: base64ToUint8Array(payload.challengeResponse),
     ownDevices: payload.ownDevices.map(d => ({
       deviceUUID: d.deviceUUID,
-      serverUserId: d.serverUserId,
+      deviceId: d.deviceId,
       deviceName: d.deviceName,
       signalIdentityKey: base64ToUint8Array(d.signalIdentityKey),
     })),
@@ -184,7 +184,7 @@ export function buildLinkApprovalProto({
     challengeResponse: ensureUint8Array(challenge),
     ownDevices: ownDevices.map(d => ({
       deviceUUID: d.deviceUUID,
-      serverUserId: d.serverUserId,
+      deviceId: d.deviceId,
       deviceName: d.deviceName,
       signalIdentityKey: ensureUint8Array(d.signalIdentityKey),
     })),

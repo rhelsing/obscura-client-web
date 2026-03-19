@@ -1,11 +1,11 @@
 /**
  * Unified Auth Module
- * Hides shell/device complexity - feels like one account
+ * Server-managed devices: one user account, devices as children
  */
 
 import { generateFirstDeviceKeys, formatSignalKeysForServer } from '../auth/register.js';
-import { LoginScenario, detectScenario } from '../auth/scenarios.js';
-import { generateDeviceUUID, generateDeviceUsername } from '../crypto/uuid.js';
+import { generateDeviceUUID } from '../crypto/uuid.js';
+// generateDeviceUsername removed — server assigns deviceId now
 import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
 import { createStore, InMemoryStore } from './store.js';
 import { createDeviceStore } from '../store/deviceStore.js';
@@ -14,7 +14,9 @@ import { encryptKeys, decryptKeys, isEncryptedFormat, isUnencryptedFormat } from
 import { keyCache } from './keyCache.js';
 
 /**
- * Register a new user (creates shell + device accounts internally)
+ * Register a new user account and provision first device
+ * New API: POST /v1/users (no keys) → POST /v1/devices (with keys)
+ *
  * @param {string} username - Display username
  * @param {string} password - Password
  * @param {object} opts - { apiUrl, store? }
@@ -24,92 +26,72 @@ export async function register(username, password, opts = {}) {
   const { apiUrl } = opts;
   const store = opts.store || createStore(username);
 
-  // Generate keys for shell account (for findability)
-  const keys = await generateFirstDeviceKeys();
-  const shellSignalKeys = formatSignalKeysForServer(keys.signal);
-
-  // Register shell account with Signal keys (for findability)
-  const shellRes = await fetch(`${apiUrl}/v1/users`, {
+  // Step 1: Register user account (no keys required)
+  const userRes = await fetch(`${apiUrl}/v1/users`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      username,
-      password,
-      ...shellSignalKeys,
-    }),
+    body: JSON.stringify({ username, password }),
   });
 
-  if (!shellRes.ok) {
-    const text = await shellRes.text();
-    if (shellRes.status === 409) {
+  if (!userRes.ok) {
+    const text = await userRes.text();
+    if (userRes.status === 409) {
       throw new Error(`Username "${username}" is already taken`);
     }
     throw new Error(`Registration failed: ${text}`);
   }
 
-  // Generate SEPARATE keys for device account
-  const deviceIdentityKeyPair = await KeyHelper.generateIdentityKeyPair();
-  const deviceRegistrationId = KeyHelper.generateRegistrationId();
-  const deviceSignedPreKey = await KeyHelper.generateSignedPreKey(deviceIdentityKeyPair, 1);
+  const userData = await userRes.json();
+  const userToken = userData.token; // User-scoped JWT (no deviceId)
+  const userId = parseUserId(userToken);
 
-  const devicePreKeys = [];
-  for (let i = 1; i <= 100; i++) {
-    const preKey = await KeyHelper.generatePreKey(i);
-    devicePreKeys.push(preKey);
-  }
+  // Step 2: Generate keys for this device
+  const keys = await generateFirstDeviceKeys();
+  const signalKeys = formatSignalKeysForServer(keys.signal);
 
-  const deviceSignalKeys = formatSignalKeysForServer({
-    identityKeyPair: deviceIdentityKeyPair,
-    registrationId: deviceRegistrationId,
-    signedPreKey: deviceSignedPreKey,
-    preKeys: devicePreKeys,
-  });
-
-  // Register device account with its own Signal keys
-  const deviceUsername = generateDeviceUsername();
-  const deviceRes = await fetch(`${apiUrl}/v1/users`, {
+  // Step 3: Provision device with Signal keys
+  const deviceRes = await fetch(`${apiUrl}/v1/devices`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${userToken}`,
+    },
     body: JSON.stringify({
-      username: deviceUsername,
-      password,
-      ...deviceSignalKeys,
+      name: detectDeviceName(),
+      ...signalKeys,
     }),
   });
 
   if (!deviceRes.ok) {
     const text = await deviceRes.text();
-    throw new Error(`Device registration failed: ${text}`);
+    throw new Error(`Device provisioning failed: ${text}`);
   }
 
   const deviceData = await deviceRes.json();
+  const deviceToken = deviceData.token; // Device-scoped JWT (has device_id claim)
+  const deviceId = parseDeviceId(deviceToken) || deviceData.deviceId;
 
-  // Use DEVICE token's userId, not shell
-  const userId = parseUserId(deviceData.token);
+  // Store identity keys encrypted with password
+  const identityKeyPair = keys.signal.identityKeyPair;
+  const registrationId = keys.signal.registrationId;
 
-  // Encrypt and store DEVICE identity keys (not shell keys)
-  const encrypted = await encryptKeys({
-    identityKeyPair: deviceIdentityKeyPair,
-  }, password);
-  encrypted.registrationId = deviceRegistrationId;
+  const encrypted = await encryptKeys({ identityKeyPair }, password);
+  encrypted.registrationId = registrationId;
   await store.storeEncryptedIdentity(encrypted);
 
-  // Cache decrypted DEVICE keys for this session
-  keyCache.set({
-    identityKeyPair: deviceIdentityKeyPair,
-    registrationId: deviceRegistrationId,
-  });
-  await store.saveSessionKeys(deviceIdentityKeyPair, deviceRegistrationId);
+  // Cache decrypted keys for this session
+  keyCache.set({ identityKeyPair, registrationId });
+  if (store.saveSessionKeys) await store.saveSessionKeys(identityKeyPair, registrationId);
 
-  // Store DEVICE prekeys (not shell prekeys)
-  await store.storeSignedPreKey(deviceSignedPreKey.keyId, deviceSignedPreKey.keyPair);
-  for (const pk of devicePreKeys) {
+  // Store prekeys
+  await store.storeSignedPreKey(keys.signal.signedPreKey.keyId, keys.signal.signedPreKey.keyPair);
+  for (const pk of keys.signal.preKeys) {
     await store.storePreKey(pk.keyId, pk.keyPair);
   }
 
-  // Store device identity with userId for re-login
+  // Store device identity for re-login
   await store.storeDeviceIdentity({
-    deviceUsername,
+    deviceId,
     deviceUUID: keys.deviceUUID,
     coreUsername: username,
     isFirstDevice: true,
@@ -120,7 +102,7 @@ export async function register(username, password, opts = {}) {
   const deviceStore = createDeviceStore(username);
   await deviceStore.storeIdentity({
     coreUsername: username,
-    deviceUsername,
+    deviceId,
     deviceUUID: keys.deviceUUID,
     p2pPublicKey: keys.p2pIdentity.publicKey,
     p2pPrivateKey: keys.p2pIdentity.privateKey,
@@ -128,51 +110,25 @@ export async function register(username, password, opts = {}) {
   });
   deviceStore.close();
 
-  // Shell login to get shellToken (needed for backup operations)
-  let shellToken = null;
-  let shellRefreshToken = null;
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    const shellLoginRes = await fetch(`${apiUrl}/v1/sessions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    if (shellLoginRes.ok) {
-      const shellLoginData = await shellLoginRes.json();
-      shellToken = shellLoginData.token;
-      shellRefreshToken = shellLoginData.refreshToken;
-    }
-  } catch (e) {
-    console.warn('[Auth] Shell login after registration failed:', e.message);
-  }
-
   // Recovery phrase - one-time access
   let recoveryPhrase = keys.recoveryPhrase;
 
   return {
     store,
-    token: deviceData.token,  // Use device token!
+    token: deviceToken,
     refreshToken: deviceData.refreshToken,
     userId,
     username,
-    deviceUsername,
+    deviceId,
     deviceUUID: keys.deviceUUID,
     p2pIdentity: keys.p2pIdentity,
-    // Only store PUBLIC key - private key is never stored, must re-derive from phrase
     recoveryPublicKey: keys.recoveryKeypair.publicKey,
     deviceInfo: {
+      deviceId,
       deviceUUID: keys.deviceUUID,
-      serverUserId: userId,  // Use UUID, not deviceUsername!
       deviceName: detectDeviceName(),
-      signalIdentityKey: new Uint8Array(deviceIdentityKeyPair.pubKey),  // Device's key, not shell's
+      signalIdentityKey: new Uint8Array(identityKeyPair.pubKey),
     },
-
-    shellToken,
-    shellRefreshToken,
 
     // Explicit backup flow - clears after first read
     getRecoveryPhrase() {
@@ -184,7 +140,9 @@ export async function register(username, password, opts = {}) {
 }
 
 /**
- * Login to existing account (handles all scenarios)
+ * Login to existing account
+ * New API: Single POST /v1/sessions with optional deviceId
+ *
  * @param {string} username - Display username
  * @param {string} password - Password
  * @param {object} opts - { apiUrl, store? }
@@ -194,192 +152,78 @@ export async function login(username, password, opts = {}) {
   const { apiUrl } = opts;
   const store = opts.store || createStore(username);
 
-  // Try shell login
-  let shellLoginSuccess = false;
-  let shellToken = null;
-  let shellRefreshToken = null;
+  // Check for stored device identity (from previous session on this browser)
+  const storedIdentity = await store.getDeviceIdentity();
+  const storedDeviceId = storedIdentity?.deviceId || storedIdentity?.deviceUsername; // backwards compat
 
+  // Login — include deviceId if we have one for device-scoped token
+  const loginBody = { username, password };
+  if (storedDeviceId && storedIdentity?.coreUsername === username) {
+    loginBody.deviceId = storedDeviceId;
+  }
+
+  let loginData;
   try {
     const res = await fetch(`${apiUrl}/v1/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify(loginBody),
     });
 
-    if (res.ok) {
-      const data = await res.json();
-      shellLoginSuccess = true;
-      shellToken = data.token;
-      shellRefreshToken = data.refreshToken;
-    } else if (res.status === 401) {
-      return { status: 'error', reason: 'Invalid credentials' };
-    } else {
+    if (!res.ok) {
+      if (res.status === 401) {
+        return { status: 'error', reason: 'Invalid credentials' };
+      }
       return { status: 'error', reason: `Login failed: ${res.status}` };
     }
+    loginData = await res.json();
   } catch (e) {
     return { status: 'error', reason: e.message };
   }
 
-  // Check for stored device identity
-  const storedIdentity = await store.getDeviceIdentity();
+  const userId = parseUserId(loginData.token);
+  const deviceId = parseDeviceId(loginData.token) || loginData.deviceId;
 
-  if (storedIdentity && storedIdentity.coreUsername === username) {
-    // Existing device - shell login succeeded, now login to device account
-    const deviceRes = await fetch(`${apiUrl}/v1/sessions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: storedIdentity.deviceUsername,
-        password,
-      }),
-    });
-
-    if (deviceRes.ok) {
-      // Normal path - device account exists
-      const deviceData = await deviceRes.json();
-      const userId = parseUserId(deviceData.token);
-
-      // Load and decrypt identity keys (with migration for old format)
-      const identityKeyPair = await loadAndDecryptIdentity(store, password);
-
-      if (!identityKeyPair) {
-        return { status: 'error', reason: 'Could not decrypt local keys - try clearing data and re-linking' };
-      }
-
-      // Load recoveryPublicKey and p2pIdentity from device store
-      const deviceStore = createDeviceStore(username);
-      const deviceIdentity = await deviceStore.getIdentity();
-      deviceStore.close();
-
-      return {
-        status: 'ok',
-        client: {
-          store,
-          token: deviceData.token,  // Device token, not shell!
-          refreshToken: deviceData.refreshToken,
-          userId,
-          username,
-          deviceUsername: storedIdentity.deviceUsername,
-          deviceUUID: storedIdentity.deviceUUID,
-          recoveryPublicKey: deviceIdentity?.recoveryPublicKey,
-          p2pIdentity: deviceIdentity ? {
-            publicKey: deviceIdentity.p2pPublicKey,
-            privateKey: deviceIdentity.p2pPrivateKey,
-          } : null,
-          deviceInfo: {
-            deviceUUID: storedIdentity.deviceUUID,
-            serverUserId: userId,
-            deviceName: detectDeviceName(),
-            signalIdentityKey: identityKeyPair ? new Uint8Array(identityKeyPair.pubKey) : null,
-          },
-          shellToken,
-          shellRefreshToken,
-        },
-      };
+  // === Existing device (has stored identity AND got device-scoped token) ===
+  if (storedIdentity && storedIdentity.coreUsername === username && deviceId) {
+    const identityKeyPair = await loadAndDecryptIdentity(store, password);
+    if (!identityKeyPair) {
+      return { status: 'error', reason: 'Could not decrypt local keys - try clearing data and re-linking' };
     }
 
-    // MIGRATION: Old user without device account (shell = device in old system)
-    console.log('[Auth] Migrating old shell-only user to shell+device model...');
-    const shellUserId = parseUserId(shellToken);
-
-    // Load existing identity keys
-    const existingIdentityKeyPair = await loadAndDecryptIdentity(store, password);
-    if (!existingIdentityKeyPair) {
-      return { status: 'error', reason: 'Could not decrypt local keys for migration' };
-    }
-
-    // Generate new device account with NEW keys (existing keys belong to shell)
-    const deviceIdentityKeyPair = await KeyHelper.generateIdentityKeyPair();
-    const deviceRegistrationId = KeyHelper.generateRegistrationId();
-    const deviceSignedPreKey = await KeyHelper.generateSignedPreKey(deviceIdentityKeyPair, 1);
-
-    const devicePreKeys = [];
-    for (let i = 1; i <= 100; i++) {
-      const preKey = await KeyHelper.generatePreKey(i);
-      devicePreKeys.push(preKey);
-    }
-
-    const deviceSignalKeys = formatSignalKeysForServer({
-      identityKeyPair: deviceIdentityKeyPair,
-      registrationId: deviceRegistrationId,
-      signedPreKey: deviceSignedPreKey,
-      preKeys: devicePreKeys,
-    });
-
-    // Create new device account
-    const newDeviceUsername = generateDeviceUsername();
-    const newDeviceRes = await fetch(`${apiUrl}/v1/users`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: newDeviceUsername,
-        password,
-        ...deviceSignalKeys,
-      }),
-    });
-
-    if (!newDeviceRes.ok) {
-      const text = await newDeviceRes.text();
-      return { status: 'error', reason: `Migration failed - could not create device account: ${text}` };
-    }
-
-    const newDeviceData = await newDeviceRes.json();
-    const newDeviceUserId = parseUserId(newDeviceData.token);
-
-    // Migrate local data from shell userId to new device userId
-    await migrateUserData(shellUserId, newDeviceUserId);
-
-    // Update stored identity with NEW device keys
-    const encrypted = await encryptKeys({ identityKeyPair: deviceIdentityKeyPair }, password);
-    encrypted.registrationId = deviceRegistrationId;
-    await store.storeEncryptedIdentity(encrypted);
-
-    // Cache new keys
-    keyCache.set({ identityKeyPair: deviceIdentityKeyPair, registrationId: deviceRegistrationId });
-    await store.saveSessionKeys(deviceIdentityKeyPair, deviceRegistrationId);
-
-    // Store new prekeys
-    await store.storeSignedPreKey(deviceSignedPreKey.keyId, deviceSignedPreKey.keyPair);
-    for (const pk of devicePreKeys) {
-      await store.storePreKey(pk.keyId, pk.keyPair);
-    }
-
-    // Update device identity
-    await store.storeDeviceIdentity({
-      deviceUsername: newDeviceUsername,
-      deviceUUID: storedIdentity.deviceUUID || generateDeviceUUID(),
-      coreUsername: username,
-      isFirstDevice: storedIdentity.isFirstDevice,
-      userId: newDeviceUserId,
-    });
-
-    console.log('[Auth] Migration complete:', { shellUserId, newDeviceUserId });
+    // Load recoveryPublicKey and p2pIdentity from device store
+    const deviceStore = createDeviceStore(username);
+    const deviceIdentity = await deviceStore.getIdentity();
+    deviceStore.close();
 
     return {
       status: 'ok',
       client: {
         store,
-        token: newDeviceData.token,
-        refreshToken: newDeviceData.refreshToken,
-        userId: newDeviceUserId,
+        token: loginData.token,
+        refreshToken: loginData.refreshToken,
+        userId,
         username,
-        deviceUsername: newDeviceUsername,
-        deviceUUID: storedIdentity.deviceUUID || generateDeviceUUID(),
+        deviceId,
+        deviceUUID: storedIdentity.deviceUUID,
+        recoveryPublicKey: deviceIdentity?.recoveryPublicKey,
+        p2pIdentity: deviceIdentity ? {
+          publicKey: deviceIdentity.p2pPublicKey,
+          privateKey: deviceIdentity.p2pPrivateKey,
+        } : null,
         deviceInfo: {
+          deviceId,
           deviceUUID: storedIdentity.deviceUUID,
-          serverUserId: newDeviceUserId,
           deviceName: detectDeviceName(),
-          signalIdentityKey: new Uint8Array(deviceIdentityKeyPair.pubKey),
+          signalIdentityKey: identityKeyPair ? new Uint8Array(identityKeyPair.pubKey) : null,
         },
-        shellToken,
-        shellRefreshToken,
       },
     };
   }
 
-  // New device - generate keys and register device account
+  // === New device — need to provision via POST /v1/devices ===
+  // Login gave us a user-scoped token (no deviceId). Provision a new device.
   const deviceUUID = generateDeviceUUID();
-  const deviceUsername = generateDeviceUsername();
 
   const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
   const registrationId = KeyHelper.generateRegistrationId();
@@ -387,8 +231,7 @@ export async function login(username, password, opts = {}) {
 
   const preKeys = [];
   for (let i = 1; i <= 100; i++) {
-    const preKey = await KeyHelper.generatePreKey(i);
-    preKeys.push(preKey);
+    preKeys.push(await KeyHelper.generatePreKey(i));
   }
 
   const signalKeys = formatSignalKeysForServer({
@@ -398,23 +241,26 @@ export async function login(username, password, opts = {}) {
     preKeys,
   });
 
-  // Register new device account
-  const deviceRes = await fetch(`${apiUrl}/v1/users`, {
+  // Provision device on server
+  const deviceRes = await fetch(`${apiUrl}/v1/devices`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${loginData.token}`,
+    },
     body: JSON.stringify({
-      username: deviceUsername,
-      password,
+      name: detectDeviceName(),
       ...signalKeys,
     }),
   });
 
   if (!deviceRes.ok) {
     const text = await deviceRes.text();
-    return { status: 'error', reason: `Device registration failed: ${text}` };
+    return { status: 'error', reason: `Device provisioning failed: ${text}` };
   }
 
   const deviceData = await deviceRes.json();
+  const newDeviceId = parseDeviceId(deviceData.token) || deviceData.deviceId;
 
   // Encrypt and store identity keys
   const encrypted = await encryptKeys({ identityKeyPair }, password);
@@ -423,30 +269,25 @@ export async function login(username, password, opts = {}) {
 
   // Cache decrypted keys for this session
   keyCache.set({ identityKeyPair, registrationId });
-  await store.saveSessionKeys(identityKeyPair, registrationId);
+  if (store.saveSessionKeys) await store.saveSessionKeys(identityKeyPair, registrationId);
 
-  // Store prekeys (not encrypted)
+  // Store prekeys
   await store.storeSignedPreKey(signedPreKey.keyId, signedPreKey.keyPair);
   for (const pk of preKeys) {
     await store.storePreKey(pk.keyId, pk.keyPair);
   }
 
-  const userId = parseUserId(deviceData.token);
-
-  // Store device identity with userId for re-login
+  // Store device identity for re-login
   await store.storeDeviceIdentity({
-    deviceUsername,
+    deviceId: newDeviceId,
     deviceUUID,
     coreUsername: username,
     isFirstDevice: false,
-    userId,  // Store for re-login
+    userId,
   });
 
   // Generate link code for existing device to scan
-  // Use userId (UUID) for server communication, deviceUsername for display
-  // Include deviceUUID for complete device info on approving device
-  // Sign the challenge with identity key for security
-  const linkCode = await generateLinkCode(userId, deviceUsername, deviceUUID, identityKeyPair, username);
+  const linkCode = await generateLinkCode(userId, newDeviceId, deviceUUID, identityKeyPair, username);
 
   return {
     status: 'newDevice',
@@ -457,16 +298,14 @@ export async function login(username, password, opts = {}) {
       refreshToken: deviceData.refreshToken,
       userId,
       username,
-      deviceUsername,
+      deviceId: newDeviceId,
       deviceUUID,
       deviceInfo: {
+        deviceId: newDeviceId,
         deviceUUID,
-        serverUserId: userId,  // Use UUID, not deviceUsername!
         deviceName: detectDeviceName(),
         signalIdentityKey: new Uint8Array(identityKeyPair.pubKey),
       },
-      shellToken,
-      shellRefreshToken,
     },
   };
 }
@@ -502,7 +341,7 @@ async function loadAndDecryptIdentity(store, password) {
 
     // Cache for this session
     keyCache.set({ identityKeyPair: keyPair, registrationId });
-    await store.saveSessionKeys(keyPair, registrationId);
+    if (store.saveSessionKeys) await store.saveSessionKeys(keyPair, registrationId);
 
     console.log('Migration complete');
     return keyPair;
@@ -522,7 +361,7 @@ async function loadAndDecryptIdentity(store, password) {
         identityKeyPair: decrypted.identityKeyPair,
         registrationId: record.registrationId,
       });
-      await store.saveSessionKeys(decrypted.identityKeyPair, record.registrationId);
+      if (store.saveSessionKeys) await store.saveSessionKeys(decrypted.identityKeyPair, record.registrationId);
 
       return decrypted.identityKeyPair;
     } catch (e) {
@@ -557,16 +396,23 @@ function parseUserId(token) {
   return decoded.sub || decoded.user_id || decoded.userId || decoded.id;
 }
 
+// Helper: parse deviceId from JWT (device-scoped tokens only)
+function parseDeviceId(token) {
+  const payload = token.split('.')[1];
+  const decoded = JSON.parse(atob(payload));
+  return decoded.device_id || decoded.deviceId || null;
+}
+
 // Helper: generate signed link code with expiry (base64 encoded)
-async function generateLinkCode(userId, deviceUsername, deviceUUID, identityKeyPair, accountUsername) {
+async function generateLinkCode(userId, deviceId, deviceUUID, identityKeyPair, accountUsername) {
   const challenge = crypto.getRandomValues(new Uint8Array(16));
   const signature = await signLinkChallenge(challenge, identityKeyPair.privKey);
   const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes from now
 
   const data = {
-    i: userId,         // UUID for server API calls
-    u: deviceUsername, // Username for display
-    d: deviceUUID,     // Full device UUID for complete device info
+    i: userId,         // User UUID (for server API calls)
+    u: deviceId,       // Device ID (server-assigned)
+    d: deviceUUID,     // Client device UUID
     k: arrayBufferToBase64(identityKeyPair.pubKey),
     c: arrayBufferToBase64(challenge),
     s: arrayBufferToBase64(signature),  // Signature proves this device owns the key
@@ -583,109 +429,6 @@ function arrayBufferToBase64(buffer) {
     binary += String.fromCharCode(bytes[i]);
   }
   return btoa(binary);
-}
-
-/**
- * Migrate user data from old userId to new userId
- * Used when migrating from shell-only to shell+device model
- */
-async function migrateUserData(oldUserId, newUserId) {
-  if (typeof indexedDB === 'undefined') {
-    console.warn('[Auth] IndexedDB not available, skipping data migration');
-    return;
-  }
-
-  console.log('[Auth] Migrating data:', { from: oldUserId, to: newUserId });
-
-  // Migrate friends database
-  await migrateDatabase(`obscura_friends_v2_${oldUserId}`, `obscura_friends_v2_${newUserId}`);
-
-  // Migrate messages database
-  await migrateDatabase(`obscura_messages_v2_${oldUserId}`, `obscura_messages_v2_${newUserId}`);
-
-  // Migrate attachments database
-  await migrateDatabase(`obscura_attachments_${oldUserId}`, `obscura_attachments_${newUserId}`);
-
-  // Migrate ORM models database (stories, pix, pixRegistry, comments, etc.)
-  await migrateDatabase(`obscura_models_${oldUserId}`, `obscura_models_${newUserId}`);
-
-  console.log('[Auth] Data migration complete');
-}
-
-/**
- * Copy all data from one IndexedDB database to another
- */
-async function migrateDatabase(sourceDbName, targetDbName) {
-  try {
-    // Check if source exists by trying to open it
-    const sourceDb = await new Promise((resolve, reject) => {
-      const request = indexedDB.open(sourceDbName);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result);
-    });
-
-    const storeNames = Array.from(sourceDb.objectStoreNames);
-    if (storeNames.length === 0) {
-      sourceDb.close();
-      return;
-    }
-
-    // Get version to create target with same schema
-    const version = sourceDb.version;
-
-    // Create target database with same schema
-    const targetDb = await new Promise((resolve, reject) => {
-      const request = indexedDB.open(targetDbName, version);
-      request.onerror = () => reject(request.error);
-      request.onupgradeneeded = (event) => {
-        const db = event.target.result;
-        // Copy store schemas from source
-        for (const storeName of storeNames) {
-          if (!db.objectStoreNames.contains(storeName)) {
-            const sourceStore = sourceDb.transaction(storeName, 'readonly').objectStore(storeName);
-            const keyPath = sourceStore.keyPath;
-            if (keyPath) {
-              db.createObjectStore(storeName, { keyPath });
-            } else {
-              db.createObjectStore(storeName);
-            }
-          }
-        }
-      };
-      request.onsuccess = () => resolve(request.result);
-    });
-
-    // Copy data from each store
-    for (const storeName of storeNames) {
-      const sourceTx = sourceDb.transaction(storeName, 'readonly');
-      const sourceStore = sourceTx.objectStore(storeName);
-      const allData = await new Promise((resolve, reject) => {
-        const request = sourceStore.getAll();
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve(request.result);
-      });
-
-      if (allData.length > 0) {
-        const targetTx = targetDb.transaction(storeName, 'readwrite');
-        const targetStore = targetTx.objectStore(storeName);
-        for (const item of allData) {
-          await new Promise((resolve, reject) => {
-            const request = targetStore.put(item);
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => resolve();
-          });
-        }
-      }
-    }
-
-    sourceDb.close();
-    targetDb.close();
-
-    console.log(`[Auth] Migrated ${sourceDbName} -> ${targetDbName}`);
-  } catch (err) {
-    // Source database might not exist, that's ok
-    console.log(`[Auth] Could not migrate ${sourceDbName}: ${err.message}`);
-  }
 }
 
 /**
@@ -787,9 +530,24 @@ export async function recoverAccount(username, password, backupData, recoveryPhr
   const { deriveRecoveryKeypair } = await import('../crypto/signatures.js');
   const recoveryKeypair = await deriveRecoveryKeypair(recoveryPhrase);
 
-  // Generate new device keys
+  // Step 1: Login to get user-scoped token
+  const loginRes = await fetch(`${apiUrl}/v1/sessions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+
+  if (!loginRes.ok) {
+    const text = await loginRes.text();
+    throw new Error(`Recovery login failed: ${text}`);
+  }
+
+  const loginData = await loginRes.json();
+  const userToken = loginData.token;
+  const userId = parseUserId(userToken);
+
+  // Step 2: Generate new device keys
   const deviceUUID = generateDeviceUUID();
-  const deviceUsername = generateDeviceUsername();
   const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
   const registrationId = KeyHelper.generateRegistrationId();
   const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
@@ -806,24 +564,26 @@ export async function recoverAccount(username, password, backupData, recoveryPhr
     preKeys,
   });
 
-  // Register new device account (shell account already exists)
-  const deviceRes = await fetch(`${apiUrl}/v1/users`, {
+  // Step 3: Provision recovery device
+  const deviceRes = await fetch(`${apiUrl}/v1/devices`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${userToken}`,
+    },
     body: JSON.stringify({
-      username: deviceUsername,
-      password,
+      name: `${detectDeviceName()} (Recovery)`,
       ...signalKeys,
     }),
   });
 
   if (!deviceRes.ok) {
     const text = await deviceRes.text();
-    throw new Error(`Failed to register recovery device: ${text}`);
+    throw new Error(`Failed to provision recovery device: ${text}`);
   }
 
   const deviceData = await deviceRes.json();
-  const userId = parseUserId(deviceData.token);
+  const deviceId = parseDeviceId(deviceData.token) || deviceData.deviceId;
 
   // Store encrypted keys
   const encrypted = await encryptKeys({ identityKeyPair }, password);
@@ -832,7 +592,7 @@ export async function recoverAccount(username, password, backupData, recoveryPhr
 
   // Cache keys for this session
   keyCache.set({ identityKeyPair, registrationId });
-  await store.saveSessionKeys(identityKeyPair, registrationId);
+  if (store.saveSessionKeys) await store.saveSessionKeys(identityKeyPair, registrationId);
 
   // Store prekeys
   await store.storeSignedPreKey(signedPreKey.keyId, signedPreKey.keyPair);
@@ -840,9 +600,9 @@ export async function recoverAccount(username, password, backupData, recoveryPhr
     await store.storePreKey(pk.keyId, pk.keyPair);
   }
 
-  // Store device identity (Signal store)
+  // Store device identity
   await store.storeDeviceIdentity({
-    deviceUsername,
+    deviceId,
     deviceUUID,
     coreUsername: username,
     isFirstDevice: false,
@@ -850,11 +610,11 @@ export async function recoverAccount(username, password, backupData, recoveryPhr
     userId,
   });
 
-  // Store full identity to deviceStore (includes recoveryPublicKey for future backups)
+  // Store full identity to deviceStore
   const deviceStore = createDeviceStore(username);
   await deviceStore.storeIdentity({
     coreUsername: username,
-    deviceUsername,
+    deviceId,
     deviceUUID,
     p2pPublicKey: backupData.deviceIdentity?.p2pPublicKey || recoveryKeypair.publicKey,
     p2pPrivateKey: backupData.deviceIdentity?.p2pPrivateKey,
@@ -874,7 +634,7 @@ export async function recoverAccount(username, password, backupData, recoveryPhr
     refreshToken: deviceData.refreshToken,
     userId,
     username,
-    deviceUsername,
+    deviceId,
     deviceUUID,
     p2pIdentity: {
       publicKey: backupData.deviceIdentity?.p2pPublicKey || recoveryKeypair.publicKey,
@@ -882,15 +642,14 @@ export async function recoverAccount(username, password, backupData, recoveryPhr
     },
     recoveryPublicKey: recoveryKeypair.publicKey,
     deviceInfo: {
+      deviceId,
       deviceUUID,
-      serverUserId: userId,
       deviceName: detectDeviceName(),
       signalIdentityKey: new Uint8Array(identityKeyPair.pubKey),
     },
   });
 
-  // Zero out recovery private key (we only need it for signing recovery announcement)
-  // The announceRecovery() method will re-derive it from the phrase
+  // Zero out recovery private key
   recoveryKeypair.privateKey.fill(0);
 
   return { client, revokeOthers };
@@ -910,7 +669,7 @@ async function restoreBackupData(username, userId, backupData, signalStore) {
     const friendStore = createFriendStore(userId);
     for (const friend of backupData.friends) {
       await friendStore.addFriend(
-        friend.devices?.[0]?.serverUserId || friend.username,
+        friend.devices?.[0]?.deviceId || friend.username,
         friend.username,
         friend.status || 'accepted',
         { devices: friend.devices }

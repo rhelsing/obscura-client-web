@@ -353,7 +353,7 @@ test.describe('Scenario 5b: Cross-User Device Linking', () => {
       // Query profiles from all own devices (same logic as ViewProfile.js)
       const ownDeviceIds = [
         window.__client.deviceUUID,
-        ...window.__client.devices.getAll().map(d => d.deviceUUID || d.serverUserId)
+        ...window.__client.devices.getAll().map(d => d.deviceUUID || d.deviceId)
       ];
       const allProfiles = await window.__client.profile.where({}).exec();
       const profile = allProfiles

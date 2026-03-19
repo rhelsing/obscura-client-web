@@ -130,6 +130,18 @@ export class InMemoryStore {
     this.sessions.delete(encodedAddress);
   }
 
+  async removeSessionsForUser(userId) {
+    const prefix = userId + '.';
+    let deleted = 0;
+    for (const key of this.sessions.keys()) {
+      if (key.startsWith(prefix)) {
+        this.sessions.delete(key);
+        deleted++;
+      }
+    }
+    return deleted;
+  }
+
   // === Device Identity Storage ===
 
   async getDeviceIdentity() {

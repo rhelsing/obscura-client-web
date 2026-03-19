@@ -363,6 +363,26 @@ export class IndexedDBStore {
     await this._promisify(store.delete(encodedAddress));
   }
 
+  /**
+   * Remove ALL sessions for a given userId (any registrationId)
+   * Scans IndexedDB for all keys matching userId prefix
+   * @param {string} userId - User ID prefix to match
+   * @returns {Promise<number>} Number of sessions deleted
+   */
+  async removeSessionsForUser(userId) {
+    const store = await this._getStore(STORES.SESSIONS, 'readwrite');
+    const allKeys = await this._promisify(store.getAllKeys());
+    const prefix = userId + '.';
+    let deleted = 0;
+    for (const key of allKeys) {
+      if (key.startsWith(prefix)) {
+        await this._promisify(store.delete(key));
+        deleted++;
+      }
+    }
+    return deleted;
+  }
+
   // === Device Identity Storage ===
 
   async getDeviceIdentity() {

@@ -1130,9 +1130,10 @@ export class ObscuraClient {
         return;
       }
 
-      // Auto-recovery: broken session + Whisper = session corrupt or missing
-      const isBrokenSession = e.message?.toLowerCase().includes('no record')
-        || e.message?.toLowerCase().includes('bad mac');
+      // Auto-recovery: only trigger on "no record" (no session at any address)
+      // Bad MAC means a session exists but is stale — the decrypt loop handles this
+      // by trying other registrationIds. Only auto-recover when NO session works.
+      const isBrokenSession = e.message?.toLowerCase().includes('no record');
       // Try to detect Whisper type from the raw message bytes
       let isWhisper = false;
       try {
@@ -1451,11 +1452,20 @@ export class ObscuraClient {
     const targets = this.friends.getFanOutTargets(friendUsername);
     const friendRecord = this.friends.get(friendUsername);
     let friendUserId = friendRecord?.userId;
-    // If userId not stored, try to resolve from device map
     if (!friendUserId && friendRecord?.devices?.[0]?.deviceId) {
       const mapped = this.messenger._deviceMap.get(friendRecord.devices[0].deviceId);
       friendUserId = mapped?.userId;
     }
+
+    // Ensure device map has registrationIds for all target devices
+    // This enables separate Signal sessions per device (required for multi-device fan-out)
+    if (friendUserId && targets.length > 1) {
+      const unmapped = targets.some(d => !this.messenger._deviceMap.get(d)?.registrationId);
+      if (unmapped) {
+        try { await this.messenger.fetchPreKeyBundles(friendUserId); } catch (e) { /* best effort */ }
+      }
+    }
+
     const messageId = this.messenger.generateMessageId();
     const timestamp = Date.now();
     const correlationId = logger.generateCorrelationId();
@@ -1850,21 +1860,9 @@ export class ObscuraClient {
    * @returns {Promise<void>}
    */
   async resetSessionWith(userId, reason = 'manual_reset') {
-    // 1. Delete ALL local sessions for this userId (any registrationId)
-    const regIds = new Set([1]);
-    for (const [, info] of this.messenger._deviceMap) {
-      if (info.userId === userId && info.registrationId) regIds.add(info.registrationId);
-    }
-    const ownRegId = await this.store.getLocalRegistrationId?.();
-    if (ownRegId) regIds.add(ownRegId);
-
-    for (const regId of regIds) {
-      const addr = `${userId}.${regId}`;
-      const session = await this.store.loadSession(addr);
-      if (session) {
-        await this.store.removeSession(addr);
-        console.log('[ObscuraClient] Deleted session:', addr.slice(-12));
-      }
+    // 1. Delete ALL local sessions for this userId (scan by prefix)
+    if (this.store.removeSessionsForUser) {
+      await this.store.removeSessionsForUser(userId);
     }
 
     // 2. Send SESSION_RESET to all known devices for this user
@@ -1959,22 +1957,22 @@ export class ObscuraClient {
    * This forces the next message exchange to use PreKey (fresh session)
    */
   async _handleSessionReset(sourceUserId, reason, keepRegId) {
-    // Delete stale sessions for this sender, but keep the fresh one
+    // Delete ALL stale sessions for this sender, keeping only the fresh one
     // created by decrypting this SESSION_RESET PreKey message
     try {
-      const regIds = new Set([1]);
-      const ownRegId = await this.store.getLocalRegistrationId?.();
-      if (ownRegId) regIds.add(ownRegId);
-      for (const [, info] of this.messenger._deviceMap) {
-        if (info.userId === sourceUserId && info.registrationId) regIds.add(info.registrationId);
-      }
-
-      for (const regId of regIds) {
-        if (keepRegId && regId === keepRegId) continue; // Keep the fresh session
-        const addr = `${sourceUserId}.${regId}`;
-        const session = await this.store.loadSession(addr);
-        if (session) {
-          await this.store.removeSession(addr);
+      if (this.store.removeSessionsForUser) {
+        // First, save the fresh session if we need to keep it
+        let freshSession = null;
+        if (keepRegId) {
+          const keepAddr = `${sourceUserId}.${keepRegId}`;
+          freshSession = await this.store.loadSession(keepAddr);
+        }
+        // Delete all sessions for this user
+        await this.store.removeSessionsForUser(sourceUserId);
+        // Restore the fresh one
+        if (freshSession && keepRegId) {
+          const keepAddr = `${sourceUserId}.${keepRegId}`;
+          await this.store.storeSession(keepAddr, freshSession);
         }
       }
     } catch (e) { /* non-fatal */ }

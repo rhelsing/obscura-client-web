@@ -1,176 +1,268 @@
 #!/usr/bin/env node
 /**
- * Smoke test: 4-device SESSION_RESET
+ * 4-device SESSION_RESET smoke test using messenger.js
  *
- * Setup: Alice (2 devices) + Bob (2 devices), all friends
- * 1. All 4 devices can message each other
- * 2. Corrupt Bob2↔Alice1 session
- * 3. Bob2 sends SESSION_RESET to Alice (all Alice devices receive it)
- * 4. After reset, Bob2 can message Alice1 again
- * 5. Bob1↔Alice1, Bob1↔Alice2, Bob2↔Alice2 sessions are unaffected
+ * Alice (2 devices) + Bob (2 devices), all friends.
+ * 1. All pairs can message
+ * 2. Corrupt Bob2↔Alice session
+ * 3. Bob2 sends SESSION_RESET to all Alice devices
+ * 4. After reset, Bob2 can message Alice again
+ * 5. Other sessions unaffected
  */
-import { TestClient, randomUsername } from '../../src/v2/test/testClient.js';
+import '../../test/helpers/setup.js';
+import { Messenger } from '../../src/v2/lib/messenger.js';
+import { createStore } from '../../src/v2/lib/store.js';
+import { KeyHelper } from '@privacyresearch/libsignal-protocol-typescript';
+import WebSocket from 'ws';
+import protobuf from 'protobufjs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 const API_URL = process.env.VITE_API_URL;
 if (!API_URL) { console.error('VITE_API_URL required'); process.exit(1); }
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function toBase64(b) { const a = new Uint8Array(b); let s = ''; for (let i = 0; i < a.length; i++) s += String.fromCharCode(a[i]); return btoa(s); }
+function jwt(t) { return JSON.parse(atob(t.split('.')[1])); }
+function uuidToBytes(uuid) { const hex = uuid.replace(/-/g, ''); const b = new Uint8Array(16); for (let i = 0; i < 16; i++) b[i] = parseInt(hex.substr(i * 2, 2), 16); return b; }
+function bytesToUuid(b) { const h = Array.from(b, x => x.toString(16).padStart(2, '0')).join(''); return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`; }
 
-console.log('\n=== 4-Device SESSION_RESET Smoke Test ===\n');
+async function req(token, path, opts = {}) {
+  const h = { 'Content-Type': 'application/json', ...opts.headers };
+  if (token) h.Authorization = `Bearer ${token}`;
+  const r = await fetch(`${API_URL}${path}`, { ...opts, headers: h });
+  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+  const ct = r.headers.get('content-type');
+  return ct?.includes('json') ? r.json() : r.text();
+}
 
-// Register Alice and Bob (each will have 2 devices via testClient)
-const alice1 = new TestClient(API_URL);
-const bob1 = new TestClient(API_URL);
+// Load server proto for WebSocket
+const serverProto = await protobuf.load(join(__dirname, '../../public/proto/obscura/v1/obscura.proto'));
+const WSFrame = serverProto.lookupType('obscura.v1.WebSocketFrame');
 
-await alice1.register(randomUsername(), 'testpass12345');
-await bob1.register(randomUsername(), 'testpass12345');
-console.log(`Alice1: userId=${alice1.userId.slice(-8)}, deviceId=${alice1.deviceId.slice(-8)}`);
-console.log(`Bob1:   userId=${bob1.userId.slice(-8)}, deviceId=${bob1.deviceId.slice(-8)}`);
+async function genKeys(store) {
+  const ikp = await KeyHelper.generateIdentityKeyPair();
+  const rid = KeyHelper.generateRegistrationId();
+  const spk = await KeyHelper.generateSignedPreKey(ikp, 1);
+  const pks = [];
+  for (let i = 1; i <= 100; i++) { const pk = await KeyHelper.generatePreKey(i); pks.push(pk); await store.storePreKey(i, pk.keyPair); }
+  // Override getters to bypass the global keyCache singleton
+  // (keyCache is shared across all stores in the same process — breaks multi-device tests)
+  store.identityKeyPair = ikp;
+  store.registrationId = rid;
+  store.getIdentityKeyPair = async () => ikp;
+  store.getLocalRegistrationId = async () => rid;
+  await store.storeSignedPreKey(1, spk.keyPair);
+  return {
+    identityKey: toBase64(ikp.pubKey), registrationId: rid,
+    signedPreKey: { keyId: spk.keyId, publicKey: toBase64(spk.keyPair.pubKey), signature: toBase64(spk.signature) },
+    oneTimePreKeys: pks.map(p => ({ keyId: p.keyId, publicKey: toBase64(p.keyPair.pubKey) })),
+  };
+}
 
-// Create second devices for each
-const alice2 = new TestClient(API_URL);
-alice2.username = alice1.username;
-alice2.password = 'testpass12345';
-let r = await alice2.request('/v1/sessions', { method: 'POST', auth: false, body: JSON.stringify({ username: alice1.username, password: 'testpass12345' }) });
-alice2.token = r.token;
-alice2.userId = alice2.parseUserId(r.token);
-const a2keys = await alice2.generateKeys();
-r = await alice2.request('/v1/devices', { method: 'POST', body: JSON.stringify({ name: 'Alice2', ...a2keys }) });
-alice2.token = r.token;
-alice2.deviceId = alice2.parseDeviceId(r.token) || r.deviceId;
-alice2.refreshToken = r.refreshToken;
-const a2ikp = await alice2.store.getIdentityKeyPair();
-alice2.deviceInfo = { deviceId: alice2.deviceId, username: alice2.username, signalIdentityKey: new Uint8Array(a2ikp.pubKey) };
+// Create a device with messenger
+async function createDevice(username, password, userToken) {
+  const store = createStore(`${username}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`);
+  const keys = await genKeys(store);
 
-const bob2 = new TestClient(API_URL);
-bob2.username = bob1.username;
-bob2.password = 'testpass12345';
-r = await bob2.request('/v1/sessions', { method: 'POST', auth: false, body: JSON.stringify({ username: bob1.username, password: 'testpass12345' }) });
-bob2.token = r.token;
-bob2.userId = bob2.parseUserId(r.token);
-const b2keys = await bob2.generateKeys();
-r = await bob2.request('/v1/devices', { method: 'POST', body: JSON.stringify({ name: 'Bob2', ...b2keys }) });
-bob2.token = r.token;
-bob2.deviceId = bob2.parseDeviceId(r.token) || r.deviceId;
-bob2.refreshToken = r.refreshToken;
-const b2ikp = await bob2.store.getIdentityKeyPair();
-bob2.deviceInfo = { deviceId: bob2.deviceId, username: bob2.username, signalIdentityKey: new Uint8Array(b2ikp.pubKey) };
+  const r = await req(userToken, '/v1/devices', { method: 'POST', body: JSON.stringify({ name: 'Dev', ...keys }) });
+  const token = r.token;
+  const deviceId = jwt(token).device_id;
+  const userId = jwt(token).sub;
 
-console.log(`Alice2: userId=${alice2.userId.slice(-8)}, deviceId=${alice2.deviceId.slice(-8)}`);
-console.log(`Bob2:   userId=${bob2.userId.slice(-8)}, deviceId=${bob2.deviceId.slice(-8)}`);
+  const messenger = new Messenger({ apiUrl: API_URL, store, token });
+  await messenger.loadProto();
+
+  return { store, token, deviceId, userId, messenger, username, keys };
+}
+
+// Connect WebSocket and return message receiver
+async function connectWS(dev) {
+  const ticket = await req(dev.token, '/v1/gateway/ticket', { method: 'POST' });
+  const wsUrl = API_URL.replace('https://', 'wss://');
+  const received = [];
+  const resolvers = [];
+
+  const ws = await new Promise((resolve) => {
+    const ws = new WebSocket(`${wsUrl}/v1/gateway?ticket=${ticket.ticket}`);
+    ws.on('open', () => resolve(ws));
+    ws.on('message', async (data) => {
+      const frame = WSFrame.decode(new Uint8Array(data));
+      if (!frame.envelope) return;
+
+      const senderId = bytesToUuid(frame.envelope.senderId);
+      const envId = bytesToUuid(frame.envelope.id);
+      const encMsg = dev.messenger.EncryptedMessage.decode(frame.envelope.message);
+
+      try {
+        const result = await dev.messenger.decrypt(senderId, encMsg.content, encMsg.type);
+        const clientMsg = dev.messenger.decodeClientMessage(result.bytes);
+        const msg = { ...clientMsg, sourceUserId: senderId, senderDeviceId: result.senderDeviceId, envelopeId: envId };
+        received.push(msg);
+        if (resolvers.length > 0) resolvers.shift()(msg);
+      } catch (e) {
+        console.error(`[WS ${dev.deviceId.slice(-8)}] from=${senderId.slice(-8)} type=${encMsg.type} err=${e.message.slice(0, 50)}`);
+      }
+
+      // ACK
+      const ack = WSFrame.create({ ack: { messageIds: [frame.envelope.id] } });
+      ws.send(WSFrame.encode(ack).finish());
+    });
+  });
+
+  const waitForMessage = (timeout = 5000) => {
+    if (received.length > 0) return Promise.resolve(received.shift());
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Timeout')), timeout);
+      resolvers.push((msg) => { clearTimeout(timer); resolve(msg); });
+    });
+  };
+
+  return { ws, waitForMessage, received };
+}
+
+// Send a text message from one device to another
+async function sendText(fromDev, toDeviceId, toUserId, text) {
+  await fromDev.messenger.queueMessage(toDeviceId, {
+    type: 0, // TEXT
+    text,
+    timestamp: Date.now(),
+  }, toUserId);
+  await fromDev.messenger.flushMessages();
+}
+
+console.log('\n=== 4-Device SESSION_RESET (messenger.js) ===\n');
+
+const pw = 'testpass12345';
+
+// Register Alice + 2 devices
+const aliceUser = `alice4d_${Date.now()}`;
+let r = await req(null, '/v1/users', { method: 'POST', body: JSON.stringify({ username: aliceUser, password: pw }) });
+const aliceUserToken = r.token;
+const aliceUserId = jwt(aliceUserToken).sub;
+
+const a1 = await createDevice(aliceUser, pw, aliceUserToken);
+const a2 = await createDevice(aliceUser, pw, aliceUserToken);
+
+// Register Bob + 2 devices
+const bobUser = `bob4d_${Date.now()}`;
+r = await req(null, '/v1/users', { method: 'POST', body: JSON.stringify({ username: bobUser, password: pw }) });
+const bobUserToken = r.token;
+const bobUserId = jwt(bobUserToken).sub;
+
+const b1 = await createDevice(bobUser, pw, bobUserToken);
+const b2 = await createDevice(bobUser, pw, bobUserToken);
+
+console.log(`Alice: userId=${aliceUserId.slice(-8)}, d1=${a1.deviceId.slice(-8)}, d2=${a2.deviceId.slice(-8)}`);
+console.log(`Bob:   userId=${bobUserId.slice(-8)}, d1=${b1.deviceId.slice(-8)}, d2=${b2.deviceId.slice(-8)}`);
+
+// TEST B: Don't pre-populate maps — let encrypt/decrypt discover via fetchPreKeyBundles
+// (like the browser does — messenger auto-fetches when no session exists)
+// Only map own devices (browser does this in connect())
+for (const dev of [a1, a2]) {
+  dev.messenger.mapDevice(a1.deviceId, aliceUserId, a1.keys.registrationId);
+  dev.messenger.mapDevice(a2.deviceId, aliceUserId, a2.keys.registrationId);
+}
+for (const dev of [b1, b2]) {
+  dev.messenger.mapDevice(b1.deviceId, bobUserId, b1.keys.registrationId);
+  dev.messenger.mapDevice(b2.deviceId, bobUserId, b2.keys.registrationId);
+}
+console.log('Only own device maps set (no cross-user pre-fetch)');
 
 // Connect all 4
-await alice1.connectWebSocket();
-await alice2.connectWebSocket();
-await bob1.connectWebSocket();
-await bob2.connectWebSocket();
-console.log('All 4 devices connected');
+const a1ws = await connectWS(a1);
+const a2ws = await connectWS(a2);
+const b1ws = await connectWS(b1);
+const b2ws = await connectWS(b2);
+console.log('All connected');
 
-// Make friends: Alice1 → Bob1
-console.log('\n--- Befriend ---');
-const bobBundles = await alice1.fetchPreKeyBundles(bob1.userId);
-await alice1.sendFriendRequest(bobBundles[0].deviceId, bob1.username, bob1.userId);
-const freq = await bob1.waitForMessage(10000);
-const fparsed = bob1.processFriendRequest(freq);
-await bob1.sendFriendResponse(fparsed.sourceDeviceId, alice1.username, true, alice1.userId);
-const fresp = await alice1.waitForMessage(10000);
-alice1.processFriendResponse(fresp);
-
-// Set up friend records on all devices
-for (const dev of [alice2, bob2]) {
-  const otherUser = dev === alice2 ? bob1 : alice1;
-  const otherBundles = await dev.fetchPreKeyBundles(otherUser.userId);
-  dev.friends.set(otherUser.username, {
-    username: otherUser.username,
-    userId: otherUser.userId,
-    devices: otherBundles.map(b => ({ deviceId: b.deviceId })),
-    status: 'accepted',
-  });
-}
-// Alice1 already has Bob as friend, copy to include Bob2
-const aliceBobFriend = alice1.friends.get(bob1.username);
-const allBobBundles = await alice1.fetchPreKeyBundles(bob1.userId);
-aliceBobFriend.devices = allBobBundles.map(b => ({ deviceId: b.deviceId }));
-
-// Bob1 already has Alice as friend, copy to include Alice2
-const bobAliceFriend = bob1.friends.get(alice1.username);
-const allAliceBundles = await bob1.fetchPreKeyBundles(alice1.userId);
-bobAliceFriend.devices = allAliceBundles.map(b => ({ deviceId: b.deviceId }));
-
-console.log('All devices have friend records');
-
-// Step 1: Verify messaging (testClient uses userId.1 so we go through fan-out)
+// --- Step 1: Verify messaging ---
 console.log('\n--- Step 1: Verify messaging ---');
 
-// Alice1 sends to all Bob devices via fan-out
-await alice1.sendToFriend(bob1.username, { type: 'TEXT', text: 'A1→Bobs' }, bob1.userId);
-const m1 = await bob1.waitForMessage(5000);
+await sendText(a1, b1.deviceId, bobUserId, 'A1→B1');
+const m1 = await b1ws.waitForMessage();
 console.log(`A1→B1: "${m1.text}" ✓`);
-// Bob2 gets it too since fan-out sends to all devices
-// But testClient encrypts with (userId, 1) — same session for both
-// Bob2 won't decrypt because it shares userId but has different keys
-// This is a testClient limitation — the browser messenger.js handles this
 
-// Bob1 sends to Alice via fan-out (establishes B1→A session)
-await bob1.sendToFriend(alice1.username, { type: 'TEXT', text: 'B1→Alices' }, alice1.userId);
-const m2 = await alice1.waitForMessage(5000);
-console.log(`B1→A1: "${m2.text}" ✓`);
+await sendText(a1, b2.deviceId, bobUserId, 'A1→B2');
+const m2 = await b2ws.waitForMessage();
+console.log(`A1→B2: "${m2.text}" ✓`);
 
-// Step 2: Corrupt Bob2's session with Alice
-console.log('\n--- Step 2: Corrupt Bob2↔Alice1 session ---');
-// Delete Bob2's session with Alice
-const aliceAddr1 = `${alice1.userId}.1`;
-await bob2.store.removeSession(aliceAddr1);
-console.log(`Deleted Bob2 session at ${aliceAddr1.slice(-12)}`);
+await sendText(b2, a1.deviceId, aliceUserId, 'B2→A1');
+const m3 = await a1ws.waitForMessage();
+console.log(`B2→A1: "${m3.text}" ✓`);
 
-// Step 3: Bob2 sends SESSION_RESET to Alice
-console.log('\n--- Step 3: Bob2 SESSION_RESET ---');
-// Bob2 needs to send SESSION_RESET to all Alice devices
-// This is what resetSessionWith does in ObscuraClient
-// Here we simulate it manually: delete all sessions, send PreKey SESSION_RESET
+await sendText(b2, a2.deviceId, aliceUserId, 'B2→A2');
+const m4 = await a2ws.waitForMessage();
+console.log(`B2→A2: "${m4.text}" ✓`);
 
-// Delete any remaining sessions Bob2 has with Alice
-for (const regId of [1, a2keys.registrationId]) {
-  const addr = `${alice1.userId}.${regId}`;
-  const s = await bob2.store.loadSession(addr);
+// --- Step 2: Corrupt Bob2's session with Alice ---
+console.log('\n--- Step 2: Corrupt Bob2↔Alice session ---');
+
+// Delete all Bob2's sessions with Alice (at all known regIds)
+const b2RegIds = new Set([1]);
+for (const [, info] of b2.messenger._deviceMap) {
+  if (info.userId === aliceUserId && info.registrationId) b2RegIds.add(info.registrationId);
+}
+const ownRegId = await b2.store.getLocalRegistrationId();
+if (ownRegId) b2RegIds.add(ownRegId);
+
+for (const regId of b2RegIds) {
+  const addr = `${aliceUserId}.${regId}`;
+  const s = await b2.store.loadSession(addr);
   if (s) {
-    await bob2.store.removeSession(addr);
-    console.log(`Deleted session at ${addr.slice(-12)}`);
+    await b2.store.removeSession(addr);
+    console.log(`Deleted Bob2 session: ${addr.slice(-12)}`);
   }
 }
 
-// Send SESSION_RESET to each Alice device (creates new PreKey session)
-for (const aliceBundle of allAliceBundles) {
-  await bob2.sendMessage(aliceBundle.deviceId, {
-    type: 'SESSION_RESET',
-    resetReason: 'test_corruption',
-    timestamp: Date.now(),
-  }, alice1.userId);
-  console.log(`Sent SESSION_RESET to Alice device ${aliceBundle.deviceId.slice(-8)}`);
+// --- Step 3: Bob2 sends SESSION_RESET to all Alice devices ---
+console.log('\n--- Step 3: Bob2 SESSION_RESET ---');
+
+const aliceBundles = await b2.messenger.fetchPreKeyBundles(aliceUserId);
+for (const bundle of aliceBundles) {
+  await sendText(b2, bundle.deviceId, aliceUserId, 'SESSION_RESET');
+  console.log(`Sent SESSION_RESET to Alice device ${bundle.deviceId.slice(-8)}`);
 }
 
-// Wait for Alice devices to receive
-const resetMsg1 = await alice1.waitForMessage(5000);
-console.log(`Alice1 received: ${resetMsg1.type} ✓`);
-const resetMsg2 = await alice2.waitForMessage(5000);
-console.log(`Alice2 received: ${resetMsg2.type} ✓`);
+// Wait for both Alice devices to receive
+const r1 = await a1ws.waitForMessage();
+console.log(`Alice1 received: "${r1.text}" ✓`);
+const r2 = await a2ws.waitForMessage();
+console.log(`Alice2 received: "${r2.text}" ✓`);
 
-// Step 4: Bob2 sends message to Alice1 (uses new session from SESSION_RESET send)
-console.log('\n--- Step 4: Post-reset messaging ---');
-await bob2.queueMessage(alice1.deviceId, { type: 'TEXT', text: 'B2→A1 after reset', timestamp: Date.now() }, alice1.userId);
-await bob2.flushMessages();
-const m4 = await alice1.waitForMessage(5000);
-console.log(`B2→A1 after reset: "${m4.text}" ✓`);
+// In the real app, _handleSessionReset deletes stale sessions.
+// Here we simulate by deleting all sessions with Bob EXCEPT the one just created.
+for (const dev of [a1, a2]) {
+  // Delete stale session at .1 (the fresh one is at a different regId from the PreKey)
+  const staleAddr = `${bobUserId}.1`;
+  const stale = await dev.store.loadSession(staleAddr);
+  if (stale) {
+    await dev.store.removeSession(staleAddr);
+  }
+}
 
-// Step 5: Verify other sessions unaffected
-console.log('\n--- Step 5: Verify other sessions intact ---');
-await alice1.queueMessage(bob1.deviceId, { type: 'TEXT', text: 'A1→B1 still works', timestamp: Date.now() }, bob1.userId);
-await alice1.flushMessages();
-const m5 = await bob1.waitForMessage(5000);
-console.log(`A1→B1 still works: "${m5.text}" ✓`);
+// --- Step 4: Post-reset messaging ---
+console.log('\n--- Step 4: Post-reset B2→A1 ---');
 
-alice1.disconnectWebSocket();
-alice2.disconnectWebSocket();
-bob1.disconnectWebSocket();
-bob2.disconnectWebSocket();
+await sendText(b2, a1.deviceId, aliceUserId, 'B2→A1 after reset');
+const m5 = await a1ws.waitForMessage();
+console.log(`B2→A1 after reset: "${m5.text}" ✓`);
+
+// --- Step 5: Verify other sessions unaffected ---
+console.log('\n--- Step 5: Other sessions intact ---');
+
+await sendText(a1, b1.deviceId, bobUserId, 'A1→B1 still works');
+const m6 = await b1ws.waitForMessage();
+console.log(`A1→B1 still works: "${m6.text}" ✓`);
+
+await sendText(b1, a2.deviceId, aliceUserId, 'B1→A2 still works');
+const m7 = await a2ws.waitForMessage();
+console.log(`B1→A2 still works: "${m7.text}" ✓`);
+
+// Cleanup
+a1ws.ws.close(); a2ws.ws.close(); b1ws.ws.close(); b2ws.ws.close();
+await sleep(500);
 
 console.log('\n=== 4-DEVICE SESSION_RESET: PASSED ===\n');

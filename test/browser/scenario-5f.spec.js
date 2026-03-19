@@ -180,27 +180,12 @@ test.describe('Scenario 5f: Auto-Recovery for No Record', () => {
     // ============================================================
     console.log('\n=== STEP 5: Delete Bob\'s session with Alice ===');
 
-    const bobHadSession = await bobPage.evaluate(async (aliceId) => {
-      const address = `${aliceId}.1`;
-      const session = await window.__client.store.loadSession(address);
-      if (session) {
-        await window.__client.store.removeSession(address);
-        console.log('[TEST] Deleted session with Alice');
-        return true;
-      }
-      return false;
+    // Delete ALL sessions Bob has with Alice (simulating storage loss)
+    const bobDeletedCount = await bobPage.evaluate(async (aliceId) => {
+      return await window.__client.store.removeSessionsForUser(aliceId);
     }, aliceDeviceId);
-    expect(bobHadSession).toBe(true);
-    console.log('Bob\'s session with Alice deleted');
-
-    // Verify session is gone
-    const bobSessionGone = await bobPage.evaluate(async (aliceId) => {
-      const address = `${aliceId}.1`;
-      const session = await window.__client.store.loadSession(address);
-      return !session;
-    }, aliceDeviceId);
-    expect(bobSessionGone).toBe(true);
-    console.log('Confirmed: Bob has no session with Alice');
+    expect(bobDeletedCount).toBeGreaterThan(0);
+    console.log(`Bob's sessions with Alice deleted: ${bobDeletedCount}`);
 
     // ============================================================
     // STEP 6: Alice sends message - triggers auto-recovery

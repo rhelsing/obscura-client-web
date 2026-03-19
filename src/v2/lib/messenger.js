@@ -47,17 +47,25 @@ export class Messenger {
     this.proto = null;
     this.clientProto = null;
     this._queue = []; // Pending submissions for batch sending
-    // deviceId → userId mapping for Signal session key resolution
-    // Signal sessions are keyed by userId (Envelope.sender_id = userId),
+    // deviceId → { userId, registrationId } mapping for Signal session resolution
+    // Signal sessions are keyed by (userId, registrationId),
     // but message routing uses deviceId. This map bridges the two.
-    this._deviceToUser = new Map();
+    this._deviceMap = new Map();
   }
 
   /**
-   * Register a deviceId → userId mapping for Signal session resolution
+   * Register a deviceId → { userId, registrationId } mapping for Signal session resolution
+   */
+  mapDevice(deviceId, userId, registrationId) {
+    this._deviceMap.set(deviceId, { userId, registrationId });
+  }
+
+  /**
+   * Legacy alias
    */
   mapDeviceToUser(deviceId, userId) {
-    this._deviceToUser.set(deviceId, userId);
+    const existing = this._deviceMap.get(deviceId);
+    this._deviceMap.set(deviceId, { userId, registrationId: existing?.registrationId || 1 });
   }
 
   setToken(token) {
@@ -165,27 +173,27 @@ export class Messenger {
         } : undefined,
       };
       // Auto-populate deviceId → userId map for Signal session resolution
-      this._deviceToUser.set(b.deviceId, userId);
+      // Note: registrationId stored for future multi-device support but not used for addressing yet
+      this._deviceMap.set(b.deviceId, { userId, registrationId: b.registrationId });
       logger.logPrekeyFetch(userId, !!bundle.preKey, bundle.registrationId);
       return bundle;
     });
   }
 
   /**
-   * Encrypt a message for a target user.
-   * Signal sessions are keyed by userId (Envelope.sender_id = userId).
+   * Encrypt a message for a target user's device.
+   * Signal sessions are keyed by (userId, registrationId).
+   * @param {string} targetUserId - Target user UUID
+   * @param {*} plaintext - Data to encrypt
+   * @param {number} [registrationId] - Target device's registrationId (default: fetches bundles)
    */
-  async encrypt(targetUserId, plaintext) {
-    const address = new SignalProtocolAddress(targetUserId, 1);
+  async encrypt(targetUserId, plaintext, registrationId = 1) {
+    const address = new SignalProtocolAddress(targetUserId, registrationId);
     const existingSession = await this.store.loadSession(address.toString());
 
     if (!existingSession) {
-      // Fetch all device bundles for user, use first one to build session
       const bundles = await this.fetchPreKeyBundles(targetUserId);
-      if (!bundles || bundles.length === 0) {
-        throw new Error(`No prekey bundles found for user ${targetUserId}`);
-      }
-      const bundle = bundles[0];
+      const bundle = bundles.find(b => b.registrationId === registrationId) || bundles[0];
       try {
         const sessionBuilder = new SessionBuilder(this.store, address);
         await sessionBuilder.processPreKey(bundle);
@@ -235,10 +243,18 @@ export class Messenger {
   }
 
   /**
-   * Decrypt a message from a source user
+   * Decrypt a message from a source user.
+   * Tries known registrationIds for the sender to find the right Signal session.
+   * @param {string} sourceUserId - Sender's user UUID (from Envelope.sender_id)
+   * @param {*} content - Encrypted content
+   * @param {number} messageType - PROTO_PREKEY_MESSAGE or PROTO_ENCRYPTED_MESSAGE
+   * @param {number} [senderRegId] - Sender's registrationId (if known)
    */
-  async decrypt(sourceUserId, content, messageType) {
-    const address = new SignalProtocolAddress(sourceUserId, 1);
+  async decrypt(sourceUserId, content, messageType, senderRegId) {
+    // Use registrationId=1 for now (consistent with encrypt side)
+    // Multi-device will need per-device registrationIds on both sides
+    const regId = senderRegId || 1;
+    const address = new SignalProtocolAddress(sourceUserId, regId);
     const cipher = new SessionCipher(this.store, address);
 
     // Check if session exists
@@ -605,8 +621,10 @@ export class Messenger {
   async queueMessage(targetDeviceId, opts, targetUserId) {
     await this.loadProto();
 
-    // Resolve userId for Signal session: explicit arg > map > fallback to deviceId
-    const encryptUserId = targetUserId || this._deviceToUser.get(targetDeviceId) || targetDeviceId;
+    // Resolve userId from device map (registrationId=1 for now, multi-device will use actual regId)
+    const mapped = this._deviceMap.get(targetDeviceId);
+    const encryptUserId = targetUserId || mapped?.userId || targetDeviceId;
+
     const clientMsgBytes = this.encodeClientMessage(opts);
     const encrypted = await this.encrypt(encryptUserId, clientMsgBytes);
 

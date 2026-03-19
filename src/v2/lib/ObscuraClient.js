@@ -696,13 +696,22 @@ export class ObscuraClient {
     await this.friends.loadFromStore();
     await this.devices.loadFromStore();
 
-    // Populate deviceId → userId map from loaded friends
+    // Populate deviceId → (userId, registrationId) map from loaded friends
     for (const [, friend] of this.friends.friends) {
       if (friend.userId && friend.devices) {
         for (const d of friend.devices) {
-          if (d.deviceId) this.messenger.mapDeviceToUser(d.deviceId, friend.userId);
+          if (d.deviceId) this.messenger.mapDevice(d.deviceId, friend.userId, d.registrationId);
         }
       }
+    }
+
+    // Also register own devices (including self) in the map
+    if (this.deviceId && this.userId) {
+      const ownRegId = await this.store.getLocalRegistrationId?.() || 1;
+      this.messenger.mapDevice(this.deviceId, this.userId, ownRegId);
+    }
+    for (const d of this.devices.getAll()) {
+      if (d.deviceId) this.messenger.mapDevice(d.deviceId, this.userId, d.registrationId);
     }
 
     await this.messenger.loadProto();
@@ -1595,6 +1604,10 @@ export class ObscuraClient {
       }
     }
 
+    // Register new device in the messenger's device map (same user)
+    // We don't know their registrationId yet — will be resolved when fetching bundles
+    this.messenger.mapDevice(parsed.deviceId, this.userId, null);
+
     // Add new device to our list FIRST so it's included in the approval
     const newDeviceInfo = {
       deviceId: parsed.deviceId,
@@ -1617,11 +1630,11 @@ export class ObscuraClient {
       }),
     });
 
-    // Send approval to new device
+    // Send approval to new device (same user, so use own userId for encryption)
     await this.messenger.sendMessage(parsed.deviceId, {
       type: 'DEVICE_LINK_APPROVAL',
       deviceLinkApproval: approval,
-    });
+    }, this.userId);
 
     console.log(`[approveLink] step 2: approval sent to ${parsed.deviceId.slice(-8)}`);
 

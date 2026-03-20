@@ -683,12 +683,12 @@ test.describe('Scenario 16: Multi-Device Offline Sync (Bidirectional)', () => {
     const bob2Devices = await bob2Page.evaluate(() =>
       window.__client.devices.getAll().map(d => d.deviceId)
     );
-    const bob1UserId = await bob1Page.evaluate(() => window.__client.userId);
-    const bob2UserId = await bob2Page.evaluate(() => window.__client.userId);
+    const bob1DeviceId = await bob1Page.evaluate(() => window.__client.deviceId);
+    const bob2DeviceId = await bob2Page.evaluate(() => window.__client.deviceId);
     console.log('Bob1 knows devices:', bob1Devices);
     console.log('Bob2 knows devices:', bob2Devices);
-    expect(bob1Devices).toContain(bob2UserId);
-    expect(bob2Devices).toContain(bob1UserId);
+    expect(bob1Devices).toContain(bob2DeviceId);
+    expect(bob2Devices).toContain(bob1DeviceId);
     console.log('Devices synced: PASS');
 
     // Verify Alice knows about both Bob devices (critical for fan-out messaging)
@@ -698,8 +698,8 @@ test.describe('Scenario 16: Multi-Device Offline Sync (Bidirectional)', () => {
       return bob?.devices?.map(d => d.deviceId) || [];
     }, bobUsername);
     console.log('Alice knows Bob devices:', aliceKnowsBobDevices);
-    expect(aliceKnowsBobDevices).toContain(bob1UserId);
-    expect(aliceKnowsBobDevices).toContain(bob2UserId);
+    expect(aliceKnowsBobDevices).toContain(bob1DeviceId);
+    expect(aliceKnowsBobDevices).toContain(bob2DeviceId);
     console.log('Alice knows both Bob devices: PASS');
 
     console.log('\n========================================');

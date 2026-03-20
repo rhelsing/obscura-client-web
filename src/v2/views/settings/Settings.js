@@ -439,6 +439,15 @@ export async function mount(container, client, router) {
       themeSelect.addEventListener('change', async () => {
         const theme = themeSelect.value;
         document.documentElement.setAttribute('data-ry-theme', theme);
+        // Load theme stylesheet (themes other than default/none need external CSS)
+        document.querySelector('link[data-ry-theme-ext]')?.remove();
+        if (theme !== 'default' && theme !== 'none') {
+          const link = document.createElement('link');
+          link.rel = 'stylesheet';
+          link.href = `https://cdn.jsdelivr.net/npm/@ryanhelsing/ry-ui@1.0.15/dist/themes/${theme}.css`;
+          link.dataset.ryThemeExt = '';
+          document.head.appendChild(link);
+        }
         localStorage.setItem('ry-theme', theme);
         await saveSettings({ theme });
       });

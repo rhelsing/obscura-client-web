@@ -19,6 +19,13 @@ async function bootstrap() {
   // Initialize theme and color mode
   const savedTheme = localStorage.getItem('ry-theme') || 'default';
   document.documentElement.setAttribute('data-ry-theme', savedTheme);
+  if (savedTheme !== 'default' && savedTheme !== 'none') {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = `https://cdn.jsdelivr.net/npm/@ryanhelsing/ry-ui@1.0.15/dist/themes/${savedTheme}.css`;
+    link.dataset.ryThemeExt = '';
+    document.head.appendChild(link);
+  }
   const savedMode = localStorage.getItem('ry-mode') || 'auto';
   if (savedMode === 'auto') {
     document.documentElement.style.removeProperty('color-scheme');

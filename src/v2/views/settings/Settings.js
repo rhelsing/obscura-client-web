@@ -128,16 +128,29 @@ export function render({ settings = null, loading = false, saving = false, isFir
 
         <section class="settings-group">
           <h2>Appearance</h2>
-          <card>
-            <cluster gap="sm" style="justify-content: space-between; align-items: center;">
-              <span>Mode</span>
-              <select id="mode-select">
-                <option value="auto">Auto</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-              </select>
-            </cluster>
-          </card>
+          <stack gap="sm">
+            <card>
+              <cluster gap="sm" style="justify-content: space-between; align-items: center;">
+                <span>Theme</span>
+                <select id="theme-select">
+                  <option value="default">Default</option>
+                  <option value="ocean">Ocean</option>
+                  <option value="antigravity">Antigravity</option>
+                  <option value="none">None</option>
+                </select>
+              </cluster>
+            </card>
+            <card>
+              <cluster gap="sm" style="justify-content: space-between; align-items: center;">
+                <span>Mode</span>
+                <select id="mode-select">
+                  <option value="auto">Auto</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </cluster>
+            </card>
+          </stack>
         </section>
 
         <section class="settings-group danger">
@@ -418,6 +431,18 @@ export async function mount(container, client, router) {
         webBackupStatus.style.display = 'none';
       }
     });
+
+    // Theme select (default/ocean/antigravity/none)
+    const themeSelect = container.querySelector('#theme-select');
+    if (themeSelect) {
+      themeSelect.value = localStorage.getItem('ry-theme') || 'default';
+      themeSelect.addEventListener('change', async () => {
+        const theme = themeSelect.value;
+        document.documentElement.setAttribute('data-ry-theme', theme);
+        localStorage.setItem('ry-theme', theme);
+        await saveSettings({ theme });
+      });
+    }
 
     // Mode select (light/dark/auto)
     const modeSelect = container.querySelector('#mode-select');

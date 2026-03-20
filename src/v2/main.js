@@ -17,7 +17,8 @@ window.addEventListener('unhandledrejection', (e) => {
 
 async function bootstrap() {
   // Initialize theme and color mode
-  document.documentElement.setAttribute('data-ry-theme', 'default');
+  const savedTheme = localStorage.getItem('ry-theme') || 'default';
+  document.documentElement.setAttribute('data-ry-theme', savedTheme);
   const savedMode = localStorage.getItem('ry-mode') || 'auto';
   if (savedMode === 'auto') {
     document.documentElement.style.removeProperty('color-scheme');

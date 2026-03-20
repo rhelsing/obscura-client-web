@@ -16,9 +16,14 @@ window.addEventListener('unhandledrejection', (e) => {
 });
 
 async function bootstrap() {
-  // Initialize theme from localStorage
-  const savedTheme = localStorage.getItem('ry-theme') || 'light';
-  document.documentElement.setAttribute('data-ry-theme', savedTheme);
+  // Initialize theme and color mode
+  document.documentElement.setAttribute('data-ry-theme', 'default');
+  const savedMode = localStorage.getItem('ry-mode') || 'auto';
+  if (savedMode === 'auto') {
+    document.documentElement.style.removeProperty('color-scheme');
+  } else {
+    document.documentElement.style.colorScheme = savedMode;
+  }
 
   const app = document.getElementById('app');
 

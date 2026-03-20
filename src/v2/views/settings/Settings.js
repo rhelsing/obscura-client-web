@@ -126,6 +126,20 @@ export function render({ settings = null, loading = false, saving = false, isFir
           </stack>
         </section>
 
+        <section class="settings-group">
+          <h2>Appearance</h2>
+          <card>
+            <cluster gap="sm" style="justify-content: space-between; align-items: center;">
+              <span>Mode</span>
+              <select id="mode-select">
+                <option value="auto">Auto</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </cluster>
+          </card>
+        </section>
+
         <section class="settings-group danger">
           <h2>Account</h2>
           <stack gap="sm">
@@ -217,7 +231,7 @@ export async function mount(container, client, router) {
     container.innerHTML = render({ settings, isFirstDevice });
 
     // Helper: save a partial settings update (merges with existing data)
-    const SETTINGS_DEFAULTS = { theme: 'system', notificationsEnabled: true, webBackupEnabled: false };
+    const SETTINGS_DEFAULTS = { theme: 'default', mode: 'auto', notificationsEnabled: true, webBackupEnabled: false };
     async function saveSettings(updates) {
       if (!client.settings) return;
       if (settingsId) {
@@ -404,6 +418,22 @@ export async function mount(container, client, router) {
         webBackupStatus.style.display = 'none';
       }
     });
+
+    // Mode select (light/dark/auto)
+    const modeSelect = container.querySelector('#mode-select');
+    if (modeSelect) {
+      modeSelect.value = localStorage.getItem('ry-mode') || 'auto';
+      modeSelect.addEventListener('change', async () => {
+        const mode = modeSelect.value;
+        if (mode === 'auto') {
+          document.documentElement.style.removeProperty('color-scheme');
+        } else {
+          document.documentElement.style.colorScheme = mode;
+        }
+        localStorage.setItem('ry-mode', mode);
+        await saveSettings({ mode });
+      });
+    }
 
     // Request sync button
     const requestSyncBtn = container.querySelector('#request-sync');

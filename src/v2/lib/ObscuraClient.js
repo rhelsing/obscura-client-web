@@ -1011,6 +1011,7 @@ export class ObscuraClient {
   async _handleMessage(data) {
     let frame;
     let correlationId;
+    let currentEnvelope; // Track for error handling
     try {
       // Handle different data types
       let bytes;
@@ -1039,15 +1040,18 @@ export class ObscuraClient {
 
       frame = this.messenger.WebSocketFrame.decode(bytes);
 
-      if (frame.envelope) {
+      // Handle batched envelopes
+      const envelopes = frame.envelopeBatch?.envelopes || [];
+      for (const envelope of envelopes) {
+        currentEnvelope = envelope;
         correlationId = logger.generateCorrelationId();
 
         // Convert bytes UUIDs to strings at the edge
-        const envelopeId = bytesToUuid(frame.envelope.id);
-        const senderId = bytesToUuid(frame.envelope.senderId);
+        const envelopeId = bytesToUuid(envelope.id);
+        const senderId = bytesToUuid(envelope.senderId);
 
         // Decode EncryptedMessage from raw bytes (server passes through opaque)
-        const encMsg = this.messenger.EncryptedMessage.decode(frame.envelope.message);
+        const encMsg = this.messenger.EncryptedMessage.decode(envelope.message);
 
         console.log('[ws] Frame received: envelope', envelopeId.slice(-8));
 
@@ -1124,8 +1128,8 @@ export class ObscuraClient {
         // Signal Protocol session desync - log details but don't crash
         console.warn('[ws] SendingChainError - session may be out of sync:', e.message);
 
-        const errEnvId = frame.envelope?.id ? bytesToUuid(frame.envelope.id) : null;
-        const errSenderId = frame.envelope?.senderId ? bytesToUuid(frame.envelope.senderId) : null;
+        const errEnvId = currentEnvelope?.id ? bytesToUuid(currentEnvelope.id) : null;
+        const errSenderId = currentEnvelope?.senderId ? bytesToUuid(currentEnvelope.senderId) : null;
 
         await logger.logReceiveError(errEnvId, errSenderId, e, correlationId);
         return;
@@ -1138,14 +1142,14 @@ export class ObscuraClient {
       // Try to detect Whisper type from the raw message bytes
       let isWhisper = false;
       try {
-        if (frame.envelope?.message) {
-          const errEncMsg = this.messenger.EncryptedMessage.decode(frame.envelope.message);
+        if (currentEnvelope?.message) {
+          const errEncMsg = this.messenger.EncryptedMessage.decode(currentEnvelope.message);
           isWhisper = errEncMsg.type === 2;
         }
       } catch { /* ignore decode failure in error path */ }
 
-      const errSenderId = frame.envelope?.senderId ? bytesToUuid(frame.envelope.senderId) : null;
-      const errEnvelopeId = frame.envelope?.id ? bytesToUuid(frame.envelope.id) : null;
+      const errSenderId = currentEnvelope?.senderId ? bytesToUuid(currentEnvelope.senderId) : null;
+      const errEnvelopeId = currentEnvelope?.id ? bytesToUuid(currentEnvelope.id) : null;
 
       if (isBrokenSession && isWhisper && errSenderId) {
         // No session for this sender — send SESSION_RESET so they re-establish via PreKey

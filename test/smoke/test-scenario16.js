@@ -83,19 +83,21 @@ async function connectWS(dev) {
     ws.on('open', () => resolve(ws));
     ws.on('message', async (data) => {
       const frame = WSFrame.decode(new Uint8Array(data));
-      if (!frame.envelope) return;
-      const senderId = bytesToUuid(frame.envelope.senderId);
-      const encMsg = dev.messenger.EncryptedMessage.decode(frame.envelope.message);
-      try {
-        const result = await dev.messenger.decrypt(senderId, encMsg.content, encMsg.type);
-        const clientMsg = dev.messenger.decodeClientMessage(result.bytes);
-        received.push({ ...clientMsg, sourceUserId: senderId });
-        if (resolvers.length > 0) resolvers.shift()({ ...clientMsg, sourceUserId: senderId });
-      } catch (e) {
-        console.error(`[WS ${dev.deviceId.slice(-8)}] err=${e.message.slice(0, 60)}`);
+      const envelopes = frame.envelopeBatch?.envelopes || [];
+      for (const envelope of envelopes) {
+        const senderId = bytesToUuid(envelope.senderId);
+        const encMsg = dev.messenger.EncryptedMessage.decode(envelope.message);
+        try {
+          const result = await dev.messenger.decrypt(senderId, encMsg.content, encMsg.type);
+          const clientMsg = dev.messenger.decodeClientMessage(result.bytes);
+          received.push({ ...clientMsg, sourceUserId: senderId });
+          if (resolvers.length > 0) resolvers.shift()({ ...clientMsg, sourceUserId: senderId });
+        } catch (e) {
+          console.error(`[WS ${dev.deviceId.slice(-8)}] err=${e.message.slice(0, 60)}`);
+        }
+        const ack = WSFrame.create({ ack: { messageIds: [envelope.id] } });
+        ws.send(WSFrame.encode(ack).finish());
       }
-      const ack = WSFrame.create({ ack: { messageIds: [frame.envelope.id] } });
-      ws.send(WSFrame.encode(ack).finish());
     });
   });
   const waitForMessage = (timeout = 5000) => {

@@ -144,13 +144,14 @@ const ws2 = await new Promise((resolve, reject) => {
   ws.on('error', reject);
   ws.on('message', async (data) => {
     const frame = WebSocketFrame.decode(new Uint8Array(data));
-    if (frame.envelope) {
-      const senderId = bytesToUuid(frame.envelope.senderId);
-      const envId = bytesToUuid(frame.envelope.id);
+    const envelopes = frame.envelopeBatch?.envelopes || [];
+    for (const envelope of envelopes) {
+      const senderId = bytesToUuid(envelope.senderId);
+      const envId = bytesToUuid(envelope.id);
       console.log(`  Dev2 received envelope: sender=${senderId.slice(-8)}`);
 
       // Try to decrypt using registrationId-based address
-      const encMsg = EncryptedMessage.decode(frame.envelope.message);
+      const encMsg = EncryptedMessage.decode(envelope.message);
 
       // The sender could be Alice (cross-user) or Bob device1 (same-user)
       // Signal address: (senderId, ???)
@@ -181,7 +182,7 @@ const ws2 = await new Promise((resolve, reject) => {
       received.push({ senderId, decrypted, envId });
 
       // ACK
-      const ackFrame = WebSocketFrame.create({ ack: { messageIds: [frame.envelope.id] } });
+      const ackFrame = WebSocketFrame.create({ ack: { messageIds: [envelope.id] } });
       ws.send(WebSocketFrame.encode(ackFrame).finish());
     }
   });

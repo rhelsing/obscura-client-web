@@ -136,9 +136,10 @@ function connectWS(token, store, label) {
     ws.on('open', () => { console.log(`${label} connected`); resolve({ ws, received }); });
     ws.on('message', async (data) => {
       const frame = WSFrame.decode(new Uint8Array(data));
-      if (!frame.envelope) return;
-      const senderId = bytesToUuid(frame.envelope.senderId);
-      const encMsg = EncMsg.decode(frame.envelope.message);
+      const envelopes = frame.envelopeBatch?.envelopes || [];
+      for (const envelope of envelopes) {
+      const senderId = bytesToUuid(envelope.senderId);
+      const encMsg = EncMsg.decode(envelope.message);
 
       // Try decrypting with (senderId, senderRegId)
       // For first message, we don't know sender's regId — try all known ones
@@ -172,8 +173,9 @@ function connectWS(token, store, label) {
       received.push({ senderId, decrypted, usedRegId });
 
       // ACK
-      const ack = WSFrame.create({ ack: { messageIds: [frame.envelope.id] } });
+      const ack = WSFrame.create({ ack: { messageIds: [envelope.id] } });
       ws.send(WSFrame.encode(ack).finish());
+      }
     });
   });
 }

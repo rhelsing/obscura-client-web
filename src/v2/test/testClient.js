@@ -613,13 +613,14 @@ export class TestClient {
     try {
       const frame = this.WebSocketFrame.decode(new Uint8Array(data));
 
-      if (frame.envelope) {
+      const envelopes = frame.envelopeBatch?.envelopes || [];
+      for (const envelope of envelopes) {
         // Convert bytes UUIDs to strings at the edge
-        const envelopeId = bytesToUuid(frame.envelope.id);
-        const senderId = bytesToUuid(frame.envelope.senderId);
+        const envelopeId = bytesToUuid(envelope.id);
+        const senderId = bytesToUuid(envelope.senderId);
 
         // Decode EncryptedMessage from raw bytes
-        const encMsg = this.EncryptedMessage.decode(frame.envelope.message);
+        const encMsg = this.EncryptedMessage.decode(envelope.message);
 
         console.log(`Received envelope from: ${senderId}`);
 

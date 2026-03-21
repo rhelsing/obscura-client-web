@@ -90,25 +90,26 @@ async function connectWS(dev) {
     ws.on('open', () => resolve(ws));
     ws.on('message', async (data) => {
       const frame = WSFrame.decode(new Uint8Array(data));
-      if (!frame.envelope) return;
+      const envelopes = frame.envelopeBatch?.envelopes || [];
+      for (const envelope of envelopes) {
+        const senderId = bytesToUuid(envelope.senderId);
+        const envId = bytesToUuid(envelope.id);
+        const encMsg = dev.messenger.EncryptedMessage.decode(envelope.message);
 
-      const senderId = bytesToUuid(frame.envelope.senderId);
-      const envId = bytesToUuid(frame.envelope.id);
-      const encMsg = dev.messenger.EncryptedMessage.decode(frame.envelope.message);
+        try {
+          const result = await dev.messenger.decrypt(senderId, encMsg.content, encMsg.type);
+          const clientMsg = dev.messenger.decodeClientMessage(result.bytes);
+          const msg = { ...clientMsg, sourceUserId: senderId, senderDeviceId: result.senderDeviceId, envelopeId: envId };
+          received.push(msg);
+          if (resolvers.length > 0) resolvers.shift()(msg);
+        } catch (e) {
+          console.error(`[WS ${dev.deviceId.slice(-8)}] from=${senderId.slice(-8)} type=${encMsg.type} err=${e.message.slice(0, 50)}`);
+        }
 
-      try {
-        const result = await dev.messenger.decrypt(senderId, encMsg.content, encMsg.type);
-        const clientMsg = dev.messenger.decodeClientMessage(result.bytes);
-        const msg = { ...clientMsg, sourceUserId: senderId, senderDeviceId: result.senderDeviceId, envelopeId: envId };
-        received.push(msg);
-        if (resolvers.length > 0) resolvers.shift()(msg);
-      } catch (e) {
-        console.error(`[WS ${dev.deviceId.slice(-8)}] from=${senderId.slice(-8)} type=${encMsg.type} err=${e.message.slice(0, 50)}`);
+        // ACK
+        const ack = WSFrame.create({ ack: { messageIds: [envelope.id] } });
+        ws.send(WSFrame.encode(ack).finish());
       }
-
-      // ACK
-      const ack = WSFrame.create({ ack: { messageIds: [frame.envelope.id] } });
-      ws.send(WSFrame.encode(ack).finish());
     });
   });
 

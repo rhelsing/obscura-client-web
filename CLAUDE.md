@@ -19,16 +19,16 @@ Key server files for crypto/auth issues:
 
 ### Proto Definitions
 
-**Server Proto** (transport layer):
-- **Repo:** https://github.com/barrelmaker97/obscura-proto
-- Submodule at `proto/`
-- OpenAPI spec at `$VITE_API_URL/openapi.yaml`
-- Defines: `WebSocketFrame`, `Envelope`, `EncryptedMessage`, `AckMessage`
+All proto files live in `public/proto/` (loaded at runtime by protobufjs):
 
-**Client Proto** (encrypted payload):
-- Local only: `src/proto/client/client_message.proto`
-- Server never sees this - opaque bytes inside `EncryptedMessage.content`
-- Defines: `ClientMessage` with types TEXT, IMAGE, FRIEND_REQUEST, FRIEND_RESPONSE
+**Server Proto** (`public/proto/obscura/v1/obscura.proto`):
+- Upstream reference: https://github.com/barrelmaker97/obscura-proto
+- OpenAPI spec at `$VITE_API_URL/openapi.yaml`
+- Defines: `WebSocketFrame`, `EnvelopeBatch`, `Envelope`, `AckMessage`, `SendMessageRequest`, `SendMessageResponse`
+
+**Client Proto** (`public/proto/v2/client.proto`):
+- Client-only, server never sees this
+- Defines: `EncryptedMessage`, `ClientMessage` with types TEXT, IMAGE, FRIEND_REQUEST, FRIEND_RESPONSE
 
 ## Signal Protocol Keys
 

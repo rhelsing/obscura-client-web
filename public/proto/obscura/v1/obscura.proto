@@ -48,15 +48,20 @@ message SendMessageResponse {
 // The top-level frame exchanged over the WebSocket connection.
 message WebSocketFrame {
   oneof payload {
-    // Server -> Client: A new message has arrived.
-    Envelope envelope = 10;
-
     // Client -> Server: Acknowledge receipt of a message and triggers server-side deletion.
     AckMessage ack = 11;
 
     // Server -> Client: Notification that one-time pre-keys are running low.
     PreKeyStatus pre_key_status = 12;
+
+    // Server -> Client: Batch of messages delivered in a single frame.
+    EnvelopeBatch envelope_batch = 13;
   }
+}
+
+// A batch of envelopes for bulk message delivery over WebSocket.
+message EnvelopeBatch {
+  repeated Envelope envelopes = 1;
 }
 
 message PreKeyStatus {

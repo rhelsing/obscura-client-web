@@ -7,7 +7,7 @@ NEXT:
 
 Web client for the [Obscura encrypted messaging server](https://github.com/barrelmaker97/obscura-server/).
 
-Uses the [obscura-proto](https://github.com/barrelmaker97/obscura-proto) definitions as a git submodule.
+Uses protocol buffer definitions from the [obscura-proto](https://github.com/barrelmaker97/obscura-proto) project (maintained locally in `public/proto/`).
 
 ## Prerequisites
 
@@ -16,16 +16,11 @@ Uses the [obscura-proto](https://github.com/barrelmaker97/obscura-proto) definit
 
 ## Getting Started
 
-1. **Clone with submodules**
+1. **Clone the repo**
 
    ```bash
-   git clone --recursive https://github.com/YOUR_USERNAME/obscura-client-web.git
+   git clone https://github.com/YOUR_USERNAME/obscura-client-web.git
    cd obscura-client-web
-   ```
-
-   If you already cloned without `--recursive`:
-   ```bash
-   git submodule update --init
    ```
 
 2. **Set Node.js version**
@@ -65,14 +60,11 @@ Uses the [obscura-proto](https://github.com/barrelmaker97/obscura-proto) definit
 
 ## Proto Definitions
 
-**Server proto** (submodule at `proto/`): Transport layer - `WebSocketFrame`, `Envelope`, `EncryptedMessage`
+All proto files live in `public/proto/` (loaded at runtime by protobufjs).
 
-**Client proto** (`src/proto/client/`): Encrypted payload - `ClientMessage` (TEXT, IMAGE, FRIEND_REQUEST, FRIEND_RESPONSE)
+**Server proto** (`public/proto/obscura/v1/obscura.proto`): Transport layer - `WebSocketFrame`, `EnvelopeBatch`, `Envelope`, `SendMessageRequest`
 
-To pull latest server proto:
-```bash
-git submodule update --remote proto
-```
+**Client proto** (`public/proto/v2/client.proto`): Encrypted payload - `EncryptedMessage`, `ClientMessage` (TEXT, IMAGE, FRIEND_REQUEST, FRIEND_RESPONSE)
 
 ## Scripts
 
